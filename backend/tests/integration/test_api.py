@@ -42,7 +42,9 @@ def test_backend_start_directory_does_not_change_data_or_frontend_paths(tmp_path
     assert not (backend / ".data").exists()
 
 
-def test_api_exposes_computed_end_and_reuses_existing_store(tmp_path):
+def test_api_exposes_computed_end_and_reuses_existing_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "")
+    monkeypatch.setenv("LLM_MODEL", "")
     path = tmp_path / "existing.sqlite3"
     store = DecisionStore(path, demo_schedule())
     from sched_copilot.domain.models import MachineFailure

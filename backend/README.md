@@ -31,3 +31,12 @@ uv build
 配置由 `config.py` 解析、具体实现由 `bootstrap.py` 组装。统一业务异常在 API 层映射为 HTTP 状态和错误码。日志通过 `observability.py` 配置，`SCHED_LOG_LEVEL` 控制级别；日志不记录模型密钥、人工理由、提示词或供应商错误内容。
 
 旧 Streamlit 已移除，历史代码可从 Git 查看。完整模块职责与扩展规则见[代码结构说明](../docs/code-structure.md)。
+# 真实模型 API 联调
+
+项目根目录 `.env` 会被后端自动加载，模型密钥只配置在后端。配置模型服务并重启后端后，从仓库根目录运行：
+
+```powershell
+uv --directory backend run python scripts/live_api_smoke.py
+```
+
+脚本只输出报告数量和长度，不输出密钥、提示词或模型原始响应。

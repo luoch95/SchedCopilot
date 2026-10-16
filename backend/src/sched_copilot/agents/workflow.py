@@ -105,7 +105,13 @@ def run_analysis(
         )
         if not any(getattr(message, "type", "") == "tool" for message in response["messages"]):
             raise ValueError("Agent 未读取证据，本次分析不予展示")
-        return str(response["messages"][-1].content)
+        for message in reversed(response["messages"]):
+            if getattr(message, "type", "") != "ai":
+                continue
+            content = str(getattr(message, "content", "")).strip()
+            if content:
+                return content
+        raise ValueError("Agent 未生成最终文本，本次分析不予展示")
 
     def planning(state: AgentState) -> dict:
         return {"plan_report": respond("生产计划 Agent", planning_facts)}
