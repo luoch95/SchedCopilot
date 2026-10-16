@@ -8,6 +8,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from .domain import Machine, MachineFailure, Order, Schedule
+from .impact import operation_changes, order_impacts
 from .scheduling import affected_operations, generate_candidates
 
 
@@ -56,6 +57,8 @@ def run_analysis(
             "metrics": asdict(item.metrics),
             "evidence": item.evidence,
             "assumptions": item.assumptions,
+            "operation_changes": operation_changes(baseline, item, event),
+            "order_impacts": order_impacts(baseline, item, orders),
         }
         for item in candidates
     ]
