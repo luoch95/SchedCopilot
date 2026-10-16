@@ -31,7 +31,16 @@ export default function Gantt({
       (range[1] - range[0])) *
       (width - left - right);
   const orderIds = [...new Set(schedule.operations.map((op) => op.order_id))].sort();
-  const ticks = Array.from({ length: 7 }, (_, i) => range[0] + ((range[1] - range[0]) * i) / 6);
+  const eventTicks = [failure.started_at, failure.recovered_at]
+    .filter((value): value is string => !!value)
+    .map((value) => +new Date(value));
+  const step = range[1] - range[0] > 18 * 3600_000 ? 2 * 3600_000 : 3600_000;
+  const firstHour = Math.ceil(range[0] / step) * step;
+  const hourlyTicks: number[] = [];
+  for (let tick = firstHour; tick < range[1]; tick += step) hourlyTicks.push(tick);
+  const ticks = [...new Set([range[0], range[1], ...hourlyTicks, ...eventTicks])].sort(
+    (a, b) => a - b,
+  );
   const before = hover && baseline?.operations.find((op) => op.id === hover.id);
   const faultEnd = failure.recovered_at ? +new Date(failure.recovered_at) : range[1];
   return (
@@ -40,7 +49,14 @@ export default function Gantt({
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="设备工序甘特图">
           {ticks.map((tick) => (
             <g key={tick}>
-              <line x1={x(tick)} x2={x(tick)} y1={28} y2={height - 20} stroke="#DFE6EB" />
+              <line
+                x1={x(tick)}
+                x2={x(tick)}
+                y1={28}
+                y2={height - 20}
+                stroke={eventTicks.includes(tick) ? '#CF8F80' : '#DFE6EB'}
+                strokeDasharray={eventTicks.includes(tick) ? '3 3' : undefined}
+              />
               <text x={x(tick)} y={19} textAnchor="middle" className="axis-label">
                 {hour(tick)}
               </text>

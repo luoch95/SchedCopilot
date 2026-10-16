@@ -75,6 +75,48 @@
 .chain-card {
   padding: 16px;
 }
+
+.impact-type-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 12px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.impact-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.15s ease;
+}
+
+.impact-type i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #93a7b2;
+}
+
+.impact-type.active {
+  color: #2b6379;
+  font-weight: 600;
+}
+
+.impact-type.active i {
+  background: #2e748c;
+}
+
+.impact-type.dim,
+.impact-type-badge.dim {
+  opacity: 0.35;
+}
+
+.impact-type-badge.active {
+  color: #2e748c;
+  background: #e5f1f5;
+}
 .chain-card h4 {
   margin-bottom: 13px;
 }
