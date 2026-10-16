@@ -64,6 +64,9 @@ class DecisionStore:
                     fingerprint TEXT NOT NULL, payload TEXT NOT NULL,
                     recorded_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS simulations (
+                    id TEXT PRIMARY KEY, candidates TEXT NOT NULL, event TEXT NOT NULL
+                );
             """)
             conn.execute(
                 "INSERT OR IGNORE INTO current_plan VALUES (1, ?)", (schedule_json(baseline),)
@@ -94,11 +97,44 @@ class DecisionStore:
             return None
         return parse_event(row[0]), row[1]
 
+    def snapshot(self) -> tuple[Schedule, MachineFailure, int]:
+        """Read the formal plan and active event in one consistent database snapshot."""
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            baseline = parse_schedule(
+                conn.execute("SELECT payload FROM current_plan WHERE id=1").fetchone()[0]
+            )
+            row = conn.execute(
+                "SELECT payload, revision FROM event_history ORDER BY revision DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            raise ValueError("尚未保存故障事件")
+        return baseline, parse_event(row[0]), row[1]
+
+    def record_simulation(self, simulation_id: str, payload: str, event: MachineFailure):
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO simulations VALUES (?, ?, ?)",
+                (
+                    simulation_id,
+                    payload,
+                    json.dumps(asdict(event), default=str, ensure_ascii=False),
+                ),
+            )
+
+    def simulation(self, simulation_id: str) -> tuple[str, MachineFailure] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT candidates, event FROM simulations WHERE id=?", (simulation_id,)
+            ).fetchone()
+        return (row[0], parse_event(row[1])) if row else None
+
     def recover_event(
         self,
         machines: tuple[Machine, ...],
         orders: tuple[Order, ...],
         fallback: MachineFailure,
+        expected_revision: int | None = None,
     ) -> int:
         """Restore the newest simulatable event without reverting plan or audit history."""
         with self._connect() as conn:
@@ -109,6 +145,9 @@ class DecisionStore:
             history = conn.execute(
                 "SELECT revision, payload FROM event_history ORDER BY revision DESC"
             ).fetchall()
+            revision = history[0][0] if history else 0
+            if expected_revision is not None and expected_revision != revision:
+                raise ValueError("事件已在其他页面更新，请重新载入后恢复")
             options = [parse_event(row[1]) for row in history] + [fallback]
             for event in options:
                 try:
