@@ -20,8 +20,12 @@ Service = Annotated[WorkbenchService, Depends(workbench_service)]
 
 
 @router.get("/health")
-def health():
-    return {"status": "ok"}
+def health(request: Request):
+    settings = request.app.state.settings
+    return {
+        "status": "ok",
+        "live_analysis_configured": settings.llm_configured,
+    }
 
 
 @router.get("/workbench")

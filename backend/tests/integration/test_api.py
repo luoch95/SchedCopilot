@@ -55,7 +55,10 @@ def test_api_exposes_computed_end_and_reuses_existing_store(tmp_path):
         assert state["event"]["machine_id"] == "M3"
         assert state["event_revision"] == 1
         assert state["baseline"]["operations"][0]["end"].endswith("+08:00")
-        assert client.get("/api/health").json() == {"status": "ok"}
+        assert client.get("/api/health").json() == {
+            "status": "ok",
+            "live_analysis_configured": False,
+        }
 
 
 def test_api_saves_unknown_recovery_blocks_simulation_and_recovers(client):

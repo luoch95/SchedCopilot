@@ -26,6 +26,7 @@ def create_app(
         settings = replace(settings, frontend_dir=frontend_dir)
     configure_logging(settings.log_level)
     app = FastAPI(title="Schedule Copilot API", version="0.2.0")
+    app.state.settings = settings
     app.state.workbench = build_workbench(settings)
     register_errors(app)
     app.include_router(router)

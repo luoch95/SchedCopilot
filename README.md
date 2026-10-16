@@ -35,6 +35,7 @@
 - [模块边界决策](docs/decisions/0004-module-boundaries.md)
 - [固定案例与指标口径](docs/demo-case.md)
 - [任务记录](docs/tasks.md)
+- [第一阶段验收清单](docs/first-stage-acceptance.md)
 - [故障录入与影响分析验收](docs/failure-impact.md)
 
 ## 本地运行

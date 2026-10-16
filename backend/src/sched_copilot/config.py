@@ -13,6 +13,11 @@ class Settings:
     frontend_dir: Path
     log_level: str = "INFO"
 
+    @property
+    def llm_configured(self) -> bool:
+        """Whether live Agent analysis has the minimum provider configuration."""
+        return bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL"))
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
