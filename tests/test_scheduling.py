@@ -5,7 +5,11 @@ import pytest
 
 from sched_copilot.domain import MachineFailure
 from sched_copilot.scenario import BASE_TIME, demo_machines, demo_orders, demo_schedule
-from sched_copilot.scheduling import affected_operations, generate_candidates, validate_schedule
+from sched_copilot.scheduling import (
+    affected_operations,
+    generate_candidates,
+    validate_schedule,
+)
 
 
 def failure():

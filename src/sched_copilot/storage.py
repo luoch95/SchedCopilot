@@ -11,11 +11,12 @@ from .domain import (
     Machine,
     MachineFailure,
     Operation,
+    Order,
     Schedule,
     TaskStatus,
     digest,
 )
-from .scheduling import validate_schedule
+from .scheduling import generate_candidates, validate_schedule
 
 
 def schedule_json(schedule: Schedule) -> str:
@@ -30,6 +31,13 @@ def parse_schedule(payload: str) -> Schedule:
         raw["status"] = TaskStatus(raw["status"])
         operations.append(Operation(**raw))
     return Schedule(data["version"], tuple(operations))
+
+
+def parse_event(payload: str) -> MachineFailure:
+    data = json.loads(payload)
+    for field in ("started_at", "recovered_at", "received_at"):
+        data[field] = datetime.fromisoformat(data[field]) if data[field] else None
+    return MachineFailure(**data)
 
 
 class DecisionStore:
@@ -51,10 +59,23 @@ class DecisionStore:
                     reason TEXT NOT NULL, created_at TEXT NOT NULL,
                     result TEXT NOT NULL, evidence TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS event_history (
+                    revision INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fingerprint TEXT NOT NULL, payload TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL
+                );
             """)
             conn.execute(
                 "INSERT OR IGNORE INTO current_plan VALUES (1, ?)", (schedule_json(baseline),)
             )
+            legacy = conn.execute(
+                "SELECT fingerprint, payload FROM current_event WHERE id=1"
+            ).fetchone()
+            if legacy and not conn.execute("SELECT 1 FROM event_history LIMIT 1").fetchone():
+                conn.execute(
+                    "INSERT INTO event_history VALUES (NULL, ?, ?, ?)",
+                    (*legacy, datetime.now(timezone.utc).isoformat()),
+                )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=10)
@@ -64,17 +85,72 @@ class DecisionStore:
             row = conn.execute("SELECT payload FROM current_plan WHERE id=1").fetchone()
         return parse_schedule(row[0])
 
-    def record_event(self, event: MachineFailure) -> str:
+    def active_event(self) -> tuple[MachineFailure, int] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload, revision FROM event_history ORDER BY revision DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return None
+        return parse_event(row[0]), row[1]
+
+    def recover_event(
+        self,
+        machines: tuple[Machine, ...],
+        orders: tuple[Order, ...],
+        fallback: MachineFailure,
+    ) -> int:
+        """Restore the newest simulatable event without reverting plan or audit history."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            baseline = parse_schedule(
+                conn.execute("SELECT payload FROM current_plan WHERE id=1").fetchone()[0]
+            )
+            history = conn.execute(
+                "SELECT revision, payload FROM event_history ORDER BY revision DESC"
+            ).fetchall()
+            options = [parse_event(row[1]) for row in history] + [fallback]
+            for event in options:
+                try:
+                    generate_candidates(baseline, event, machines, orders)
+                except ValueError:
+                    continue
+                if history and digest(event) == digest(parse_event(history[0][1])):
+                    return history[0][0]
+                payload = json.dumps(asdict(event), default=str, ensure_ascii=False)
+                conn.execute(
+                    "INSERT OR REPLACE INTO current_event VALUES (1, ?, ?)",
+                    (digest(event), payload),
+                )
+                cursor = conn.execute(
+                    "INSERT INTO event_history VALUES (NULL, ?, ?, ?)",
+                    (digest(event), payload, datetime.now(timezone.utc).isoformat()),
+                )
+                return cursor.lastrowid
+            raise ValueError("当前执行记录没有可恢复的试算事件，请检查计划数据")
+
+    def record_event(self, event: MachineFailure, expected_revision: int | None = None) -> int:
         fingerprint = digest(event)
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            latest = conn.execute(
+                "SELECT revision, fingerprint FROM event_history ORDER BY revision DESC LIMIT 1"
+            ).fetchone()
+            revision = latest[0] if latest else 0
+            if expected_revision is not None and revision != expected_revision:
+                raise ValueError("事件已在其他页面更新，请重新载入后编辑")
+            if latest and latest[1] == fingerprint:
+                return revision
+            payload = json.dumps(asdict(event), default=str, ensure_ascii=False)
             conn.execute(
                 "INSERT OR REPLACE INTO current_event VALUES (1, ?, ?)",
-                (
-                    fingerprint,
-                    json.dumps(asdict(event), default=str, ensure_ascii=False),
-                ),
+                (fingerprint, payload),
             )
-        return fingerprint
+            cursor = conn.execute(
+                "INSERT INTO event_history VALUES (NULL, ?, ?, ?)",
+                (fingerprint, payload, datetime.now(timezone.utc).isoformat()),
+            )
+            return cursor.lastrowid
 
     def decide(
         self,
@@ -114,6 +190,11 @@ class DecisionStore:
                 or candidate.event_fingerprint != digest(event)
             ):
                 raise ValueError("事件已变化，请重新分析")
+            revision = conn.execute("SELECT MAX(revision) FROM event_history").fetchone()[0]
+            if candidate.event_revision != revision:
+                raise ValueError("事件版本已变化，请重新分析")
+            if action == "publish" and event.recovered_at is None:
+                raise ValueError("恢复时间未知，不能发布候选方案")
             errors = validate_schedule(candidate.schedule, machines, event, baseline)
             if errors:
                 raise ValueError("发布校验失败：" + "; ".join(errors))

@@ -110,14 +110,14 @@ def metrics(schedule: Schedule, orders: tuple[Order, ...], baseline: Schedule) -
 
 
 def _available_start(
-    start: datetime,
-    duration: int,
-    occupied: list[tuple[datetime, datetime]],
-) -> datetime:
-    for left, right in sorted(occupied):
+    start: datetime, duration: int, occupied: list[tuple[datetime, datetime, str]]
+) -> tuple[datetime, tuple[str, ...]]:
+    blockers = []
+    for left, right, reference in sorted(occupied):
         if overlaps(start, start + timedelta(minutes=duration), left, right):
             start = right
-    return start
+            blockers.append(reference)
+    return start, tuple(blockers)
 
 
 def _replan(
@@ -126,14 +126,17 @@ def _replan(
     machines: tuple[Machine, ...],
     orders: tuple[Order, ...],
     allow_transfer: bool,
-) -> Schedule:
-    occupied: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
-    occupied[failure.machine_id].append((failure.started_at, failure.recovered_at))
+) -> tuple[Schedule, tuple[tuple[str, tuple[str, ...]], ...]]:
+    occupied: dict[str, list[tuple[datetime, datetime, str]]] = defaultdict(list)
+    root = f"故障:{failure.machine_id}"
+    occupied[failure.machine_id].append((failure.started_at, failure.recovered_at, root))
     placed = {op.id: op for op in baseline.operations if op.status != TaskStatus.PLANNED}
     for op in placed.values():
-        occupied[op.machine_id].append((op.start, op.end))
+        occupied[op.machine_id].append((op.start, op.end, op.id))
     order_map = {order.id: order for order in orders}
     pending = [op for op in baseline.operations if op.status == TaskStatus.PLANNED]
+    direct = {op.id for op in affected_operations(baseline, failure)}
+    causes = {}
     while pending:
         eligible = [
             op
@@ -156,27 +159,58 @@ def _replan(
                 item.id,
             ),
         )
-        predecessor_end = max(
-            (item.end for item in placed.values() if item.order_id == op.order_id),
-            default=failure.started_at,
+        predecessors = [item for item in placed.values() if item.order_id == op.order_id]
+        predecessor = max(predecessors, key=lambda item: item.end, default=None)
+        earliest = max(
+            op.start, failure.started_at, predecessor.end if predecessor else failure.started_at
         )
-        earliest = max(op.start, failure.started_at, predecessor_end)
         options = []
+        original_blockers = ()
         for machine in machines:
             if op.capability not in machine.capabilities:
                 continue
             if not allow_transfer and machine.id != op.machine_id:
                 continue
-            start = _available_start(earliest, op.duration_minutes, occupied[machine.id])
-            options.append((start, machine.id != op.machine_id, machine.id))
+            start, blockers = _available_start(earliest, op.duration_minutes, occupied[machine.id])
+            if machine.id == op.machine_id:
+                original_blockers = blockers
+            options.append((start, machine.id != op.machine_id, machine.id, blockers))
         if not options:
             raise ValueError(f"{op.id} 无合格设备")
-        start, _, machine_id = min(options)
+        start, transferred, machine_id, blockers = min(options)
+        references = list(blockers)
+        if op.id in direct:
+            references.insert(0, root)
+        if predecessor and predecessor.end > op.start:
+            references.append(predecessor.id)
+        if transferred:
+            references.extend(original_blockers)
+        causes[op.id] = tuple(dict.fromkeys(references))
         updated = op.move_to(machine_id, start)
         placed[op.id] = updated
-        occupied[machine_id].append((updated.start, updated.end))
+        occupied[machine_id].append((updated.start, updated.end, updated.id))
         pending.remove(op)
-    return Schedule(baseline.version + 1, tuple(placed[op.id] for op in baseline.operations))
+    schedule = Schedule(baseline.version + 1, tuple(placed[op.id] for op in baseline.operations))
+    return schedule, tuple(causes.items())
+
+
+def failure_issues(
+    schedule: Schedule,
+    failure: MachineFailure,
+    machines: tuple[Machine, ...],
+) -> tuple[str, ...]:
+    """Input-quality gates also apply when the recovery time is unknown."""
+    issues = list(validate_schedule(schedule, machines))
+    if failure.machine_id not in {machine.id for machine in machines}:
+        issues.append("故障设备不存在")
+    for op in schedule.operations:
+        if op.status == TaskStatus.PLANNED and op.start < failure.started_at:
+            issues.append(f"报工状态过期：{op.id} 在事件之前应已开工，请先确认状态")
+        if op.machine_id == failure.machine_id and op.status != TaskStatus.PLANNED:
+            end = failure.recovered_at or max(op.end, failure.started_at + timedelta(minutes=1))
+            if overlaps(op.start, op.end, failure.started_at, end):
+                issues.append(f"加工中故障：{op.id} 涉及已开工或已完成工序，需人工处理在制品")
+    return tuple(issues)
 
 
 def generate_candidates(
@@ -184,30 +218,23 @@ def generate_candidates(
     failure: MachineFailure,
     machines: tuple[Machine, ...],
     orders: tuple[Order, ...],
+    event_revision: int = 0,
 ) -> tuple[CandidatePlan, ...]:
     if failure.recovered_at is None:
         raise ValueError("需要人工补充预计恢复时间，才能生成候选方案")
-    if failure.machine_id not in {machine.id for machine in machines}:
-        raise ValueError("故障设备不存在")
-    errors = validate_schedule(schedule, machines)
-    if errors:
-        raise ValueError("基线计划无效：" + "; ".join(errors))
-    for op in schedule.operations:
-        if op.status == TaskStatus.PLANNED and op.start < failure.started_at:
-            raise ValueError("报工状态过期：请先确认事件发生前的工序状态")
-        if (
-            op.machine_id == failure.machine_id
-            and overlaps(op.start, op.end, failure.started_at, failure.recovered_at)
-            and op.status != TaskStatus.PLANNED
-        ):
-            raise ValueError("加工中故障不在首版支持范围，需要人工处理在制品")
+    issues = failure_issues(schedule, failure, machines)
+    if issues:
+        raise ValueError("; ".join(issues))
     affected = affected_operations(schedule, failure)
     candidates = []
     for strategy, label, transfer in (
         ("wait-recovery", "原设备等待恢复", False),
         ("allow-transfer", "允许合格设备转移", True),
     ):
-        result = _replan(schedule, failure, machines, orders, transfer)
+        if affected:
+            result, causes = _replan(schedule, failure, machines, orders, transfer)
+        else:
+            result, causes = Schedule(schedule.version + 1, schedule.operations), ()
         errors = validate_schedule(result, machines, failure, schedule)
         if errors:
             raise ValueError("候选校验失败：" + "; ".join(errors))
@@ -227,6 +254,8 @@ def generate_candidates(
                 ASSUMPTIONS,
                 schedule.fingerprint,
                 digest(failure),
+                event_revision,
+                causes,
             )
         )
     return tuple(candidates)

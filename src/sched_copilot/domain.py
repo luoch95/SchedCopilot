@@ -98,6 +98,8 @@ class CandidatePlan:
     assumptions: tuple[str, ...]
     baseline_fingerprint: str
     event_fingerprint: str
+    event_revision: int = 0
+    causes: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 def digest(record: object) -> str:
