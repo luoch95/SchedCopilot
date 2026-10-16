@@ -21,7 +21,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
-            Path(os.getenv("SCHED_DB_PATH") or REPOSITORY_ROOT / ".data/decisions.sqlite3"),
+            Path(os.getenv("SCHED_DB_PATH") or REPOSITORY_ROOT / ".data/injection_molding.sqlite3"),
             Path(os.getenv("SCHED_FRONTEND_DIR") or REPOSITORY_ROOT / "frontend/dist"),
             os.getenv("SCHED_LOG_LEVEL", "INFO").upper(),
         )

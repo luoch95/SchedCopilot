@@ -38,7 +38,7 @@ def test_backend_start_directory_does_not_change_data_or_frontend_paths(tmp_path
         assert client.get("/api/workbench").status_code == 200
         assert "Schedule Copilot" in client.get("/").text
         assert client.get("/assets/app.js").status_code == 200
-    assert (tmp_path / ".data" / "decisions.sqlite3").exists()
+    assert (tmp_path / ".data" / "injection_molding.sqlite3").exists()
     assert not (backend / ".data").exists()
 
 
