@@ -113,6 +113,21 @@
   opacity: 0.35;
 }
 
+.impact-type-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.impact-type-badge {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  background: #eef2f4;
+}
+
 .impact-type-badge.active {
   color: #2e748c;
   background: #e5f1f5;

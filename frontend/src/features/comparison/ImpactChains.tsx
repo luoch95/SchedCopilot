@@ -26,16 +26,17 @@ export function ImpactChains({ candidates }: { candidates: Candidate[] }) {
             <h4>{item.label}</h4>
             {item.changes.map((change) => (
               <div className="chain-item" key={change.工序}>
-                <strong>
-                  {change.工序}
-                  <span
-                    className={`tag impact-type-badge ${
-                      IMPACT_TYPES.includes(change.类型) ? 'active' : 'dim'
-                    }`}
-                  >
-                    {change.类型}
-                  </span>
-                </strong>
+                <strong>{change.工序}</strong>
+                <div className="impact-type-options" aria-label={`影响类型：${change.工序}`}>
+                  {IMPACT_TYPES.map((type) => (
+                    <span
+                      className={`impact-type-badge ${type === change.类型 ? 'active' : 'dim'}`}
+                      key={type}
+                    >
+                      {type}
+                    </span>
+                  ))}
+                </div>
                 <p>{change.影响链}</p>
                 <small>依据：{change.依据}</small>
               </div>
