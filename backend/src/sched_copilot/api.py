@@ -21,6 +21,7 @@ from .scheduling import affected_operations, failure_issues, generate_candidates
 from .storage import DecisionStore
 
 CANDIDATES = TypeAdapter(tuple[CandidatePlan, ...])
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 
 class SnapshotRequest(BaseModel):
@@ -61,7 +62,8 @@ def schedule_view(schedule):
 def create_app(db_path: str | Path | None = None, frontend_dir: Path | None = None):
     app = FastAPI(title="Schedule Copilot API", version="0.2.0")
     store = DecisionStore(
-        db_path or os.getenv("SCHED_DB_PATH", ".data/decisions.sqlite3"), demo_schedule()
+        db_path or os.getenv("SCHED_DB_PATH") or REPOSITORY_ROOT / ".data" / "decisions.sqlite3",
+        demo_schedule(),
     )
     machines, orders = demo_machines(), demo_orders()
     example = MachineFailure(
@@ -189,7 +191,9 @@ def create_app(db_path: str | Path | None = None, frontend_dir: Path | None = No
         return {"reports": reports, "mode": "live" if request.live else "offline"}
 
     # Production can serve the separately built frontend from the same origin.
-    build = frontend_dir or Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    build = Path(
+        frontend_dir or os.getenv("SCHED_FRONTEND_DIR") or REPOSITORY_ROOT / "frontend" / "dist"
+    )
     if (build / "index.html").exists():
         app.mount("/assets", StaticFiles(directory=build / "assets"), name="assets")
 

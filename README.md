@@ -42,14 +42,14 @@
 首次安装：
 
 ```powershell
-uv sync --locked --python 3.12
+uv --directory backend sync --locked --python 3.12
 npm --prefix frontend ci
 ```
 
 开发时打开两个终端。终端一运行后端：
 
 ```powershell
-uv run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000 --reload
+uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000 --reload
 ```
 
 终端二运行前端：
@@ -70,12 +70,12 @@ npm --prefix frontend run dev
 
 ```powershell
 npm --prefix frontend run build
-uv run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000
+uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-此时访问 http://127.0.0.1:8000。构建产物在 `frontend/dist/`，需在后端启动前生成；Python wheel 不包含前端产物，独立部署时须同时携带它或使用反向代理。
+此时访问 http://127.0.0.1:8000。构建产物在 `frontend/dist/`，需在后端启动前生成；Python wheel 不包含前端产物，独立部署时须配置 `SCHED_DB_PATH` 和 `SCHED_FRONTEND_DIR`，或使用反向代理。
 
-旧的 `streamlit_app.py` 和 `src/sched_copilot/app.py` 仅保留作迁移参考，不是当前主界面。
+旧的 `backend/streamlit_app.py` 和 `backend/src/sched_copilot/app.py` 仅保留作迁移参考，不是当前主界面。
 
 ## API 多 Agent
 
@@ -87,33 +87,40 @@ uv run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 80
 $env:LLM_API_KEY = "你的密钥"
 $env:LLM_MODEL = "供应商提供的模型名称"
 $env:LLM_BASE_URL = "供应商提供的兼容 API 地址"
-uv run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000
+uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-然后在“AI 辅助分析”区域启用 API 多 Agent 并点击“运行分析”。密钥只配置在后端，不传给浏览器。配置以 `.env.example` 为参考，应用不会自动读取 `.env`。未提供真实凭据进行联调；供应商必须支持工具调用，API 费用由调用方承担。不要提交密钥、生产数据或本地数据库。
+然后在“AI 辅助分析”区域启用 API 多 Agent 并点击“运行分析”。密钥只配置在后端，不传给浏览器。配置以 `backend/.env.example` 为参考，应用不会自动读取 `.env`。未提供真实凭据进行联调；供应商必须支持工具调用，API 费用由调用方承担。不要提交密钥、生产数据或本地数据库。
 
 ## 验证与打包
 
 ```powershell
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
-uv build
+uv --directory backend run ruff check .
+uv --directory backend run ruff format --check .
+uv --directory backend run pytest
+uv --directory backend build
 npm --prefix frontend run format:check
 npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-`uv.lock` 和 `frontend/package-lock.json` 均纳入版本控制。CI 分别在 Python 3.12 和 Node.js 24 上执行后端、前端检查。
+`backend/uv.lock` 和 `frontend/package-lock.json` 均纳入版本控制。CI 分别进入 `backend/` 与 `frontend/`，在 Python 3.12 和 Node.js 24 上执行检查。
 
 ## 代码结构与 API
 
 ```text
-frontend/src/             React 页面、甘特图、比较区和 HTTP 客户端
-src/sched_copilot/api.py  FastAPI 路由、输入校验与业务适配
-src/sched_copilot/        领域模型、排程、影响分析、三 Agent 与持久化
-tests/test_api.py        API 决策闭环与版本、幂等测试
-docs/decisions/          架构决策记录
+frontend/
+  src/                      React 页面、甘特图、比较区和 HTTP 客户端
+  package.json              前端依赖与命令
+  package-lock.json         前端锁文件
+backend/
+  src/sched_copilot/api.py   FastAPI 接口入口
+  src/sched_copilot/         排程、影响分析、三 Agent 与持久化
+  tests/                    后端业务与 API 测试
+  pyproject.toml            后端依赖、测试及构建配置
+  uv.lock                   后端锁文件
+docs/                       业务说明、开发流程和架构决策
+.data/                      本地数据库与日志（不提交）
 ```
 
 | API | 用途 |

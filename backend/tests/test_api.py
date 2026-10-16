@@ -21,6 +21,27 @@ def token(state):
     }
 
 
+def test_backend_start_directory_does_not_change_data_or_frontend_paths(tmp_path, monkeypatch):
+    import sched_copilot.api as api
+
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    frontend = tmp_path / "frontend" / "dist"
+    (frontend / "assets").mkdir(parents=True)
+    (frontend / "index.html").write_text("<h1>Schedule Copilot</h1>", encoding="utf-8")
+    (frontend / "assets" / "app.js").write_text("console.log('ok')", encoding="utf-8")
+    monkeypatch.setattr(api, "REPOSITORY_ROOT", tmp_path)
+    monkeypatch.delenv("SCHED_DB_PATH", raising=False)
+    monkeypatch.delenv("SCHED_FRONTEND_DIR", raising=False)
+    monkeypatch.chdir(backend)
+    with TestClient(create_app()) as client:
+        assert client.get("/api/workbench").status_code == 200
+        assert "Schedule Copilot" in client.get("/").text
+        assert client.get("/assets/app.js").status_code == 200
+    assert (tmp_path / ".data" / "decisions.sqlite3").exists()
+    assert not (backend / ".data").exists()
+
+
 def test_api_exposes_computed_end_and_reuses_existing_store(tmp_path):
     path = tmp_path / "existing.sqlite3"
     store = DecisionStore(path, demo_schedule())
