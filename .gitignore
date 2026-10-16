@@ -18,6 +18,7 @@ htmlcov/
 # Frontend
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Local configuration and runtime data
 .env
