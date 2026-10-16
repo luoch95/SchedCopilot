@@ -58,16 +58,36 @@ def _frame(schedule):
     )
 
 
-def _gantt(schedule, failure=None, *, time_range=None):
+def _gantt(schedule, failure=None, *, time_range=None, baseline=None):
+    original = {op.id: op for op in baseline.operations} if baseline else {}
+    adjustments = {}
+    for op in schedule.operations:
+        before = original.get(op.id)
+        adjustments[op.id] = (
+            "设备转移"
+            if before and before.machine_id != op.machine_id
+            else "时间调整"
+            if before and (before.start != op.start or before.end != op.end)
+            else "未调整"
+        )
+    frame = _frame(schedule)
+    frame["调整"] = frame["任务"].map(adjustments)
+    frame["标注"] = frame["任务"].map(lambda task: task if adjustments[task] != "未调整" else "")
     fig = px.timeline(
-        _frame(schedule),
+        frame,
         x_start="开始",
         x_end="结束",
         y="设备",
         color="订单",
-        hover_data=["任务", "状态"],
+        hover_data=["任务", "状态", "调整"],
+        text="标注",
         height=400,
     )
+    for trace in fig.data:
+        kinds = [adjustments[row[0]] for row in trace.customdata]
+        trace.marker.line.color = ["#7C3AED" if kind == "设备转移" else "#B45309" for kind in kinds]
+        trace.marker.line.width = [3 if kind != "未调整" else 0 for kind in kinds]
+        trace.textposition = "inside"
     machine_ids = sorted({op.machine_id for op in schedule.operations})
     if failure and failure.machine_id not in machine_ids:
         machine_ids.append(failure.machine_id)
@@ -173,12 +193,13 @@ def _comparison(baseline, candidates, failure, orders):
         with column:
             st.markdown(f"### {item.label}")
             st.plotly_chart(
-                _gantt(item.schedule, failure, time_range=time_range),
+                _gantt(item.schedule, failure, time_range=time_range, baseline=baseline),
                 key=f"candidate-gantt-{item.id}",
                 width="stretch",
                 config={"displayModeBar": False},
             )
     st.caption("各方案使用相同时间范围；悬停甘特条可查看任务、状态和起止时间。")
+    st.caption("紫色描边：设备已转移；橙色描边：仅调整时间。调整后的工序显示任务编号。")
 
     def slot(op):
         return f"{op.machine_id} · {op.start:%m-%d %H:%M} → {op.end:%m-%d %H:%M}"
@@ -232,9 +253,17 @@ def _comparison(baseline, candidates, failure, orders):
                 st.dataframe(_table(changes), width="stretch", hide_index=True)
             else:
                 st.info("该方案没有改变任何工序。")
-            st.markdown("**证据与假设**")
-            for evidence in (*item.evidence, *item.assumptions):
-                st.write(f"- {evidence}")
+    st.subheader("证据与假设")
+    for column, item in zip(st.columns(len(candidates)), candidates):
+        column.markdown(f"**{item.label}**")
+    for title, field in (("决策证据", "evidence"), ("适用假设", "assumptions")):
+        st.markdown(f"**{title}**")
+        entries = [getattr(item, field) for item in candidates]
+        for index in range(max(map(len, entries), default=0)):
+            for column, values in zip(st.columns(len(candidates)), entries):
+                with column:
+                    with st.container(border=True):
+                        st.write(values[index] if index < len(values) else "—")
 
 
 def _reload_editor():
