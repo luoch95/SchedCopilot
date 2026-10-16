@@ -171,3 +171,21 @@ def test_second_saved_event_conflict_explains_block_and_can_be_corrected(tmp_pat
     app.button(key="generate").click().run()
     assert not app.exception
     assert app.button(key="decide")
+
+
+def test_unknown_recovery_hides_time_fields_and_reentry_restores_comparison(tmp_path, monkeypatch):
+    app = workbench(tmp_path, monkeypatch)
+    app.checkbox(key="recovery_unknown").check().run()
+    assert not any(item.key == "failure_recovery" for item in app.time_input)
+    app.button(key="save_event").click().run()
+    store = DecisionStore(tmp_path / ".data/decisions.sqlite3", demo_schedule())
+    assert store.active_event()[0].recovered_at is None
+    assert app.button(key="generate").disabled
+    app.checkbox(key="recovery_unknown").uncheck().run()
+    app.time_input(key="failure_recovery").set_value(time(18)).run()
+    app.button(key="save_event").click().run()
+    assert store.active_event()[0].recovered_at.hour == 18
+    assert not app.button(key="generate").disabled
+    app.button(key="generate").click().run()
+    assert not app.exception
+    assert app.button(key="decide")

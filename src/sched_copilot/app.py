@@ -129,12 +129,12 @@ def _event_editor(store, machines, active, revision):
             "恢复时间未知", value=active.recovered_at is None, key="recovery_unknown"
         )
         recovery = active.recovered_at or active.started_at + timedelta(hours=4)
-        recovery_date = st.date_input(
-            "预计恢复日期", recovery.date(), disabled=unknown, key="recovery_date"
-        )
-        recovery_time = st.time_input(
-            "预计恢复时间", recovery.time(), disabled=unknown, key="failure_recovery"
-        )
+        recovery_date, recovery_time = recovery.date(), recovery.time()
+        if unknown:
+            st.info("预计恢复时间：未提供。已有时间不参与本次事件，补充时间后才能试算。")
+        else:
+            recovery_date = st.date_input("预计恢复日期", recovery.date(), key="recovery_date")
+            recovery_time = st.time_input("预计恢复时间", recovery.time(), key="failure_recovery")
         source = st.text_input("事件来源", active.source, key="failure_source")
         draft, error = None, None
         try:
@@ -173,7 +173,11 @@ def _event_editor(store, machines, active, revision):
                 st.error(str(exc))
         if dirty:
             st.info("事件输入已修改。请先保存，再重新生成候选方案；当前不能发布旧方案。")
-        st.caption("预计恢复是人工估计。未知恢复时间时仅提示潜在风险，不生成正式候选。")
+        if not unknown and draft is not None:
+            st.caption(
+                f"当前输入的预计恢复：{draft.recovered_at:%m-%d %H:%M}（人工估计）。"
+                "如暂时无法估计，请勾选“恢复时间未知”，不必手动清空时间框。"
+            )
     return dirty or stale
 
 
@@ -293,6 +297,22 @@ def main():
             )
     if failure.recovered_at is None:
         st.warning("请补充预计恢复时间。红色区域延伸只表示恢复未知，不代表实际停机时长。")
+    blockers = []
+    if dirty:
+        blockers.append("输入尚未保存，或编辑版本已过期，请保存或重新载入事件")
+    if issues:
+        blockers.extend(issues)
+    if failure.recovered_at is None:
+        blockers.append("已保存事件的预计恢复时间未知，请取消勾选、填写时间并保存")
+    if blockers:
+        st.write("**暂不能生成方案比较，原因：**")
+        for blocker in blockers:
+            st.write(f"- {blocker}")
+    else:
+        st.caption(
+            f"已保存预计恢复时间：{failure.recovered_at:%m-%d %H:%M}。"
+            "输入校验通过，可以生成候选方案。"
+        )
     if st.button(
         "生成候选方案",
         key="generate",
