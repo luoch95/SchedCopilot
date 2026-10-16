@@ -31,6 +31,8 @@
 - [架构决策记录](docs/decisions/0001-initial-direction.md)
 - [本地首版架构](docs/decisions/0002-local-first-mvp.md)
 - [前后端分离架构](docs/decisions/0003-react-fastapi.md)
+- [代码结构与扩展规则](docs/code-structure.md)
+- [模块边界决策](docs/decisions/0004-module-boundaries.md)
 - [固定案例与指标口径](docs/demo-case.md)
 - [任务记录](docs/tasks.md)
 - [故障录入与影响分析验收](docs/failure-impact.md)
@@ -75,7 +77,7 @@ uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host
 
 此时访问 http://127.0.0.1:8000。构建产物在 `frontend/dist/`，需在后端启动前生成；Python wheel 不包含前端产物，独立部署时须配置 `SCHED_DB_PATH` 和 `SCHED_FRONTEND_DIR`，或使用反向代理。
 
-旧的 `backend/streamlit_app.py` 和 `backend/src/sched_copilot/app.py` 仅保留作迁移参考，不是当前主界面。
+旧 Streamlit 实现及专用依赖已移除，历史版本保留在 Git 中。当前只有 React + FastAPI 这一套主实现。
 
 ## API 多 Agent
 
@@ -100,6 +102,7 @@ uv --directory backend run ruff format --check .
 uv --directory backend run pytest
 uv --directory backend build
 npm --prefix frontend run format:check
+npm --prefix frontend run lint:architecture
 npm --prefix frontend test
 npm --prefix frontend run build
 ```
@@ -110,18 +113,26 @@ npm --prefix frontend run build
 
 ```text
 frontend/
-  src/                      React 页面、甘特图、比较区和 HTTP 客户端
+  src/app/                  页面组装与分类样式
+  src/features/             事件、计划、方案比较、AI、人工决定和历史
+  src/shared/               公共接口契约、HTTP、时间工具和甘特图
   package.json              前端依赖与命令
   package-lock.json         前端锁文件
 backend/
-  src/sched_copilot/api.py   FastAPI 接口入口
-  src/sched_copilot/         排程、影响分析、三 Agent 与持久化
-  tests/                    后端业务与 API 测试
+  src/sched_copilot/api/             HTTP 接口、输入校验与输出映射
+  src/sched_copilot/application/     业务用例、命令结果和依赖契约
+  src/sched_copilot/domain/          领域模型、排程与影响规则
+  src/sched_copilot/infrastructure/  SQLite 与序列化
+  src/sched_copilot/agents/          三 Agent 工作流
+  src/sched_copilot/scenarios/       仿真案例
+  tests/                    单元、集成与架构边界测试
   pyproject.toml            后端依赖、测试及构建配置
   uv.lock                   后端锁文件
 docs/                       业务说明、开发流程和架构决策
 .data/                      本地数据库与日志（不提交）
 ```
+
+依赖边界由测试与 CI 自动检查；详细职责、依赖方向和新增功能位置见[代码结构说明](docs/code-structure.md)。
 
 | API | 用途 |
 | --- | --- |

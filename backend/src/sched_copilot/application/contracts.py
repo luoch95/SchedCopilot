@@ -1,0 +1,65 @@
+"""Typed commands and results shared by use cases and their adapters."""
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
+
+from ..domain.models import CandidatePlan, Machine, MachineFailure, Order, Schedule
+
+
+@dataclass(frozen=True)
+class SnapshotVersion:
+    event_revision: int
+    baseline_fingerprint: str
+
+
+@dataclass(frozen=True)
+class SaveEvent:
+    version: SnapshotVersion
+    machine_id: str
+    started_at: datetime
+    recovered_at: datetime | None
+    source: str
+
+
+@dataclass(frozen=True)
+class Decide:
+    simulation_id: str
+    candidate_id: str
+    action: Literal["publish", "reject"]
+    reason: str
+    request_id: str
+
+
+@dataclass(frozen=True)
+class Analyze:
+    version: SnapshotVersion
+    live: bool
+    question: str
+
+
+@dataclass(frozen=True)
+class WorkbenchSnapshot:
+    baseline: Schedule
+    event: MachineFailure
+    event_revision: int
+    snapshot_time: datetime
+    machines: tuple[Machine, ...]
+    orders: tuple[Order, ...]
+    affected: tuple[str, ...]
+    issues: tuple[str, ...]
+    history: list[dict]
+
+
+@dataclass(frozen=True)
+class CandidateComparison:
+    candidate: CandidatePlan
+    changes: list[dict]
+    order_impacts: list[dict]
+
+
+@dataclass(frozen=True)
+class SimulationResult:
+    id: str
+    version: SnapshotVersion
+    candidates: tuple[CandidateComparison, ...]

@@ -46,6 +46,6 @@ GitHub 发布前先确认仓库根目录、许可证和公开内容。没有远�
 
 ## 当前开发入口
 
-主界面已迁移为 React + FastAPI，见 [ADR 0003](decisions/0003-react-fastapi.md) 和根目录 README 的双终端启动方式。前端项目在 `frontend/`，后端项目在 `backend/`，API 入口为 `backend/src/sched_copilot/api.py`。后端源码、测试、依赖与 uv 锁文件均在 `backend/` 内。Streamlit 仅作为旧版参考。
+主界面已迁移为 React + FastAPI，见 [ADR 0003](decisions/0003-react-fastapi.md) 和根目录 README 的双终端启动方式。前端项目在 `frontend/`，后端项目在 `backend/`，API 工厂为 `backend/src/sched_copilot/api/__init__.py`。内部依赖、职责和新增功能位置见 [代码结构与扩展规则](code-structure.md)。旧 Streamlit 已从当前实现移除，Git 保留历史。
 
-在根目录运行前端命令 `npm --prefix frontend run format:check`、`npm --prefix frontend test` 和 `npm --prefix frontend run build`；后端命令使用 `uv --directory backend run ruff check .`、`uv --directory backend run pytest` 和 `uv --directory backend build`。也可进入 `backend/` 后直接运行 uv 命令。CI 分别执行两组检查。业务规则不得搬到前端作为唯一校验，人工发布必须经过后端版本与约束校验。
+在根目录运行前端命令 `npm --prefix frontend run format:check`、`npm --prefix frontend run lint:architecture`、`npm --prefix frontend test` 和 `npm --prefix frontend run build`；后端命令使用 `uv --directory backend run ruff check .`、`uv --directory backend run pytest` 和 `uv --directory backend build`。也可进入 `backend/` 后直接运行 uv 命令。CI 分别执行两组检查。业务规则不得搬到前端作为唯一校验，人工发布必须经过后端版本与约束校验。

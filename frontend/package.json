@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
+    "lint:architecture": "node scripts/check-boundaries.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

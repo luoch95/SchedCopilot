@@ -26,4 +26,8 @@ uv run pytest
 uv build
 ```
 
-依赖、锁文件、虚拟环境和构建产物分别为本目录的 `pyproject.toml`、`uv.lock`、`.venv/` 和 `dist/`。`src/sched_copilot/api.py` 是 HTTP 入口，其他业务模块与 `tests/` 同在后端目录。`streamlit_app.py` 仅保留作旧版迁移参考。
+依赖、锁文件、虚拟环境和构建产物分别为本目录的 `pyproject.toml`、`uv.lock`、`.venv/` 和 `dist/`。`src/sched_copilot/api/__init__.py` 是 HTTP 应用工厂；内部按 API、application、domain、infrastructure、agents 和 scenarios 分层。测试分为 `unit/`、`integration/` 与 `architecture/`；架构依赖检查随 pytest 一起运行。
+
+配置由 `config.py` 解析、具体实现由 `bootstrap.py` 组装。统一业务异常在 API 层映射为 HTTP 状态和错误码。日志通过 `observability.py` 配置，`SCHED_LOG_LEVEL` 控制级别；日志不记录模型密钥、人工理由、提示词或供应商错误内容。
+
+旧 Streamlit 已移除，历史代码可从 Git 查看。完整模块职责与扩展规则见[代码结构说明](../docs/code-structure.md)。

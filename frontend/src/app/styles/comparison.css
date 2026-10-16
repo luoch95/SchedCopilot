@@ -1,0 +1,131 @@
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+.candidate-card,
+.chain-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 0;
+  background: #fff;
+}
+.candidate-card header {
+  padding: 13px 16px;
+  background: #f4f8fa;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.candidate-card header h3 {
+  font-size: 14px;
+}
+.candidate-card header span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.candidate-card .gantt {
+  padding: 10px 10px 0;
+}
+
+.outline-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 13px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.outline-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.outline-legend i {
+  width: 20px;
+  height: 12px;
+  border-radius: 3px;
+}
+.purple-outline {
+  border: 3px solid #7c3aed;
+}
+.amber-outline {
+  border: 3px solid #b45309;
+}
+.difference-cell {
+  padding: 9px;
+  border: 2px solid #e3b64e;
+  border-radius: 4px;
+  background: #fffae9;
+  min-height: 74px;
+}
+.transfer-text {
+  color: #7c3aed;
+}
+.time-text {
+  color: #b45309;
+}
+.late-text {
+  color: #aa3d3d;
+}
+.chain-card {
+  padding: 16px;
+}
+.chain-card h4 {
+  margin-bottom: 13px;
+}
+.chain-item {
+  border-top: 1px solid #e6edf2;
+  padding: 12px 0;
+  font-size: 12px;
+}
+.chain-item strong {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+}
+.chain-item p {
+  color: #3d6e84;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+}
+.chain-item .tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  font-weight: 400;
+}
+.chain-item small {
+  font-size: 11px;
+}
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+}
+.evidence-grid h4 {
+  padding: 5px 0;
+  color: #3d6478;
+}
+.evidence-label {
+  grid-column: 1/-1;
+  font-size: 11px;
+  color: #6b8494;
+  margin-top: 11px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+.evidence-cell {
+  padding: 13px 15px;
+  border: 1px solid #dde8ee;
+  border-left: 3px solid #a9c4d3;
+  border-radius: 4px;
+  background: #f9fbfd;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

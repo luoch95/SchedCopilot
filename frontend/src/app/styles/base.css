@@ -1,0 +1,147 @@
+:root {
+  font-family: 'IBM Plex Sans', 'Microsoft YaHei', sans-serif;
+  color: #243b48;
+  background: #eef3f6;
+  font-synthesis: none;
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 400;
+  --accent: #126477;
+  --border: #dce5eb;
+  --muted: #697f8d;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button,
+a,
+input,
+select,
+textarea {
+  outline-offset: 4px;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #4da5ba;
+}
+button {
+  border: 1px solid #c4d3dd;
+  border-radius: 6px;
+  padding: 9px 15px;
+  background: #fff;
+  color: #264c5c;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+button:hover:not(:disabled) {
+  background: #edf5f8;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.primary:hover:not(:disabled) {
+  background: #0b4d5e;
+}
+.full-width {
+  width: 100%;
+  margin-top: 9px;
+}
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: 28px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.6px;
+}
+h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+h3 {
+  font-size: 16px;
+}
+h4 {
+  font-size: 14px;
+}
+small {
+  font-size: 12px;
+  color: var(--muted);
+}
+fieldset {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 9px 10px;
+  background: white;
+  border: 1px solid #cbd8e1;
+  border-radius: 5px;
+  color: #243b48;
+  min-width: 0;
+}
+textarea {
+  resize: vertical;
+  min-height: 85px;
+}
+input[type='checkbox'] {
+  width: auto;
+  accent-color: var(--accent);
+}
+input[type='range'] {
+  padding: 0;
+  accent-color: var(--accent);
+}
+.check-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  margin-top: 15px;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+}
+.inline-actions label {
+  margin: 0;
+}

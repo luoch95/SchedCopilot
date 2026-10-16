@@ -1,0 +1,75 @@
+.chart-scroll {
+  overflow-x: auto;
+}
+svg {
+  display: block;
+  width: 100%;
+  min-width: 490px;
+}
+.axis-label {
+  fill: #768d9c;
+  font:
+    12px 'IBM Plex Sans',
+    sans-serif;
+}
+.machine-label {
+  fill: #456777;
+  font:
+    600 12px 'IBM Plex Sans',
+    sans-serif;
+}
+.bar-label {
+  fill: #fff;
+  font:
+    11px 'IBM Plex Sans',
+    sans-serif;
+}
+.fault-label {
+  fill: #aa4c3a;
+  font:
+    10px 'Microsoft YaHei',
+    sans-serif;
+}
+.gantt-inspector {
+  background: #f4f8fa;
+  border-radius: 4px;
+  margin: 4px 0 10px;
+  min-height: 73px;
+  padding: 8px 12px;
+  color: #78909e;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.gantt-inspector strong {
+  color: #2b5266;
+}
+.order-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 13px;
+  padding: 0 4px 12px;
+  font-size: 10px;
+  color: #6d8695;
+}
+.order-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.order-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.chart-controls {
+  display: flex;
+  gap: 17px;
+}
+.chart-controls label {
+  width: 120px;
+  font-size: 10px;
+  margin: 0;
+  color: var(--muted);
+}

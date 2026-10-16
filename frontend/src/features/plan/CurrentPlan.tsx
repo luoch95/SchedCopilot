@@ -1,0 +1,126 @@
+import { stamp } from '../../shared/lib/time';
+import Gantt from '../../shared/ui/Gantt';
+import type { Workbench } from '../../shared/api/contracts';
+
+interface Props {
+  state: Workbench;
+  range: [number, number];
+  zoom: number;
+  pan: number;
+  onZoom: (value: number) => void;
+  onPan: (value: number) => void;
+}
+
+export function CurrentPlan({ state, range, zoom, pan, onZoom, onPan }: Props) {
+  const originalById = new Map(state.baseline.operations.map((op) => [op.id, op]));
+  const affected = state.affected.map((id) => originalById.get(id)!);
+  return (
+    <>
+      <div className="stat-strip">
+        <div>
+          <span>{state.event.recovered_at ? '直接受影响工序' : '潜在受影响工序'}</span>
+          <strong>
+            {state.affected.length}
+            <small>道</small>
+          </strong>
+        </div>
+        <div>
+          <span>正式计划版本</span>
+          <strong>V{state.baseline.version}</strong>
+        </div>
+        <div>
+          <span>已保存事件版本</span>
+          <strong>R{state.event_revision}</strong>
+        </div>
+        <div className="event-stat">
+          <span>已保存故障 · {state.event.machine_id}</span>
+          <strong>
+            {stamp(state.event.started_at)} →{' '}
+            {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复未知'}
+          </strong>
+          <small>来源：{state.event.source}</small>
+        </div>
+      </div>
+
+      <section className="section">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">CURRENT PLAN</p>
+            <h2>当前正式计划</h2>
+          </div>
+          <div className="chart-controls">
+            <label>
+              共同缩放
+              <input
+                aria-label="甘特图缩放"
+                type="range"
+                min={1}
+                max={4}
+                step={0.25}
+                value={zoom}
+                onChange={(e) => onZoom(+e.target.value)}
+              />
+            </label>
+            <label>
+              查看起点
+              <input
+                aria-label="甘特图查看起点"
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={pan}
+                disabled={zoom === 1}
+                onChange={(e) => onPan(+e.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+        <Gantt
+          schedule={state.baseline}
+          failure={state.event}
+          machines={state.machines}
+          range={range}
+        />
+        <p className="hint">
+          浅色条为已完成工序，红色虚线区域为故障窗口。三个甘特图使用共同时间轴。
+        </p>
+        <h3 className="block-title">
+          {state.event.recovered_at ? '直接影响范围' : '潜在风险范围'}
+        </h3>
+        {affected.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>工序</th>
+                  <th>订单</th>
+                  <th>设备</th>
+                  <th>原加工时段</th>
+                  <th>依据</th>
+                </tr>
+              </thead>
+              <tbody>
+                {affected.map((op) => (
+                  <tr key={op.id}>
+                    <th>{op.id}</th>
+                    <td>{op.order_id}</td>
+                    <td>{op.machine_id}</td>
+                    <td>
+                      {stamp(op.start)} → {stamp(op.end)}
+                    </td>
+                    <td>
+                      {state.event.recovered_at ? '与故障窗口重叠' : '恢复未知，列为潜在风险'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="empty-state">已保存故障未覆盖任何待加工工序，可以试算验证是否需要调整。</p>
+        )}
+      </section>
+    </>
+  );
+}
