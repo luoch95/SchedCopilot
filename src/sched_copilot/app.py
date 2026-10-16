@@ -11,7 +11,7 @@ from .agents import run_analysis
 from .domain import MachineFailure, digest
 from .impact import operation_changes, order_impacts
 from .scenario import BASE_TIME, EVENT_TIME, demo_machines, demo_orders, demo_schedule
-from .scheduling import affected_operations, failure_issues, generate_candidates
+from .scheduling import affected_operations, failure_issues, generate_candidates, overlaps
 from .storage import DecisionStore
 
 EDITOR_KEYS = (
@@ -251,6 +251,46 @@ def main():
     issues = failure_issues(baseline, failure, machines)
     for issue in issues:
         st.error(issue)
+    if issues:
+        st.warning(
+            "当前事件已保存，但与执行记录冲突，暂不能生成方案比较。"
+            "本案例是10月19日13:00的固定报工快照，修改故障时间不会回退或推进工序状态。"
+            "请在左侧修正事件并再次保存；若要模拟加工中故障，需要先定义在制品处置规则。"
+        )
+        conflicts = [
+            op
+            for op in baseline.operations
+            if op.machine_id == failure.machine_id
+            and op.status.value != "planned"
+            and overlaps(
+                op.start,
+                op.end,
+                failure.started_at,
+                failure.recovered_at or max(op.end, failure.started_at + timedelta(minutes=1)),
+            )
+        ]
+        if conflicts:
+            st.dataframe(
+                _table(
+                    [
+                        {
+                            "冲突工序": op.id,
+                            "设备": op.machine_id,
+                            "执行记录开始": op.start,
+                            "执行记录结束": op.end,
+                            "执行状态": "已完成" if op.status.value == "completed" else "加工中",
+                        }
+                        for op in conflicts
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+        if baseline == demo_schedule():
+            st.info(
+                "初始快照可试：M1，10月19日13:00—17:00。"
+                "在左侧保存后，重新点击“生成候选方案”。这会替换当前单条事件，正式计划不变。"
+            )
     if failure.recovered_at is None:
         st.warning("请补充预计恢复时间。红色区域延伸只表示恢复未知，不代表实际停机时长。")
     if st.button(
@@ -272,7 +312,8 @@ def main():
             st.error(str(exc))
     candidates = st.session_state.get("candidates")
     if not candidates or dirty or issues or failure.recovered_at is None:
-        st.caption("保存事件后点击“生成候选方案”。正式计划只在人工确认发布后改变。")
+        if not issues:
+            st.caption("保存事件后点击“生成候选方案”。正式计划只在人工确认发布后改变。")
         _history(store)
         return
 

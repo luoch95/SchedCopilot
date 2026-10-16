@@ -152,3 +152,22 @@ def test_gantt_failure_band_only_covers_the_failed_machine_row():
     assert band.y1 == row + 0.4
     assert band.x0 == event.started_at.replace(tzinfo=None)
     assert band.x1 == event.recovered_at.replace(tzinfo=None)
+
+
+def test_second_saved_event_conflict_explains_block_and_can_be_corrected(tmp_path, monkeypatch):
+    app = workbench(tmp_path, monkeypatch)
+    app.button(key="save_event").click().run()
+    app.button(key="generate").click().run()
+    app.time_input(key="failure_start").set_value(time(12)).run()
+    app.button(key="save_event").click().run()
+    assert not app.exception
+    assert app.button(key="generate").disabled
+    assert any("当前事件已保存，但与执行记录冲突" in item.value for item in app.warning)
+    assert any("13:00—17:00" in item.value for item in app.info)
+    assert not any(button.key == "decide" for button in app.button)
+    app.time_input(key="failure_start").set_value(time(13)).run()
+    app.button(key="save_event").click().run()
+    assert not app.button(key="generate").disabled
+    app.button(key="generate").click().run()
+    assert not app.exception
+    assert app.button(key="decide")
