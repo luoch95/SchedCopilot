@@ -39,6 +39,27 @@ def test_workbench_publish_survives_rerun(tmp_path, monkeypatch):
     assert app.metric[1].value == "2"
 
 
+def test_comparison_shows_all_candidates_and_publishes_the_chosen_one(tmp_path, monkeypatch):
+    app = workbench(tmp_path, monkeypatch)
+    app.button(key="generate").click().run()
+    assert not app.exception
+    candidates = app.session_state.candidates
+    assert len(app.get("plotly_chart")) == len(candidates) + 1
+    comparison = next(table.value for table in app.dataframe if "原计划" in table.value.columns)
+    assert all(item.label in comparison.columns for item in candidates)
+    assert any(
+        row[candidates[0].label] != row[candidates[1].label] for _, row in comparison.iterrows()
+    )
+    chosen = candidates[1]
+    app.selectbox(key="candidate").set_value(chosen.label).run()
+    app.text_input(key="reason").set_value("比较后接受设备转移").run()
+    app.radio(key="action").set_value("确认发布").run()
+    app.button(key="decide").click().run()
+    assert not app.exception
+    store = DecisionStore(tmp_path / ".data/decisions.sqlite3", demo_schedule())
+    assert store.current() == chosen.schedule
+
+
 def test_edit_discards_candidates_without_changing_plan_and_save_invalidates_revision(
     tmp_path, monkeypatch
 ):

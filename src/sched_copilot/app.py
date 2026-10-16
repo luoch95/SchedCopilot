@@ -58,7 +58,7 @@ def _frame(schedule):
     )
 
 
-def _gantt(schedule, failure=None):
+def _gantt(schedule, failure=None, *, time_range=None):
     fig = px.timeline(
         _frame(schedule),
         x_start="开始",
@@ -77,6 +77,8 @@ def _gantt(schedule, failure=None):
     fig.update_layout(
         margin=dict(l=8, r=8, t=35, b=8), legend_title_text="订单", xaxis_title="时间（UTC+08:00）"
     )
+    if time_range:
+        fig.update_xaxes(range=[_local(value) for value in time_range])
     if failure:
         row = machine_ids.index(failure.machine_id)
         end = failure.recovered_at or max(
@@ -105,6 +107,134 @@ def _gantt(schedule, failure=None):
             font=dict(color="#A9432D"),
         )
     return fig
+
+
+def _difference_table(rows, columns):
+    """Highlight disagreements across candidates, keeping equal values neutral."""
+    frame = _table(rows)
+
+    def highlight(row):
+        different = len({row[column] for column in columns}) > 1
+        return [
+            "background-color: #FFF0C2; color: #684900; font-weight: bold"
+            if different and column in columns
+            else ""
+            for column in row.index
+        ]
+
+    return frame.style.apply(highlight, axis=1)
+
+
+def _comparison(baseline, candidates, failure, orders):
+    st.subheader("方案比较")
+    st.caption("绿色：该指标较优；红色：较差；黄色：方案之间不同。数值相同不着色。")
+    summary = pd.DataFrame(
+        [
+            {
+                "方案": item.label,
+                "延期订单": item.metrics.late_orders,
+                "累计延期(分钟)": item.metrics.total_lateness_minutes,
+                "移动工序": item.metrics.moved_operations,
+                "计划完工": _local(item.metrics.makespan),
+            }
+            for item in candidates
+        ]
+    )
+
+    def rank(values):
+        if values.nunique() < 2:
+            return [""] * len(values)
+        return [
+            "background-color: #DCF3E4; color: #14532D"
+            if value == values.min()
+            else "background-color: #FCE2E2; color: #8B2020"
+            if value == values.max()
+            else ""
+            for value in values
+        ]
+
+    st.dataframe(
+        summary.style.apply(rank, subset=list(summary.columns[1:])).format(
+            {"计划完工": lambda value: value.strftime("%m-%d %H:%M")}
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.caption("指标各有取舍：移动工序少代表调整少，不代表交付一定更好。")
+    time_range = (
+        min(op.start for op in baseline.operations),
+        max(
+            failure.recovered_at,
+            max(op.end for op in baseline.operations),
+            *(op.end for item in candidates for op in item.schedule.operations),
+        ),
+    )
+    for column, item in zip(st.columns(len(candidates)), candidates):
+        with column:
+            st.markdown(f"### {item.label}")
+            st.plotly_chart(
+                _gantt(item.schedule, failure, time_range=time_range),
+                key=f"candidate-gantt-{item.id}",
+                width="stretch",
+                config={"displayModeBar": False},
+            )
+    st.caption("各方案使用相同时间范围；悬停甘特条可查看任务、状态和起止时间。")
+
+    def slot(op):
+        return f"{op.machine_id} · {op.start:%m-%d %H:%M} → {op.end:%m-%d %H:%M}"
+
+    labels = [item.label for item in candidates]
+    schedules = [{op.id: op for op in item.schedule.operations} for item in candidates]
+    rows = []
+    for op in baseline.operations:
+        if any(schedule[op.id] != op for schedule in schedules):
+            rows.append(
+                {
+                    "工序": op.id,
+                    "原计划": slot(op),
+                    **{label: slot(schedule[op.id]) for label, schedule in zip(labels, schedules)},
+                }
+            )
+    st.subheader("工序调整对照")
+    st.caption("汇总任一方案发生变化的工序；黄色单元格表示两套方案安排不同。")
+    if rows:
+        st.dataframe(_difference_table(rows, labels), width="stretch", hide_index=True)
+    else:
+        st.info("所有方案均未改变工序安排。")
+
+    impacts = [order_impacts(baseline, item, orders) for item in candidates]
+    rows = []
+    for index, order in enumerate(orders):
+        original = impacts[0][index]
+        rows.append(
+            {
+                "订单": order.id,
+                "交期": order.due,
+                "原完工": original["原完工"],
+                **{
+                    label: (
+                        f"{impact[index]['新完工']:%m-%d %H:%M} · "
+                        f"延期 {impact[index]['新延期(分钟)']} 分钟 · "
+                        f"新增 {impact[index]['新增延期(分钟)']:+d} 分钟"
+                    )
+                    for label, impact in zip(labels, impacts)
+                },
+            }
+        )
+    st.subheader("订单交付对照")
+    st.dataframe(_difference_table(rows, labels), width="stretch", hide_index=True)
+    st.subheader("工序变化与影响链")
+    for column, item in zip(st.columns(len(candidates)), candidates):
+        with column:
+            st.markdown(f"**{item.label}**")
+            changes = operation_changes(baseline, item, failure)
+            if changes:
+                st.dataframe(_table(changes), width="stretch", hide_index=True)
+            else:
+                st.info("该方案没有改变任何工序。")
+            st.markdown("**证据与假设**")
+            for evidence in (*item.evidence, *item.assumptions):
+                st.write(f"- {evidence}")
 
 
 def _reload_editor():
@@ -363,45 +493,7 @@ def main():
         _history(store)
         return
 
-    st.subheader("方案比较")
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {
-                    "方案": item.label,
-                    "延期订单": item.metrics.late_orders,
-                    "累计延期(分钟)": item.metrics.total_lateness_minutes,
-                    "移动工序": item.metrics.moved_operations,
-                    "计划完工": item.metrics.makespan.strftime("%m-%d %H:%M"),
-                }
-                for item in candidates
-            ]
-        ),
-        width="stretch",
-        hide_index=True,
-    )
-    label = st.selectbox("查看候选方案", [item.label for item in candidates], key="candidate")
-    selected = next(item for item in candidates if item.label == label)
-    st.plotly_chart(
-        _gantt(selected.schedule, failure),
-        key="candidate-gantt",
-        width="stretch",
-        config={"displayModeBar": False},
-    )
-    changes = operation_changes(baseline, selected, failure)
-    st.subheader("工序变化与影响链")
-    if changes:
-        st.dataframe(_table(changes), width="stretch", hide_index=True)
-        st.caption("影响链来自求解过程中的前序等待、设备占用及故障约束；策略调整单独标记。")
-    else:
-        st.info("该候选没有改变任何工序。")
-    st.subheader("订单交付影响")
-    st.dataframe(
-        _table(order_impacts(baseline, selected, orders)), width="stretch", hide_index=True
-    )
-    with st.expander("证据与假设"):
-        for item in (*selected.evidence, *selected.assumptions):
-            st.write(f"- {item}")
+    _comparison(baseline, candidates, failure, orders)
 
     with st.expander("AI 辅助分析"):
         live = st.toggle("启用 API 多 Agent", value=False, key="live")
@@ -435,6 +527,8 @@ def main():
                 st.code(report, language="text")
 
     st.subheader("人工确认")
+    label = st.selectbox("本次处理的方案", [item.label for item in candidates], key="candidate")
+    selected = next(item for item in candidates if item.label == label)
     reason = st.text_input("确认理由（必填）", key="reason", placeholder="说明接受的代价与选择理由")
     action = st.radio("处理方式", ["暂不发布", "确认发布"], horizontal=True, key="action")
     unchanged = action == "确认发布" and selected.metrics.moved_operations == 0
