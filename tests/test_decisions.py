@@ -123,3 +123,33 @@ def test_legacy_database_event_is_migrated_once(tmp_path):
     assert store.active_event() == (event, 1)
     reopened = DecisionStore(path, demo_schedule())
     assert reopened.active_event() == (event, 1)
+
+
+def test_recovery_appends_event_preserves_plan_and_rejects_old_candidate(context):
+    store, event, candidates = context
+    store.record_event(replace(event, started_at=EVENT_TIME - timedelta(hours=1)))
+    revision = store.recover_event(demo_machines(), demo_orders(), event)
+    assert revision == 3
+    assert store.active_event() == (event, 3)
+    assert store.current() == demo_schedule()
+    with pytest.raises(ValueError, match="事件版本"):
+        store.decide(candidates[0], event, demo_machines(), "publish", "旧方案", "old")
+    assert store.recover_event(demo_machines(), demo_orders(), event) == 3
+
+
+def test_recovery_preserves_published_plan_and_decision_history(context):
+    store, event, candidates = context
+    store.decide(candidates[1], event, demo_machines(), "publish", "接受转机", "published")
+    published, history = store.current(), store.history()
+    store.record_event(replace(event, started_at=EVENT_TIME - timedelta(hours=1)))
+    store.recover_event(demo_machines(), demo_orders(), event)
+    assert store.current() == published
+    assert store.history() == history
+
+
+def test_recovery_uses_example_when_all_saved_events_are_invalid(tmp_path):
+    store = DecisionStore(tmp_path / "recover.sqlite3", demo_schedule())
+    example = MachineFailure("M1", EVENT_TIME, EVENT_TIME + timedelta(hours=4), "示例", EVENT_TIME)
+    store.record_event(replace(example, started_at=EVENT_TIME - timedelta(hours=1)))
+    assert store.recover_event(demo_machines(), demo_orders(), example) == 2
+    assert store.active_event()[0] == example

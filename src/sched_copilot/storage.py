@@ -11,11 +11,12 @@ from .domain import (
     Machine,
     MachineFailure,
     Operation,
+    Order,
     Schedule,
     TaskStatus,
     digest,
 )
-from .scheduling import validate_schedule
+from .scheduling import generate_candidates, validate_schedule
 
 
 def schedule_json(schedule: Schedule) -> str:
@@ -30,6 +31,13 @@ def parse_schedule(payload: str) -> Schedule:
         raw["status"] = TaskStatus(raw["status"])
         operations.append(Operation(**raw))
     return Schedule(data["version"], tuple(operations))
+
+
+def parse_event(payload: str) -> MachineFailure:
+    data = json.loads(payload)
+    for field in ("started_at", "recovered_at", "received_at"):
+        data[field] = datetime.fromisoformat(data[field]) if data[field] else None
+    return MachineFailure(**data)
 
 
 class DecisionStore:
@@ -84,10 +92,42 @@ class DecisionStore:
             ).fetchone()
         if not row:
             return None
-        data = json.loads(row[0])
-        for field in ("started_at", "recovered_at", "received_at"):
-            data[field] = datetime.fromisoformat(data[field]) if data[field] else None
-        return MachineFailure(**data), row[1]
+        return parse_event(row[0]), row[1]
+
+    def recover_event(
+        self,
+        machines: tuple[Machine, ...],
+        orders: tuple[Order, ...],
+        fallback: MachineFailure,
+    ) -> int:
+        """Restore the newest simulatable event without reverting plan or audit history."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            baseline = parse_schedule(
+                conn.execute("SELECT payload FROM current_plan WHERE id=1").fetchone()[0]
+            )
+            history = conn.execute(
+                "SELECT revision, payload FROM event_history ORDER BY revision DESC"
+            ).fetchall()
+            options = [parse_event(row[1]) for row in history] + [fallback]
+            for event in options:
+                try:
+                    generate_candidates(baseline, event, machines, orders)
+                except ValueError:
+                    continue
+                if history and digest(event) == digest(parse_event(history[0][1])):
+                    return history[0][0]
+                payload = json.dumps(asdict(event), default=str, ensure_ascii=False)
+                conn.execute(
+                    "INSERT OR REPLACE INTO current_event VALUES (1, ?, ?)",
+                    (digest(event), payload),
+                )
+                cursor = conn.execute(
+                    "INSERT INTO event_history VALUES (NULL, ?, ?, ?)",
+                    (digest(event), payload, datetime.now(timezone.utc).isoformat()),
+                )
+                return cursor.lastrowid
+            raise ValueError("当前执行记录没有可恢复的试算事件，请检查计划数据")
 
     def record_event(self, event: MachineFailure, expected_revision: int | None = None) -> int:
         fingerprint = digest(event)

@@ -189,3 +189,36 @@ def test_unknown_recovery_hides_time_fields_and_reentry_restores_comparison(tmp_
     app.button(key="generate").click().run()
     assert not app.exception
     assert app.button(key="decide")
+
+
+def test_recover_after_repeated_invalid_saves_restores_comparison(tmp_path, monkeypatch):
+    app = workbench(tmp_path, monkeypatch)
+    app.time_input(key="failure_recovery").set_value(time(18)).run()
+    app.button(key="save_event").click().run()
+    for hour in (12, 14):
+        app.time_input(key="failure_start").set_value(time(hour)).run()
+        app.button(key="save_event").click().run()
+        assert app.button(key="generate").disabled
+    app.button(key="recover_event").click().run()
+    assert not app.exception
+    assert app.time_input(key="failure_start").value == time(13)
+    assert app.time_input(key="failure_recovery").value == time(18)
+    assert not app.button(key="generate").disabled
+    app.button(key="generate").click().run()
+    assert app.button(key="decide")
+    store = DecisionStore(tmp_path / ".data/decisions.sqlite3", demo_schedule())
+    assert store.current() == demo_schedule()
+
+
+def test_recover_discards_invalid_unsaved_fields_and_unknown_time(tmp_path, monkeypatch):
+    app = workbench(tmp_path, monkeypatch)
+    app.checkbox(key="recovery_unknown").check().run()
+    app.button(key="save_event").click().run()
+    app.text_input(key="failure_source").set_value("").run()
+    assert app.button(key="save_event").disabled
+    app.button(key="recover_event").click().run()
+    assert not app.exception
+    assert not app.checkbox(key="recovery_unknown").value
+    assert app.text_input(key="failure_source").value
+    app.button(key="generate").click().run()
+    assert app.button(key="decide")

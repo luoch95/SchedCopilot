@@ -112,11 +112,36 @@ def _reload_editor():
         st.session_state.pop(key, None)
 
 
-def _event_editor(store, machines, active, revision):
+def _recover_event(store, machines, orders):
+    example = MachineFailure(
+        "M1", EVENT_TIME, EVENT_TIME + timedelta(hours=4), "计划员手动录入", EVENT_TIME
+    )
+    try:
+        store.recover_event(machines, orders, example)
+        _reload_editor()
+        for key in ("candidates", "reports", "report_token", "reason", "analysis_token"):
+            st.session_state.pop(key, None)
+        st.session_state.notice = (
+            "已恢复可试算事件。正式计划与历史记录均保留，点击“生成候选方案”继续。"
+        )
+    except ValueError as exc:
+        st.session_state.recovery_error = str(exc)
+
+
+def _event_editor(store, machines, orders, active, revision):
     st.sidebar.header("设备故障事件")
     with st.sidebar:
         st.caption("仿真快照：10-19 13:00，UTC+08:00。当前仅编辑一条故障事件，切换设备会替换事件。")
         st.button("重新载入已保存事件", on_click=_reload_editor, key="reload_event")
+        st.button(
+            "恢复上次可试算事件",
+            key="recover_event",
+            on_click=_recover_event,
+            args=(store, machines, orders),
+            help="恢复最近一个满足当前执行记录的事件；无可用历史时尝试初始示例。保留正式计划和全部历史。",
+        )
+        if st.session_state.get("recovery_error"):
+            st.error(st.session_state.pop("recovery_error"))
         st.session_state.setdefault("editor_revision", revision)
         stale = st.session_state.editor_revision != revision
         ids = [machine.id for machine in machines]
@@ -204,7 +229,7 @@ def main():
         except ValueError:
             pass  # Another local session initialized the event first.
     failure, revision = store.active_event()
-    dirty = _event_editor(store, machines, failure, revision)
+    dirty = _event_editor(store, machines, orders, failure, revision)
     token = (baseline.fingerprint, revision)
     if dirty or st.session_state.get("analysis_token") != token:
         for key in ("candidates", "reports", "report_token", "reason"):
@@ -259,7 +284,8 @@ def main():
         st.warning(
             "当前事件已保存，但与执行记录冲突，暂不能生成方案比较。"
             "本案例是10月19日13:00的固定报工快照，修改故障时间不会回退或推进工序状态。"
-            "请在左侧修正事件并再次保存；若要模拟加工中故障，需要先定义在制品处置规则。"
+            "可点击左侧“恢复上次可试算事件”继续，或手动修正后保存。"
+            "若要模拟加工中故障，需要先定义在制品处置规则。"
         )
         conflicts = [
             op
