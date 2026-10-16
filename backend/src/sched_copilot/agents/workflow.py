@@ -108,7 +108,7 @@ def run_analysis(
         for message in reversed(response["messages"]):
             if getattr(message, "type", "") != "ai":
                 continue
-            content = str(getattr(message, "content", "")).strip()
+            content = str(getattr(message, "text", getattr(message, "content", ""))).strip()
             if content:
                 return content
         raise ValueError("Agent 未生成最终文本，本次分析不予展示")
