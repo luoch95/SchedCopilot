@@ -44,6 +44,8 @@ GitHub 发布前先确认仓库根目录、许可证和公开内容。没有远�
 
 指标必须写明样本、基线、运行环境与测量方式。不得将个人仿真结果包装为企业生产收益。
 
-## 下一项任务：M0
+## 当前开发入口
 
-交付最小车间案例、数据字典及手工可核对的正常计划与故障结果。通过这个案例确认业务语义，再确定接口与数据库结构。
+主界面已迁移为 React + FastAPI，见 [ADR 0003](decisions/0003-react-fastapi.md) 和根目录 README 的双终端启动方式。前端修改在 `frontend/`，后端接口在 `src/sched_copilot/api.py`，排程等业务模块保留在 Python 包中。Streamlit 仅作为旧版参考。
+
+前端运行 `npm --prefix frontend run format:check`、`npm --prefix frontend test` 和 `npm --prefix frontend run build`；后端运行 Ruff、pytest 和 uv build。CI 分别执行两组检查。业务规则不得搬到前端作为唯一校验，人工发布必须经过后端版本与约束校验。
