@@ -1,5 +1,10 @@
 # Temporary tools and generated inspection artifacts
 /tmp/
+/.data/
+/.uv-cache/
+/build/
+/*.egg-info/
+.streamlit/secrets.toml
 
 # Python
 __pycache__/
