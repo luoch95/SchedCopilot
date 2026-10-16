@@ -9,9 +9,8 @@ export function ImpactChains({ candidates }: { candidates: Candidate[] }) {
       <h3 className="block-title">工序变化与影响链</h3>
       <div className="impact-type-legend" aria-label="影响类型图例">
         {IMPACT_TYPES.map((type) => {
-          const active = candidates.some((candidate) =>
-            candidate.changes.some((change) => change.类型 === type),
-          );
+          // Keep every impact type visible; direct impact is the primary legend state.
+          const active = type === '直接影响';
           return (
             <span className={active ? 'impact-type active' : 'impact-type dim'} key={type}>
               <i />
@@ -31,6 +30,7 @@ export function ImpactChains({ candidates }: { candidates: Candidate[] }) {
                   {IMPACT_TYPES.map((type) => (
                     <span
                       className={`impact-type-badge ${type === change.类型 ? 'active' : 'dim'}`}
+                      aria-current={type === change.类型 ? 'true' : undefined}
                       key={type}
                     >
                       {type}

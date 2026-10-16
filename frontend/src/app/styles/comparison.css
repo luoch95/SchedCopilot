@@ -110,7 +110,8 @@
 
 .impact-type.dim,
 .impact-type-badge.dim {
-  opacity: 0.35;
+  color: #71848e;
+  opacity: 0.72;
 }
 
 .impact-type-options {
@@ -122,6 +123,7 @@
 
 .impact-type-badge {
   padding: 2px 6px;
+  border: 1px solid #dce6ea;
   border-radius: 3px;
   font-size: 10px;
   font-weight: 500;
@@ -130,7 +132,9 @@
 
 .impact-type-badge.active {
   color: #2e748c;
+  border-color: #b8d7e1;
   background: #e5f1f5;
+  font-weight: 700;
 }
 .chain-card h4 {
   margin-bottom: 13px;
