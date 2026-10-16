@@ -1,0 +1,27 @@
+# Temporary tools and generated inspection artifacts
+/tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Frontend
+node_modules/
+dist/
+
+# Local configuration and runtime data
+.env
+.env.*
+!.env.example
+*.log
+*.sqlite
+*.sqlite3
+
+# Operating system
+.DS_Store
+Thumbs.db
