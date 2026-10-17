@@ -12,7 +12,8 @@ ALLOWED = {
     "domain": {"domain"},
     "application": {"application", "domain"},
     "infrastructure": {"infrastructure", "domain"},
-    "agents": {"agents", "domain"},
+    "agents": {"agents", "domain", "prompts"},
+    "prompts": {"prompts"},
     "scenarios": {"scenarios", "domain"},
 }
 
@@ -40,7 +41,7 @@ def test_backend_layer_dependencies(layer):
                 assert dependency in ALLOWED[layer], (
                     f"{path.name}: {layer} must not import {module}"
                 )
-            elif layer in {"domain", "application", "scenarios"}:
+            elif layer in {"domain", "application", "scenarios", "prompts"}:
                 assert module.split(".")[0] in sys.stdlib_module_names, (
                     f"{path.name}: framework dependency {module} is not allowed in {layer}"
                 )
