@@ -37,6 +37,7 @@
 - [任务记录](docs/tasks.md)
 - [第一阶段验收清单](docs/first-stage-acceptance.md)
 - [四阶段路线](docs/roadmap.md)
+- [四类 Agent 定义](docs/agent-definitions.md)
 - [故障录入与影响分析验收](docs/failure-impact.md)
 
 ## 本地运行
