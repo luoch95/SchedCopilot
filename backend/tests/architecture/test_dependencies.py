@@ -12,7 +12,8 @@ ALLOWED = {
     "domain": {"domain"},
     "application": {"application", "domain"},
     "infrastructure": {"infrastructure", "domain"},
-    "agents": {"agents", "domain", "prompts"},
+    "agents": {"agents", "domain", "prompts", "tools"},
+    "tools": {"tools", "domain", "agents"},
     "prompts": {"prompts"},
     "scenarios": {"scenarios", "domain"},
 }
@@ -58,3 +59,10 @@ def test_only_infrastructure_can_import_database_drivers():
         if "infrastructure" in path.relative_to(PACKAGE).parts:
             continue
         assert not any(module.startswith("sqlite3") for module in imported_modules(path)), path
+
+
+def test_tools_can_import_agent_contracts_but_not_agent_execution():
+    for path in (PACKAGE / "tools").rglob("*.py"):
+        for module in imported_modules(path):
+            if module.startswith("sched_copilot.agents"):
+                assert module.startswith("sched_copilot.agents.contracts."), path

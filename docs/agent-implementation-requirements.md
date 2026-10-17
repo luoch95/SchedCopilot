@@ -530,3 +530,76 @@ result = validate_result(raw_response_text, request, prompt)
 本轮完成数据契约和可独立调用的校验入口，没有接入现有 API 或旧三角色工作流，没有实现四 Agent、工具绑定、动态编排、人工决策变更或真实模型验收。
 
 验证文件：`backend/tests/unit/test_agent_contracts.py`；验证内容包括四角色有效输出、阻断结果、严格 JSON、非法字段与类型、空报告、完整上下文匹配、过期证据、无效引用、工具结果改写、上游校验、候选完整性及解释取舍条件。
+
+## 17. V1.1 数据校验 Agent 实现记录
+
+### 17.1 实现结构
+
+```text
+agents/validation_agent.py  # 调用工具、整理状态和通知、校验报告
+tools/validation.py        # 契约转换、结构化证据和规则结果适配
+domain/validation.py       # 数据完整性、资源/报工、事件规则
+```
+
+`tools/` 与 `agents/`、`prompts/` 平级。工具层只引用 Agent 的 contracts，不引用 Agent 执行逻辑。领域规则保持纯 Python 标准库依赖；沿用 `domain/scheduling.py` 的基线约束检查，不解析旧中文错误文本来推断业务状态。
+
+数据校验 Agent 独立运行，不调用大模型，也不直接调用其他 Agent。Prompt Loader 用于载入角色定义及记录模板版本和哈希；业务放行由确定性工具判断，不能让模型改变校验级别。
+
+### 17.2 调用接口
+
+```python
+from sched_copilot.agents.validation_agent import ValidationAgent
+
+# request 为已构造的 ValidationInput。
+# current_context 必须由调用方从当前可信快照中读取。
+run = ValidationAgent().run(request, expected_context=current_context)
+report = run.result
+evidence_catalog = run.request.evidence_catalog
+```
+
+返回 `ValidationRun`：
+
+- request：包含本次真实工具结果和新增证据的输入副本；
+- result：通过 V1.1 运行时校验的 ValidationResult；
+- prompt_sha256：实际加载模板的内容哈希。
+
+Agent 不修改调用方的输入，不写数据库，不保存或发布计划。不得丢弃新证据后仅把报告字符串传给下游。后续编排器可将完整 report 注册为新证据，并用该引用构造 SchedulingInput。
+
+`expected_context` 在独立离线试验时可省略；接入应用后应提供当前可信上下文。Agent 自身不读取数据库，也不能发现传入上下文本身已经过期。写入结果或调用下游前，应用层仍须确认当前版本未变化。
+
+### 17.3 当前规则覆盖
+
+| 分类 | 检查内容 |
+| --- | --- |
+| 输入完整性 | 订单、设备、工序、故障缺失及各类记录 ID 重复 |
+| 基线计划 | 设备能力、设备工序重叠、工序先后、重复工序序号 |
+| 记录引用 | 工序订单、实体模具、模具兼容设备是否存在 |
+| 资源资格 | 设备不可用且无故障窗口、模具与当前设备不兼容 |
+| 报工状态 | 快照前应开工却仍未开工、已完成/加工中状态与计划时间冲突、加工超时但无剩余时间 |
+| 故障时间 | 故障设备存在、接收时间不早于发生时间、预计恢复时间已知且晚于发生时间 |
+| 事件质量 | 重复故障窗口、事件之前应开工却仍未开工 |
+| 支持范围 | 多故障联合输入、加工中故障是否超出执行工具能力 |
+
+待开工工序与故障窗口重叠是生成新方案的原因，不作为基线校验错误。工序恰好在故障时刻开始，允许继续；已完成工序恰好在故障时刻结束，不误报加工中故障。
+
+实体模具未提供时，返回 `MOLD_ASSIGNMENT_MISSING` 警告，只能按已有设备能力进行受限试算，并在 unchecked_items 标记实体模具兼容未检查。提供实体模具但记录缺失或明确不兼容时阻断。不能把模具族能力当作已验证实体模具库存和占用。
+
+未知恢复时间返回 `RECOVERY_TIME_UNKNOWN` 阻断；不补造时间。恢复时间始终是人工估计，不代表已经恢复。
+
+### 17.4 支持边界与异常
+
+- 当前候选工具仅支持单故障。多个故障返回 `MULTIPLE_FAILURES_UNSUPPORTED`，重复窗口另报 `DUPLICATE_EVENT`，不假装完成联合校验后即可生成候选。
+- 加工中故障缺规则返回 `WIP_POLICY_REQUIRED`；即使填写处置文本，现有执行工具仍不能处理，返回 `WIP_POLICY_UNSUPPORTED`。这项业务能力尚未完成。
+- 班次、物料、人员、模具保养、实体模具占用及换型时长均标记为未检查，不能将 can_generate_candidates 理解为真实车间全面放行。
+- 成功、警告和阻断由问题清单确定。阻断报告保留问题、业务影响、修复建议和证据，工具异常或无效结果返回 failed，data 为 null。
+- 输入契约、旧版本或旧证据不合法，在调用工具前拒绝；提供 expected_context 时，版本冲突也在工具前拒绝。
+- 传入的旧 validation_tool_result 不作为本次判定来源，每次重新运行规则。
+- 工具报告必须对应本次 case_data，证据上下文必须匹配；发生引用冲突、未知引用或无效结果时不放行。
+- 证据 ID 由案例内容、完整上下文和规则版本共同确定，重复运行可追溯，不同版本不会共用同一证据 ID。报告同时引用输入和规则版本记录。
+- 工具异常不回传原始异常或敏感输入；日志仅记录异常类型。
+
+### 17.5 验证与后续
+
+场景测试：`backend/tests/unit/test_validation_agent.py`。覆盖正常试算、缺失数据、重复记录、未知恢复、模具兼容、设备状态、报工冲突、在制品边界、多故障阻断、工具异常、证据错误、重复运行和输入不变性。现有注塑案例在未提供实体模具时返回可解释警告，可以继续受限试算。
+
+本轮完成独立的数据校验 Agent、规则工具和测试；未接入 API、页面或旧三角色工作流。后续实现排产执行 Agent，再通过动态编排器将校验与候选生成串接到实际需要的路径中。
