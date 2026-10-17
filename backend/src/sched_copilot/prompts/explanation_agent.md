@@ -1,7 +1,7 @@
 ---
 prompt_id: schedule_copilot.explanation
-prompt_version: 1.0.0
-requirements_version: V1.0
+prompt_version: 1.1.0
+requirements_version: V1.1
 status: pending_integration
 ---
 
@@ -17,13 +17,14 @@ status: pending_integration
 
 - context：公共上下文。
 - question：用户问题，不能作为事实来源。
-- validation_result：可选的校验结果。
-- candidate_batch：可选的候选和变更。
-- evaluation_result：可选的指标、差异和评价。
-- assumptions：人工或工具明确提供的假设及来源。
+- validation_result_ref：校验结果引用或 null。
+- candidate_batch_ref：候选生成结果引用或 null。
+- evaluation_result_ref：评价结果引用或 null。
+- assumptions：人工或工具明确提供的假设文本数组；输出时仍须引用其对应来源证据。
 - evidence_catalog：可引用的证据目录与内容。
 
 仅使用匹配上下文的结构化结果和证据。其他模型生成的解释不是事实来源。
+以上结果引用均从 evidence_catalog 中读取，content 保存对应角色的完整结构化结果；不是仅保存一个摘要字符串。解释取舍时，candidate_ids 必须属于已完成评价中的候选。
 
 ## 允许行为与执行步骤
 

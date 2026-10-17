@@ -1,6 +1,6 @@
 # Schedule Copilot 四 Agent 实现需求
 
-> **文档版本：V1.0**
+> **文档版本：V1.1**
 >
 > **文档状态：开发基线**
 >
@@ -9,6 +9,15 @@
 > **适用范围：四 Agent 第一版实现**
 >
 > **唯一依据：后续代码、接口和测试以本版本及其后续明确版本为准**
+
+版本记录：
+
+| 版本 | 日期 | 变更 | 是否为当前基线 |
+| --- | --- | --- | --- |
+| V1.0 | 2026-10-17 | 四 Agent 功能、Prompt 草案和 Loader | 否，仅保留设计背景 |
+| V1.1 | 2026-10-17 | 冻结输入输出契约、结果引用方式和运行时校验；Prompt 升至 1.1.0 | 是 |
+
+V1.1 未改变四 Agent 的职责和第一版业务目标。正文早期的伪代码用于说明设计意图；涉及具体字段和调用接口时，以第 16 节及其列出的代码模型为准。
 
 版本变更规则：
 
@@ -392,7 +401,7 @@ Agent 代码通过 Prompt Loader 加载模板，业务数据作为独立 user �
 ```python
 from sched_copilot.prompts import PromptLoader
 
-prompt = PromptLoader(requirements_version="V1.0").load("validation")
+prompt = PromptLoader(requirements_version="V1.1").load("validation")
 response = llm.invoke(prompt.build_messages(input_data))
 result = parse_structured_result(response)
 ```
@@ -429,7 +438,7 @@ Prompt 只负责意图识别、解释和输出格式约束，不承载核心业�
 
 测试位于 `backend/tests/unit/test_prompt_loader.py`，覆盖四角色、不同启动目录、消息隔离、非法输入、资源缺失、版本冲突、无效模板以及修改后重载。
 
-本轮不替换旧三角色工作流，不实现结果 Schema 或调用真实模型；上面的 `parse_structured_result` 仍是后续实现示意。
+上述记录对应 V1.0。当时不替换旧三角色工作流，不实现结果 Schema 或调用真实模型；V1.1 已实现具体校验入口，见第 16 节。
 
 ### 文档引用规则
 
@@ -440,3 +449,84 @@ Prompt 只负责意图识别、解释和输出格式约束，不承载核心业�
 - 本文档：第一版功能范围、代码逻辑、共享状态、Prompt 管理和验收标准。
 
 任何新增 Agent 能力或职责变化，都应先更新上述文档，再修改代码、接口和测试。
+
+## 16. V1.1 输入输出契约与运行时校验（当前开发依据）
+
+### 16.1 文件职责
+
+```text
+backend/src/sched_copilot/agents/
+├── contracts/
+│   ├── __init__.py    # 四角色输入输出的公开导出
+│   ├── common.py      # 公共上下文、证据、状态、通知和事实陈述
+│   ├── inputs.py      # SchedulingCase 和四角色输入
+│   └── results.py     # 四角色输出与工具结果数据
+└── result_validation.py  # JSON、Schema、版本、引用和一致性校验入口
+```
+
+Pydantic 显式列入后端直接依赖，模型不放入 domain，避免领域规则依赖框架。模型采用严格类型，禁止额外字段；文本不可为空白，版本号和时间等字段有结构约束。输入输出模型可生成 JSON Schema，后续可提供给模型结构化输出功能。
+
+### 16.2 公共上下文与证据
+
+`AgentContext` 的五个字段均必填：`case_id`、`snapshot_id`、`event_version`、`current_plan_version`、`input_fingerprint`。其中事件版本为非负整数，其他字段为非空字符串。正常工作流不接受不完整上下文，不依赖模型补齐。
+
+证据目录为 `dict[reference_id, Evidence]`。Evidence 包含同一上下文、kind 和 JSON 内容 content。所有证据必须属于本次版本。完整校验、候选和评价结果可作为证据 content 保存；下游通过引用读取。输入中的 `*_ref`、`candidate_refs` 的值和所有 `evidence_refs` 均须存在于目录。
+
+### 16.3 角色输入
+
+| 输入模型 | 业务字段（另含 agent_name、context、evidence_catalog） |
+| --- | --- |
+| ValidationInput | intent、case_data、validation_tool_result |
+| SchedulingInput | validation_result_ref、current_plan_ref、user_constraints、allowed_strategies、wip_policy、scheduling_tool_result |
+| EvaluationInput | current_plan_ref、candidate_batch_id、candidate_refs、evaluation_criteria_ref、evaluation_tool_result |
+| ExplanationInput | question、validation_result_ref、candidate_batch_ref、evaluation_result_ref、assumptions |
+
+`SchedulingCase` 是通信快照 DTO，包含带时区的报工快照时间、订单、工序、设备、模具、故障列表和在制品规则。工序包含设备、模具、能力、开始时间、时长与报工状态。恢复时间明确命名为 `estimated_recovery_at`。结构可解析不表示业务正确：兼容、时间冲突、缺失设备等由后续确定性校验工具判断，不能在 DTO 中偷偷修正。
+
+策略使用 `Strategy` 模型：strategy_id、description、parameters。首版不虚构新的规则能力，Agent 只能使用调用方列出的策略。
+
+### 16.4 角色输出
+
+四个角色均使用公共顶层：agent_name、prompt_version、requirements_version、context、status、data、evidence_refs、warnings、errors。data 按角色使用 ValidationData、SchedulingData、EvaluationData 或 ExplanationData；所有字段以 `contracts/results.py` 为准。
+
+- 校验：允许生成标记、已检查项、未检查项与问题清单。
+- 排产：批次 ID、候选引用、假设和限制。
+- 评估：批次 ID、评价口径引用、逐候选指标与差异引用、风险和取舍。
+- 解释：摘要、事实、假设、风险、取舍、下一步与信息限制。
+
+事实、风险、假设和操作建议等条目必须具有证据引用。运行时只验证引用存在及版本匹配，不能据此保证自由文本在语义上一定被证据支持；语义忠实度仍需后续模型验收。
+
+### 16.5 校验入口与状态规则
+
+```python
+from sched_copilot.agents.result_validation import validate_request, validate_result
+from sched_copilot.prompts import PromptLoader
+
+prompt = PromptLoader(requirements_version="V1.1").load("explanation")
+request = validate_request(request_json, prompt)
+messages = prompt.build_messages(request.model_dump(mode="json"))
+# 后续 Agent 执行层调用模型获取 raw_response_text。
+result = validate_result(raw_response_text, request, prompt)
+```
+
+入口拒绝非单个 JSON 对象、代码围栏、重复键和非标准数值；不尝试从错误文本中静默提取 JSON。失败抛出带 code 的 `AgentContractError`，错误说明不包含原始业务数据或模型响应；后续执行层负责捕获并记录失败状态。
+
+- success/warning 必须有非空角色结果、顶层证据，且不能包含 errors。
+- warning 必须有明确 warnings；success 不能携带 warnings。
+- blocked/failed 必须有 errors；除校验可保留问题清单外，data 必须为 null，避免下游误用部分方案。
+- 输出上下文必须与输入完全一致，模型回传版本必须匹配实际模板。模板审计信息仍取自 LoadedPrompt。
+- 校验阻断不能允许生成候选；有校验警告不能返回无警告成功。
+- 校验、排产和评价的完成结果 data 必须与本次传入的确定性工具结果一致，模型不能改写工具字段。工具未执行时，只允许报告阻断或失败；未来执行层调用工具后需构造包含真实结果的新请求。
+- 排产需要当前版本的已完成校验结果，不接受阻断校验。候选 ID 不重复，策略必须在允许列表中；只有一个候选时必须 warning 并披露限制。
+- 评估必须覆盖请求的全部候选，批次和评价口径匹配，缺失指标必须 warning。
+- 解释上游阻断原因可以独立成功；解释候选取舍需提供已完成的完整评价结果，候选 ID 必须在其范围内。
+
+引用与上下文检查只对调用时提供的快照负责；如真实数据发生变化，编排器必须重新构造当前请求并使旧结果失效，不能仅凭先前通过的校验继续执行。
+
+### 16.6 版本与本轮边界
+
+当前需求基线为 V1.1，所有公共和角色 Prompt 均为 1.1.0，Loader 默认基线同步为 V1.1。V1.0 不再作为新接口实现依据。
+
+本轮完成数据契约和可独立调用的校验入口，没有接入现有 API 或旧三角色工作流，没有实现四 Agent、工具绑定、动态编排、人工决策变更或真实模型验收。
+
+验证文件：`backend/tests/unit/test_agent_contracts.py`；验证内容包括四角色有效输出、阻断结果、严格 JSON、非法字段与类型、空报告、完整上下文匹配、过期证据、无效引用、工具结果改写、上游校验、候选完整性及解释取舍条件。

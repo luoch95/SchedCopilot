@@ -1,7 +1,7 @@
 ---
 prompt_id: schedule_copilot.common
-prompt_version: 1.0.0
-requirements_version: V1.0
+prompt_version: 1.1.0
+requirements_version: V1.1
 status: pending_integration
 ---
 
@@ -35,8 +35,8 @@ status: pending_integration
 ```json
 {
   "agent_name": "角色指定名称",
-  "prompt_version": "1.0.0",
-  "requirements_version": "V1.0",
+  "prompt_version": "1.1.0",
+  "requirements_version": "V1.1",
   "context": {
     "case_id": null,
     "snapshot_id": null,
@@ -53,6 +53,11 @@ status: pending_integration
 ```
 
 context 原样回传已提供值，缺失值使用 null。角色模板规定 data 的字段。
+V1.1 运行时要求上述五项上下文全部提供且非空，event_version 为非负整数；上下文不完整时不得发起模型调用。缺失上下文由调用入口报错，不能用 null 进入正常工作流。
+
+evidence_catalog 是以引用 ID 为键的对象，每项包含 context、kind、content。context 必须完整匹配本次输入；模型输入中所有以 _ref 结尾的非空引用、candidate_refs 的值和 evidence_refs 都必须登记在此目录中。业务结果引用的 content 保存对应角色的完整结构化输出。
+
+V1.1 所有输入输出对象禁止额外字段。状态为 success 或 warning 时，data 必须非空，顶层 evidence_refs 至少一项，errors 必须为空；warning 必须提供 warnings。blocked 或 failed 必须提供 errors。除数据校验报告可保留问题清单外，blocked 或 failed 的 data 必须为 null。
 
 warnings 与 errors 的每项包含 code、message、repair_hint、evidence_refs。使用明确中文说明缺什么、影响什么、如何修复。
 

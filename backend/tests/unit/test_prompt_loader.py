@@ -15,8 +15,8 @@ def test_loads_role_with_common_instructions_and_file_metadata(role, monkeypatch
     prompt = PromptLoader().load(role)
     assert prompt.role_metadata.prompt_id == f"schedule_copilot.{role}"
     assert prompt.common_metadata.prompt_id == "schedule_copilot.common"
-    assert prompt.role_metadata.requirements_version == "V1.0"
-    assert prompt.role_metadata.prompt_version == "1.0.0"
+    assert prompt.role_metadata.requirements_version == "V1.1"
+    assert prompt.role_metadata.prompt_version == "1.1.0"
     assert "# 公共约束" in prompt.system_prompt
     assert f"agent_name 固定为 {role}" in prompt.system_prompt
     assert not prompt.system_prompt.startswith("---")
@@ -76,11 +76,11 @@ def test_missing_resource_fails_explicitly(editable_resources, name):
     [
         ("---", "", "missing metadata header"),
         ("prompt_id: schedule_copilot.validation", "prompt_id: wrong", "unexpected prompt_id"),
-        ("prompt_version: 1.0.0", "prompt_version: latest", "invalid prompt_version"),
-        ("requirements_version: V1.0", "requirements_version: V2.0", "expected requirements"),
+        ("prompt_version: 1.1.0", "prompt_version: latest", "invalid prompt_version"),
+        ("requirements_version: V1.1", "requirements_version: V2.0", "expected requirements"),
         ("status: pending_integration", "status: retired", "unsupported template status"),
-        ("prompt_version: 1.0.0", "prompt_version: 1.0.0\nprompt_version: 2.0.0", "duplicate"),
-        ("prompt_version: 1.0.0\n", "", "incomplete metadata"),
+        ("prompt_version: 1.1.0", "prompt_version: 1.1.0\nprompt_version: 2.0.0", "duplicate"),
+        ("prompt_version: 1.1.0\n", "", "incomplete metadata"),
     ],
 )
 def test_rejects_invalid_metadata(editable_resources, old, new, message):

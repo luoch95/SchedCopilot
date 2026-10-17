@@ -20,6 +20,8 @@
 
 ## Agent 开发约束
 
+当前四 Agent 开发基线为需求 V1.1、Prompt 1.1.0，详见 [实现需求第 16 节](agent-implementation-requirements.md)。调用前使用 `validate_request` 校验结构化输入，调用后使用 `validate_result` 校验结果；通过后才可用于下游，不能只依靠 Prompt 约束。
+
 Agent 之间使用 Agent Orchestrator 和结构化共享状态通信。禁止在 Agent 内部直接调用其他 Agent，也禁止把自然语言回复作为下游事实来源。
 
 每个 Agent 的输出必须包含状态、计划指纹、事件版本、结构化事实或结果、证据引用和失败信息。候选方案通过后端保存的批次 ID 传递，正式计划发布只能由人工决策用例完成。

@@ -96,9 +96,9 @@ class PromptLoader:
     not activate an Agent or certify model acceptance.
     """
 
-    def __init__(self, requirements_version: str = "V1.0") -> None:
+    def __init__(self, requirements_version: str = "V1.1") -> None:
         if not re.fullmatch(r"V\d+\.\d+", requirements_version):
-            raise ValueError("requirements_version must look like V1.0")
+            raise ValueError("requirements_version must look like V1.1")
         self.requirements_version = requirements_version
 
     def load(self, role: AgentRole) -> LoadedPrompt:

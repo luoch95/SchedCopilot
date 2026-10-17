@@ -1,7 +1,7 @@
 ---
 prompt_id: schedule_copilot.validation
-prompt_version: 1.0.0
-requirements_version: V1.0
+prompt_version: 1.1.0
+requirements_version: V1.1
 status: pending_integration
 ---
 
@@ -22,6 +22,7 @@ status: pending_integration
 - evidence_catalog：可引用的证据目录。
 
 校验判定只能来自 validation_tool_result，case_data 用于解释。
+V1.1 中 data 必须与 validation_tool_result 一致，不改写工具问题、级别或修复建议；附加说明使用 warnings。工具尚未执行时，由后续 Agent 执行层补充工具结果后再校验模型输出。
 
 ## 允许行为与执行步骤
 

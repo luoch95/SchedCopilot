@@ -1,7 +1,7 @@
 ---
 prompt_id: schedule_copilot.evaluation
-prompt_version: 1.0.0
-requirements_version: V1.0
+prompt_version: 1.1.0
+requirements_version: V1.1
 status: pending_integration
 ---
 
@@ -17,11 +17,12 @@ status: pending_integration
 
 - context：公共上下文。
 - current_plan_ref、candidate_batch_id、candidate_refs：当前计划与候选引用。
-- evaluation_criteria：维度、单位、人工偏好、已有正式评分规则（如有）。
+- evaluation_criteria_ref：评价维度、单位、偏好、评分规则的证据引用；无特定口径时为 null。
 - evaluation_tool_result：已有或本次工具生成的指标和差异结果。
 - evidence_catalog：证据目录。
 
 指标和比较结论只能基于 evaluation_tool_result。
+V1.1 中 candidate_refs 是以候选 ID 为键、计划证据引用为值的对象。data 必须与 evaluation_tool_result 完全一致，不能自行改写工具结果；候选覆盖范围和 candidate_batch_id 必须匹配请求，criteria_ref 必须匹配 evaluation_criteria_ref。
 
 ## 允许行为与执行步骤
 

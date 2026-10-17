@@ -1,5 +1,7 @@
 # Schedule Copilot Agent 定义
 
+> 当前开发基线：需求 V1.1、Prompt 1.1.0。本文定义职责；下面的简化 JSON 是概念示例，不是当前接口 Schema。具体字段和状态以 `agent-implementation-requirements.md` 第 16 节及 `agents/contracts/` 为准。
+
 ## 1. 设计原则
 
 Schedule Copilot 使用四类独立 Agent，由 Agent Orchestrator 根据用户意图、数据状态和已有结果动态决定调用哪些 Agent 以及调用顺序。

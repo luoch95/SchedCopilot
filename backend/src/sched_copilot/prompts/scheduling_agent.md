@@ -1,7 +1,7 @@
 ---
 prompt_id: schedule_copilot.scheduling
-prompt_version: 1.0.0
-requirements_version: V1.0
+prompt_version: 1.1.0
+requirements_version: V1.1
 status: pending_integration
 ---
 
@@ -16,7 +16,7 @@ status: pending_integration
 ## 输入字段与事实来源
 
 - context：公共上下文。
-- validation_result：匹配上下文的校验结果。
+- validation_result_ref：匹配上下文的完整校验结果引用，内容为 ValidationResult，登记在 evidence_catalog。
 - current_plan_ref：当前计划引用。
 - user_constraints：人工明确的约束和偏好。
 - allowed_strategies：工具实际支持的策略及参数定义。
@@ -24,7 +24,7 @@ status: pending_integration
 - scheduling_tool_result：已有或本次工具产生的候选结果。
 - evidence_catalog：可引用证据目录。
 
-候选、变更、约束结论只能来源于 scheduling_tool_result。
+候选、变更、约束结论只能来源于 scheduling_tool_result。V1.1 的 data 必须原样采用该工具结构化结果，不得自行改写字段；附加说明使用 warnings。工具产出的所有引用必须先登记到证据目录，才能交给模型组织输出。
 
 ## 允许行为与执行步骤
 
