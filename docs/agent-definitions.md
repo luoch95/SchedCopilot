@@ -17,6 +17,48 @@ Schedule Copilot 使用四类独立 Agent，由 Agent Orchestrator 根据用户�
 | 评估 Agent | 比较候选方案和交付风险 | 否 | 候选方案、指标、影响链、假设 |
 | 解释 Agent | 面向计划员解释事实、差异和风险 | 否 | 校验、候选和评估结果 |
 
+## 2.1 Agent 通信方式
+
+四个 Agent 通过 **Agent Orchestrator + typed shared state（结构化共享状态）** 通信，不直接互相调用。
+
+```text
+用户请求
+   ↓
+Agent Orchestrator
+   ↓
+结构化工作流状态
+   ├── 数据校验 Agent
+   ├── 排产执行 Agent
+   ├── 评估 Agent
+   └── 解释 Agent
+```
+
+Agent 的通信载体是带版本和来源的结构化结果，不是未经约束的自然语言。例如：
+
+```json
+{
+  "agent": "validation",
+  "status": "passed",
+  "snapshot": "plan-fingerprint",
+  "event_revision": 3,
+  "issues": [],
+  "facts": [],
+  "evidence_refs": []
+}
+```
+
+候选方案和完整证据保存在后端，后续 Agent 通过 `candidate_batch_id`、`candidate_id` 和 `evidence_refs` 引用，避免在 Agent 之间复制未经校验的大段文本。
+
+通信约束：
+
+- Agent 不直接调用其他 Agent，由编排器决定调用顺序。
+- 每个结果必须包含状态、计划指纹、事件版本和证据引用。
+- 过期或版本不匹配的结果不能被下游 Agent 使用。
+- Agent 失败、超时、空输出和无证据输出都必须写入状态。
+- Agent 不拥有发布正式计划的通信权限。
+
+当前本地实现使用 LangGraph `StateGraph` 管理工作流状态。后续接入实时事件流时，可以在不改变 Agent 契约的前提下，将状态持久化或接入消息队列。
+
 ## 3. 数据校验 Agent
 
 ### 职责
