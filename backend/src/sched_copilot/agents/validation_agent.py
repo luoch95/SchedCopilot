@@ -1,4 +1,4 @@
-"""Standalone data-validation Agent with an explicit deterministic tool boundary."""
+"""独立的数据校验 Agent，通过确定性工具执行规则校验。"""
 
 import json
 import logging
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ValidationRun:
-    """Keep the exact checked request and new evidence for downstream orchestration."""
+    """保存本次校验使用的完整请求和新增证据，供后续编排使用。"""
 
     request: ValidationInput
     result: ValidationResult
@@ -25,10 +25,10 @@ class ValidationRun:
 
 
 class ValidationAgent:
-    """Load the role definition, call rules, organize and verify the report.
+    """加载角色定义，调用规则工具，整理并校验报告。
 
-    No LLM, publication tool, persistence, or other Agent is invoked. This role
-    intentionally does not let a model decide whether business gates pass.
+    不调用大模型、发布工具、持久化组件或其他 Agent。
+    业务校验是否通过由确定性规则决定，不交给模型判断。
     """
 
     def __init__(
@@ -67,7 +67,7 @@ class ValidationAgent:
                 if ref in catalog and catalog[ref] != evidence:
                     raise AgentContractError("EVIDENCE_COLLISION", "工具证据引用与现有记录冲突。")
                 catalog[ref] = evidence
-            # Reparse: model_copy(update=...) by itself does not validate new values.
+            # 重新解析并校验：model_copy(update=...) 本身不会校验更新后的值。
             prepared = checked.model_dump(mode="json")
             prepared["evidence_catalog"] = {
                 k: v.model_dump(mode="json") for k, v in catalog.items()
@@ -109,7 +109,7 @@ class ValidationAgent:
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         except Exception as exc:
-            # Do not expose tool exceptions, which may contain business data or credentials.
+            # 原始工具异常可能包含业务数据或凭据，因此只记录异常类型。
             logger.warning("Validation tool execution failed: %s", type(exc).__name__)
             checked = original
             result = ValidationResult(
