@@ -603,3 +603,54 @@ Agent 不修改调用方的输入，不写数据库，不保存或发布计划�
 场景测试：`backend/tests/unit/test_validation_agent.py`。覆盖正常试算、缺失数据、重复记录、未知恢复、模具兼容、设备状态、报工冲突、在制品边界、多故障阻断、工具异常、证据错误、重复运行和输入不变性。现有注塑案例在未提供实体模具时返回可解释警告，可以继续受限试算。
 
 本轮完成独立的数据校验 Agent、规则工具和测试；未接入 API、页面或旧三角色工作流。后续实现排产执行 Agent，再通过动态编排器将校验与候选生成串接到实际需要的路径中。
+
+## 18. V1.1 排产执行 Agent 实现记录
+
+### 18.1 实现结构
+
+```text
+agents/scheduling_agent.py       # 前置条件、工具调用、结果状态和契约校验
+tools/scheduling_context.py      # 校验结果、案例快照、策略和设备资格准备
+tools/scheduling.py              # 候选生成、候选证据登记和独立复核
+domain/scheduling.py             # 既有确定性排产规则，新增策略筛选和设备资格参数
+agents/contracts/artifacts.py    # 候选计划、变更清单、约束检查证据模型
+```
+
+排产执行 Agent 不调用大模型、不调用其他 Agent、不修改数据库、不发布正式计划。它只接收当前案例的 `SchedulingInput`，读取已登记的完整 ValidationResult，调用确定性工具并返回候选引用。
+
+### 18.2 支持的策略
+
+V1.1 只实现并允许以下两个策略：
+
+- `wait-recovery`：故障设备等待人工预计恢复时间，再顺延受影响待开工工序；不转移设备。
+- `allow-transfer`：在设备能力、实体模具兼容、设备可用状态和现有占用约束满足时，转移到合格设备。
+
+候选生成沿用 `domain/scheduling.py` 的工序顺序、设备占用、故障窗口、固定已开工/已完成工序和原计划开工时间下界检查。每个候选再次独立校验，不接受工具只返回 `passed=true` 的声明。
+
+自由文本用户约束、换型顺序调整、换型时长参数、班次日历和物料等尚无确定性工具，返回 `USER_CONSTRAINTS_UNSUPPORTED` 或 `STRATEGY_UNSUPPORTED`，不让模型猜测执行。加工中故障、未知恢复时间、多故障等由校验前置条件阻断。
+
+### 18.3 候选证据
+
+工具为每个批次注册：
+
+- `candidate_plan`：完整候选工序快照；
+- `candidate_changes`：设备、开始/结束时间、影响类型、原因和影响链；
+- `candidate_constraints`：通过的检查项和未检查项；
+- `candidate_batch`：与 SchedulingData 完全一致的批次清单；
+- `scheduling_rules`：规则版本和仿真假设。
+
+候选通过 `candidate_batch_id`、`candidate_id`、`plan_ref`、`changes_ref`、`constraint_check_ref` 和证据引用传递。完整计划、变更清单和约束检查在证据目录中保存，不复制为下游自然语言。
+
+候选按完整工序安排指纹去重。两种策略生成相同计划时只保留一个候选，并返回 `DUPLICATE_PLAN_MERGED`；不得伪造两个方案满足比较数量。只有一个不同候选时返回 warning 和 `SINGLE_CANDIDATE`，没有候选时返回 blocked 和 `NO_FEASIBLE_CANDIDATE`。
+
+### 18.4 前置与失败处理
+
+- `prepare_scheduling` 先确认 ValidationResult 属于当前上下文、需求版本和规则版本，并重新运行确定性校验工具，防止旧报告授权新数据。
+- 校验失败、快照变化、策略为空/重复/未支持、策略参数未实现、自由文本约束、在制品规则变化或无候选时，不调用候选工具。
+- 候选工具输出必须与计划快照、变更清单、约束检查和批次清单互相一致；候选篡改工序定义、伪造资格、隐藏未检查项、变更引用或空结果会进入 failed。
+- 工具异常不返回原始异常和业务数据，只返回 `SCHEDULING_TOOL_FAILED`；业务前置不满足使用明确的 blocked 错误码。
+- 输入和输出保持不可变语义；工具接收深拷贝，重复执行同一上下文和策略产生相同候选和证据 ID。
+
+### 18.5 当前边界
+
+本轮完成排产执行 Agent、确定性候选适配、候选证据模型和测试；未接入 API、页面或动态编排器。现有页面仍调用旧三角色工作流。下一步实现评估 Agent，再统一编排四 Agent 的调用条件。

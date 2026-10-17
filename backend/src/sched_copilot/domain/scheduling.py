@@ -1,6 +1,7 @@
 """Deterministic tools shared by UI, agents and publication checks."""
 
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from .errors import RuleViolation
@@ -128,6 +129,7 @@ def _replan(
     machines: tuple[Machine, ...],
     orders: tuple[Order, ...],
     allow_transfer: bool,
+    eligible_machine_ids: Mapping[str, frozenset[str]] | None = None,
 ) -> tuple[Schedule, tuple[tuple[str, tuple[str, ...]], ...]]:
     occupied: dict[str, list[tuple[datetime, datetime, str]]] = defaultdict(list)
     root = f"故障:{failure.machine_id}"
@@ -169,6 +171,10 @@ def _replan(
         options = []
         original_blockers = ()
         for machine in machines:
+            if eligible_machine_ids is not None and machine.id not in eligible_machine_ids.get(
+                op.id, frozenset()
+            ):
+                continue
             if op.capability not in machine.capabilities:
                 continue
             if not allow_transfer and machine.id != op.machine_id:
@@ -221,7 +227,14 @@ def generate_candidates(
     machines: tuple[Machine, ...],
     orders: tuple[Order, ...],
     event_revision: int = 0,
+    *,
+    strategies: tuple[str, ...] = ("wait-recovery", "allow-transfer"),
+    eligible_machine_ids: Mapping[str, frozenset[str]] | None = None,
 ) -> tuple[CandidatePlan, ...]:
+    # 新入口按明确指定的策略执行；旧调用不传参数时保留原有两方案行为。
+    supported = {"wait-recovery", "allow-transfer"}
+    if not strategies or len(strategies) != len(set(strategies)) or set(strategies) - supported:
+        raise RuleViolation("排产策略为空、重复或尚未支持")
     if failure.recovered_at is None:
         raise RuleViolation("需要人工补充预计恢复时间，才能生成候选方案")
     issues = failure_issues(schedule, failure, machines)
@@ -233,8 +246,12 @@ def generate_candidates(
         ("wait-recovery", "原设备等待恢复", False),
         ("allow-transfer", "允许合格设备转移", True),
     ):
+        if strategy not in strategies:
+            continue
         if affected:
-            result, causes = _replan(schedule, failure, machines, orders, transfer)
+            result, causes = _replan(
+                schedule, failure, machines, orders, transfer, eligible_machine_ids
+            )
         else:
             result, causes = Schedule(schedule.version + 1, schedule.operations), ()
         errors = validate_schedule(result, machines, failure, schedule)
