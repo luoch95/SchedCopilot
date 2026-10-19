@@ -133,7 +133,21 @@ export interface WorkflowStatement {
   text: string;
   evidence_refs: string[];
 }
+export interface QualityIssue {
+  code: string;
+  message: string;
+  repairable: boolean;
+}
+export interface QualityReport {
+  version: string;
+  outcome: 'passed' | 'warning' | 'blocked' | 'failed';
+  round: number;
+  issues: QualityIssue[];
+  stop_reason: string | null;
+  history: { round: number; issues: QualityIssue[]; repair: string | null }[];
+}
 export interface WorkflowReport {
+  quality?: QualityReport | null;
   status: 'success' | 'warning' | 'blocked' | 'failed';
   warnings: WorkflowNotice[];
   errors: WorkflowNotice[];
@@ -159,6 +173,7 @@ export interface WorkflowReport {
   } | null;
 }
 export interface WorkflowResult {
+  demo?: DemoFallbackStatus;
   id: string;
   intent: WorkflowIntent;
   status: 'completed' | 'blocked' | 'failed';
@@ -178,6 +193,10 @@ export interface WorkflowResult {
       error_code: string | null;
       prompt_sha256: string;
       highlights: WorkflowStatement[];
+      failure_phase?: string | null;
+      failure_reason?: string | null;
+      corrections?: { phase: string; reason: string }[];
+      simulated?: boolean;
     } | null;
   }[];
   results: Partial<
@@ -190,10 +209,29 @@ export interface WorkflowResponse {
   simulation: Simulation | null;
 }
 
+export interface DemoFallbackStatus {
+  available: boolean;
+  remaining_seconds: number;
+  retry_at: string | null;
+}
+
 export type WorkflowAction = 'validate' | 'schedule' | 'evaluate' | 'explain';
 export type WorkflowProgressEvent =
   | { type: 'plan'; actions: WorkflowAction[] }
   | { type: 'stage_started'; action: WorkflowAction }
+  | {
+      type: 'quality_phase';
+      action: WorkflowAction;
+      phase: 'executing' | 'checking' | 'repairing';
+      round: number;
+    }
+  | {
+      type: 'quality_checked';
+      action: WorkflowAction;
+      round: number;
+      outcome: 'passed' | 'failed';
+      issues: QualityIssue[];
+    }
   | {
       type: 'stage_completed';
       action: WorkflowAction;
@@ -202,10 +240,16 @@ export type WorkflowProgressEvent =
       step: WorkflowResult['trace'][number];
     };
 export interface WorkflowProgress {
+  quality?: {
+    action: WorkflowAction;
+    phase: 'executing' | 'checking' | 'repairing' | 'checked';
+    round: number;
+  } | null;
   intent: WorkflowIntent;
   actions: WorkflowAction[];
   active: WorkflowAction | null;
   trace: WorkflowResult['trace'];
   results: WorkflowResult['results'];
   interrupted: boolean;
+  cancelled?: boolean;
 }

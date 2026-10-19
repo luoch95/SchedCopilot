@@ -17,7 +17,7 @@ from ..agents.contracts import (
 from ..agents.contracts.artifacts import CandidateChanges, CandidateSnapshot
 from ..agents.contracts.inputs import ProductionSnapshot
 from ..application.contracts import WorkflowOutcome
-from ..application.errors import InvalidInput, SnapshotConflict
+from ..application.errors import DemoCooldown, InvalidInput, SnapshotConflict
 from ..domain.models import CandidatePlan, Schedule, digest
 from ..domain.scheduling import metrics
 from .orchestrator import DynamicOrchestrator
@@ -27,12 +27,17 @@ from .state import WorkflowState
 class WorkflowEngine:
     """Sessions expire on restart/eviction; snapshot checks prevent stale reuse."""
 
-    def __init__(self, capacity=32, production_provider=None, orchestrator=None):
+    def __init__(self, capacity=32, production_provider=None, orchestrator=None, demo_gate=None):
         self._sessions = OrderedDict()
         self._lock = RLock()
         self._capacity = capacity
         self.orchestrator = orchestrator or DynamicOrchestrator()
         self.production_provider = production_provider or (lambda: None)
+        self.demo_gate = demo_gate
+
+    def _claim_demo(self):
+        if not self.demo_gate.claim():
+            raise DemoCooldown("兜底演示冷却中，20 分钟内只能触发一次。可关闭演示后正常生成。")
 
     def __call__(
         self,
@@ -47,7 +52,12 @@ class WorkflowEngine:
         question,
         workflow_id=None,
         on_progress=None,
+        demo_fallback=False,
     ):
+        if demo_fallback and (intent != "generate_candidates" or self.demo_gate is None):
+            raise InvalidInput("兜底演示仅支持已配置的候选生成流程")
+        if demo_fallback and not self.demo_gate.status()["available"]:
+            raise DemoCooldown("兜底演示冷却中，20 分钟内只能触发一次。可关闭演示后正常生成。")
         supplemental = self.production_provider()
         fingerprint = sha256(
             json.dumps(
@@ -104,7 +114,11 @@ class WorkflowEngine:
                 intent,
                 supplemental,
             )
-        run = self.orchestrator.run(state, **({"on_progress": on_progress} if on_progress else {}))
+        run = self.orchestrator.run(
+            state,
+            **({"on_progress": on_progress} if on_progress else {}),
+            **({"fallback_demo": self._claim_demo} if demo_fallback else {}),
+        )
         result = run.state
         if self.production_provider() != supplemental:
             raise SnapshotConflict("生产资源数据已更新，请重新生成方案")
@@ -125,6 +139,8 @@ class WorkflowEngine:
                 k: e.model_dump(mode="json") for k, e in result.evidence_catalog.items()
             },
         }
+        if demo_fallback:
+            payload["demo"] = self.demo_gate.status()
         for name in ("validation", "scheduling", "evaluation", "explanation"):
             report = getattr(result, f"{name}_result")
             if report:

@@ -1,9 +1,12 @@
+import asyncio
 import json
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
 
 from sched_copilot.api import create_app
+from sched_copilot.api.workflow_stream import workflow_stream
 
 
 @pytest.fixture
@@ -64,3 +67,43 @@ def test_stream_validation_only_plans_one_agent(client):
     events = stream(client, body)
     assert events[0] == {"type": "plan", "actions": ["validate"]}
     assert [e["action"] for e in events if e["type"] == "stage_started"] == ["validate"]
+
+
+def test_demo_stream_discloses_simulation_and_reports_cooldown_separately(client):
+    body = {**request_body(client), "demo_fallback": True}
+    events = stream(client, body)
+    assert events[-1]["type"] == "result"
+    trace = events[-1]["data"]["workflow"]["trace"]
+    execution = next(step["execution"] for step in trace if step["action"] == "schedule")
+    assert execution["simulated"]
+    again = stream(client, body)
+    assert again[-1]["type"] == "error"
+    assert again[-1]["code"] == "demo_cooldown"
+    assert not any(event["type"] == "stage_started" for event in again)
+
+
+def test_disconnect_stops_worker_at_next_checkpoint_without_running_downstream():
+    release, stopped = Event(), Event()
+    downstream = []
+
+    def execute(emit):
+        try:
+            emit({"type": "stage_started", "action": "validate"})
+            assert release.wait(3)
+            # A completed synchronous call observes cancellation at its next boundary.
+            emit({"type": "quality_phase", "phase": "checking", "round": 1})
+            downstream.append("schedule")
+            return {}
+        finally:
+            stopped.set()
+
+    async def disconnect():
+        response = workflow_stream(execute)
+        first = await anext(response.body_iterator)
+        assert json.loads(first)["action"] == "validate"
+        await response.body_iterator.aclose()
+        release.set()
+        assert await asyncio.to_thread(stopped.wait, 3)
+
+    asyncio.run(disconnect())
+    assert downstream == []

@@ -13,6 +13,7 @@ from .agents.workflow import run_analysis
 from .application.workbench import WorkbenchService
 from .config import Settings
 from .domain.models import MachineFailure
+from .infrastructure.fallback_demo import FallbackDemoGate
 from .infrastructure.sqlite_repository import DecisionStore
 from .orchestration.engine import WorkflowEngine
 from .orchestration.orchestrator import DynamicOrchestrator
@@ -33,6 +34,7 @@ def build_workbench(settings: Settings) -> WorkbenchService:
         WorkflowEngine(
             production_provider=store.production_snapshot,
             orchestrator=build_orchestrator(settings),
+            demo_gate=FallbackDemoGate(settings.database_path),
         ),
     )
     service.initialize()

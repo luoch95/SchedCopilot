@@ -14,6 +14,7 @@ from ..tools.explanation_context import (
 from .contracts.common import AgentContext, Notice
 from .contracts.inputs import ExplanationInput
 from .contracts.results import ExplanationData, ExplanationResult
+from .quality import QualityFailure, checked_execute, finish_quality
 from .result_validation import AgentContractError, validate_request, validate_result
 
 logger = logging.getLogger(__name__)
@@ -41,12 +42,25 @@ class ExplanationAgent:
         checked = validate_request(request.model_dump_json(), prompt)
         if expected_context is not None and checked.context != expected_context:
             raise AgentContractError("STALE_CONTEXT", "请求版本已过期，请重新读取当前快照。")
+        quality = None
         try:
             source = prepare_explanation(checked)
-            data = self._tool(prepare_explanation(checked.model_copy(deep=True)))
-            # 不能仅凭引用存在就允许工具编造语义；首版输出须与受控模板一致。
-            if data != explain_results(source):
-                raise ValueError("解释内容与已登记结构化事实不一致")
+
+            def inspect(data):
+                if data != explain_results(source):
+                    raise ValueError("解释遗漏风险或与已登记事实不一致")
+
+            data, quality = checked_execute(
+                lambda: self._tool(prepare_explanation(checked.model_copy(deep=True))),
+                inspect,
+                lambda rejected, issues: explain_results(
+                    prepare_explanation(checked.model_copy(deep=True))
+                ),
+                blocked=(ExplanationBlocked,),
+                repair_label="使用受控模板重建事实、风险与行动建议",
+                check_code="EXPLANATION_FACT_OR_COVERAGE_MISMATCH",
+                check_message="解释与已有事实不一致，或遗漏风险与限制，需要从可信证据重建说明。",
+            )
             refs = list(
                 dict.fromkeys(
                     ref
@@ -80,6 +94,7 @@ class ExplanationAgent:
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         except ExplanationBlocked as exc:
+            quality = getattr(exc, "quality_report", None)
             result = ExplanationResult(
                 agent_name="explanation",
                 context=checked.context,
@@ -93,6 +108,8 @@ class ExplanationAgent:
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         except Exception as exc:
+            if isinstance(exc, QualityFailure):
+                quality = exc.report
             logger.warning("解释工具执行失败：%s", type(exc).__name__)
             result = ExplanationResult(
                 agent_name="explanation",
@@ -113,4 +130,6 @@ class ExplanationAgent:
                 ],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
+        result = finish_quality(result, quality)
+        result = validate_result(result.model_dump_json(), checked, prompt)
         return ExplanationRun(checked, result, prompt.content_sha256)

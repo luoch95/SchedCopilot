@@ -11,6 +11,7 @@ from ..tools.scheduling_context import SchedulingBlocked, SchedulingSource, prep
 from .contracts.common import AgentContext, Notice
 from .contracts.inputs import SchedulingInput
 from .contracts.results import SchedulingResult
+from .quality import QualityFailure, checked_execute, finish_quality, verify_evidence
 from .result_validation import AgentContractError, validate_request, validate_result
 
 logger = logging.getLogger(__name__)
@@ -41,12 +42,28 @@ class SchedulingAgent:
         if expected_context is not None and checked.context != expected_context:
             raise AgentContractError("STALE_CONTEXT", "请求版本已过期，请重新读取当前快照。")
         original = checked
+        quality = None
         try:
             source = prepare_scheduling(checked)
-            # 工具只接收独立副本，不能通过修改输入来影响后续结果复核。
-            tool_source = prepare_scheduling(checked.model_copy(deep=True))
-            output = self._tool(tool_source)
-            verify_tool_output(source, output)
+
+            def inspect(output):
+                verify_evidence(output, original)
+                verify_tool_output(source, output)
+                expected = generate_schedule(prepare_scheduling(original.model_copy(deep=True)))
+                if output != expected:
+                    raise ValueError("候选、策略、限制或风险披露与规则结果不一致")
+
+            output, quality = checked_execute(
+                lambda: self._tool(prepare_scheduling(original.model_copy(deep=True))),
+                inspect,
+                lambda rejected, issues: generate_schedule(
+                    prepare_scheduling(original.model_copy(deep=True))
+                ),
+                blocked=(SchedulingBlocked,),
+                repair_label="按原快照和允许策略重建候选及约束证据",
+                check_code="SCHEDULING_CONSTRAINT_OR_EVIDENCE_INVALID",
+                check_message="候选工序、硬约束、变更记录或风险说明不一致，需要重建候选。",
+            )
             catalog = dict(checked.evidence_catalog)
             for ref, evidence in output.evidence_catalog.items():
                 if ref in catalog and catalog[ref] != evidence:
@@ -72,6 +89,7 @@ class SchedulingAgent:
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         except SchedulingBlocked as exc:
+            quality = getattr(exc, "quality_report", None)
             checked = original
             result = SchedulingResult(
                 agent_name="scheduling",
@@ -86,6 +104,8 @@ class SchedulingAgent:
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         except Exception as exc:
+            if isinstance(exc, QualityFailure):
+                quality = exc.report
             # 日志不包含异常正文，避免泄露业务输入或凭据。
             logger.warning("排产工具执行失败：%s", type(exc).__name__)
             checked = original
@@ -94,7 +114,11 @@ class SchedulingAgent:
                 prompt_version=prompt.role_metadata.prompt_version,
                 requirements_version=prompt.role_metadata.requirements_version,
                 context=checked.context,
-                status="failed",
+                status="blocked"
+                if isinstance(exc, QualityFailure)
+                and exc.report.issues
+                and all(issue.repairable for issue in exc.report.issues)
+                else "failed",
                 data=None,
                 evidence_refs=[],
                 warnings=[],
@@ -108,4 +132,6 @@ class SchedulingAgent:
                 ],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
+        result = finish_quality(result, quality)
+        result = validate_result(result.model_dump_json(), checked, prompt)
         return SchedulingRun(checked, result, prompt.content_sha256)

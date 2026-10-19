@@ -9,6 +9,10 @@ class SnapshotConflict(ApplicationError):
     code = "snapshot_conflict"
 
 
+class DemoCooldown(ApplicationError):
+    code = "demo_cooldown"
+
+
 class ResourceNotFound(ApplicationError):
     code = "not_found"
 

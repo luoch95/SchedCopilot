@@ -29,9 +29,42 @@ export function useWorkbench() {
   const [progress, setProgress] = useState<WorkflowProgress | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState(0);
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  const [demoRetryAt, setDemoRetryAt] = useState(0);
+  const [demoRemaining, setDemoRemaining] = useState(0);
+  const [demoLoading, setDemoLoading] = useState(false);
   const inFlight = useRef(false);
+  const workflowAbort = useRef<AbortController | null>(null);
   const decisionRequest = useRef({ key: '', id: '' });
   const initialLoad = useRef<Promise<Workbench> | null>(null);
+
+  useEffect(() => {
+    const update = () =>
+      setDemoRemaining(Math.max(0, Math.ceil((demoRetryAt - Date.now()) / 1000)));
+    update();
+    if (!demoRetryAt) return;
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [demoRetryAt]);
+
+  async function toggleDemo(enabled: boolean) {
+    if (inFlight.current || demoLoading) return;
+    if (!enabled) {
+      setDemoEnabled(false);
+      return;
+    }
+    setDemoLoading(true);
+    try {
+      const status = await workbenchApi.demoStatus();
+      setDemoRetryAt(status.retry_at ? Date.parse(status.retry_at) : 0);
+      setDemoEnabled(status.available && !inFlight.current);
+      if (!status.available) setNotice('兜底演示冷却中，可正常生成候选方案。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法读取演示状态。');
+    } finally {
+      setDemoLoading(false);
+    }
+  }
 
   function clearResults() {
     setSimulation(null);
@@ -162,6 +195,9 @@ export function useWorkbench() {
           setWorkflow({ ...workflow, results: { ...workflow.results, explanation: undefined } });
         }
         setActiveIntent(intent);
+        const controller = new AbortController();
+        const demonstrate = intent === 'generate_candidates' && demoEnabled;
+        workflowAbort.current = controller;
         setProgress({
           intent,
           actions: {
@@ -180,6 +216,7 @@ export function useWorkbench() {
             {
               ...version(),
               intent,
+              ...(demonstrate ? { demo_fallback: true } : {}),
               question: question.trim() || '解释校验结果',
               workflow_id:
                 intent === 'explain' || intent === 're_evaluate' ? workflow?.id : undefined,
@@ -188,17 +225,36 @@ export function useWorkbench() {
               setProgress((previous) => {
                 if (!previous) return previous;
                 if (event.type === 'plan') return { ...previous, actions: event.actions };
-                if (event.type === 'stage_started') return { ...previous, active: event.action };
+                if (event.type === 'stage_started')
+                  return { ...previous, active: event.action, quality: null };
+                if (event.type === 'quality_phase' || event.type === 'quality_checked') {
+                  return {
+                    ...previous,
+                    quality: {
+                      action: event.action,
+                      round: event.round,
+                      phase: event.type === 'quality_phase' ? event.phase : 'checked',
+                    },
+                  };
+                }
                 return {
                   ...previous,
                   active: null,
+                  quality: null,
                   trace: [...previous.trace, event.step],
                   results: event.report
                     ? { ...previous.results, [event.name]: event.report }
                     : previous.results,
                 };
               }),
+            controller.signal,
           );
+          controller.signal.throwIfAborted();
+          if (result.workflow.demo) {
+            setDemoRetryAt(
+              result.workflow.demo.retry_at ? Date.parse(result.workflow.demo.retry_at) : 0,
+            );
+          }
           setWorkflow(result.workflow);
           setProgress(null);
           if (result.simulation) {
@@ -208,16 +264,38 @@ export function useWorkbench() {
           }
         } catch (err) {
           setProgress((previous) =>
-            previous ? { ...previous, active: null, interrupted: true } : null,
+            previous
+              ? {
+                  ...previous,
+                  active: null,
+                  quality: null,
+                  interrupted: true,
+                  cancelled: controller.signal.aborted,
+                }
+              : null,
           );
-          throw err;
+          if (controller.signal.aborted) {
+            setNotice('已取消本次执行，未生成新方案。正式计划未改变。');
+          } else throw err;
         } finally {
+          if (demonstrate) {
+            setDemoEnabled(false);
+            // The server may have consumed the demo before cancellation.
+            void workbenchApi
+              .demoStatus()
+              .then((status) => {
+                setDemoRetryAt(status.retry_at ? Date.parse(status.retry_at) : 0);
+              })
+              .catch(() => {});
+          }
+          workflowAbort.current = null;
           setActiveIntent(null);
         }
       },
     );
 
   const generate = () => runWorkflow('generate_candidates');
+  const cancelWorkflow = () => workflowAbort.current?.abort();
 
   const decide = () =>
     run('提交人工决定', async () => {
@@ -276,6 +354,11 @@ export function useWorkbench() {
     save,
     recover,
     generate,
+    demoEnabled,
+    demoRemaining,
+    demoLoading,
+    toggleDemo,
+    cancelWorkflow,
     decide,
     setSelected,
     setReason,

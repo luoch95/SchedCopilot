@@ -35,6 +35,27 @@ class Notice(Contract):
     evidence_refs: list[Text]
 
 
+class QualityIssue(Contract):
+    code: Text
+    message: Text
+    repairable: bool
+
+
+class QualityRound(Contract):
+    round: Annotated[int, Field(ge=1, le=3)]
+    issues: list[QualityIssue] = Field(default_factory=list)
+    repair: Text | None = None
+
+
+class QualityReport(Contract):
+    version: Literal["AGD-V1.3-I1"] = "AGD-V1.3-I1"
+    outcome: Literal["passed", "warning", "blocked", "failed"]
+    round: Annotated[int, Field(ge=1, le=3)]
+    issues: list[QualityIssue] = Field(default_factory=list)
+    stop_reason: Text | None = None
+    history: list[QualityRound] = Field(default_factory=list)
+
+
 class Statement(Contract):
     text: Text
     evidence_refs: Refs
@@ -53,3 +74,4 @@ class ResultBase(Contract):
     evidence_refs: list[Text]
     warnings: list[Notice]
     errors: list[Notice]
+    quality: QualityReport | None = None

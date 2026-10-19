@@ -13,7 +13,7 @@ export default function App() {
   if (!state || !draft)
     return (
       <main className="loading">
-        <h1>Schedule Copilot</h1>
+        <h1>排产辅助决策工作台</h1>
         <p role={controller.error ? 'alert' : 'status'}>
           {controller.error || '正在载入本地车间数据…'}
         </p>
@@ -37,7 +37,6 @@ export default function App() {
       <main className="workspace">
         <header className="page-header">
           <div>
-            <p className="eyebrow">PRODUCTION DECISION WORKBENCH</p>
             <h1>故障影响与方案决策</h1>
             <p>先看影响，再比较代价。正式计划由你确认。</p>
           </div>
@@ -77,6 +76,12 @@ export default function App() {
           busy={controller.busy}
           blocked={controller.blocked}
           onGenerate={controller.generate}
+          onCancel={controller.cancelWorkflow}
+          running={controller.activeIntent !== null}
+          demoEnabled={controller.demoEnabled}
+          demoRemaining={controller.demoRemaining}
+          demoLoading={controller.demoLoading}
+          onDemoChange={controller.toggleDemo}
         />
         <WorkflowPanel
           running={controller.activeIntent !== null}
@@ -120,7 +125,7 @@ export default function App() {
         )}
         <DecisionHistory history={state.history} />
         <footer className="workspace-footer">
-          Schedule Copilot · 规则排程与约束校验提供计算结果，AI 解释证据，人工决定是否发布。
+          规则排程与约束校验提供计算结果，模型辅助解释证据，人工决定是否发布。
         </footer>
       </main>
     </div>

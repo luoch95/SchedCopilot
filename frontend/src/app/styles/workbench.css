@@ -108,6 +108,54 @@
 .simulation-actions .primary span {
   margin-left: 20px;
 }
+.simulation-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fallback-demo-controls {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+.fallback-demo-controls label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  width: fit-content;
+  gap: 8px;
+  margin-top: 10px;
+  margin-bottom: 0;
+}
+.simulation-action-buttons .primary.is-running {
+  min-width: 190px;
+  background: #0b5365;
+  box-shadow: 0 0 0 3px rgba(18, 100, 119, 0.12);
+}
+.loading-dots {
+  display: inline-block;
+  width: 18px;
+  margin-left: 2px;
+  overflow: hidden;
+  vertical-align: bottom;
+  animation: loading-dots 1.2s steps(4, end) infinite;
+}
+@keyframes loading-dots {
+  0% {
+    width: 0;
+  }
+  75%,
+  100% {
+    width: 18px;
+  }
+}
+.cancel-workflow {
+  border-color: #d9a7a0;
+  color: #9c4339;
+}
+.cancel-workflow:hover:not(:disabled) {
+  background: #fff1ef;
+}
 .blockers {
   flex-basis: 100%;
   padding: 14px 18px;

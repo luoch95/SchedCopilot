@@ -51,7 +51,8 @@ class Model:
         owner, definition = self, tools[0]["function"]
         assert definition["strict"] is True
         assert definition["parameters"]["additionalProperties"] is False
-        assert "tool_choice" not in kwargs
+        if "tool_choice" in kwargs:
+            assert kwargs["tool_choice"] == definition["name"]
 
         class Bound:
             def invoke(self, messages):
@@ -63,7 +64,11 @@ class Model:
                     raise TimeoutError("private-key-and-provider-body")
                 args = {}
                 if name == "submit_focus":
-                    catalog = json.loads(messages[-1].content)["focus_catalog"]
+                    catalog = next(
+                        json.loads(message.content)["focus_catalog"]
+                        for message in reversed(messages)
+                        if message.type == "tool"
+                    )
                     args = {"focus_ids": list(catalog)[-2:]}
                     if owner.fault == "unknown_focus":
                         args = {"focus_ids": ["invented-fact"]}
@@ -172,6 +177,92 @@ def test_rule_tool_runs_once_even_if_the_model_fails(state, fault):
     wrapped = LiveAgent("validation", agent, lambda: model, "test-model")
     wrapped.run(state.validation_input, expected_context=state.context)
     assert agent.count == 1
+
+
+@pytest.mark.parametrize("stage", ["run_validation_tool", "submit_focus"])
+def test_one_format_correction_recovers_without_reexecuting_rules(state, stage):
+    class RecoveringModel(Model):
+        repaired = False
+
+        def bind_tools(self, tools, **kwargs):
+            bound = super().bind_tools(tools, **kwargs)
+            owner = self
+
+            class Bound:
+                def invoke(self, messages):
+                    response = bound.invoke(messages)
+                    if tools[0]["function"]["name"] == stage and not owner.repaired:
+                        owner.repaired = True
+                        return AIMessage(content="wrong format")
+                    return response
+
+            return Bound()
+
+    class CountingAgent:
+        count = 0
+
+        def run(self, *args, **kwargs):
+            self.count += 1
+            return ValidationAgent().run(*args, **kwargs)
+
+    agent, model = CountingAgent(), RecoveringModel()
+    result = LiveAgent("validation", agent, lambda: model, "test").run(state.validation_input)
+    assert result.execution.mode == "live"
+    assert result.execution.calls == 3
+    assert len(result.execution.corrections) == 1
+    assert result.execution.failure_phase is None
+    assert agent.count == 1
+
+
+@pytest.mark.parametrize("status", [400, 401, 429])
+def test_provider_errors_are_not_retried_unless_tool_choice_is_unsupported(state, status):
+    class ProviderError(Exception):
+        status_code = status
+
+    class FailedModel:
+        def bind_tools(self, *args, **kwargs):
+            raise ProviderError("private provider body")
+
+    result = LiveAgent("validation", ValidationAgent(), FailedModel, "test").run(
+        state.validation_input
+    )
+    assert result.execution.mode == "fallback"
+    assert result.execution.calls == 1
+    assert result.execution.failure_phase == "role_tool_call"
+
+
+def test_unsupported_named_tool_is_negotiated_once(state):
+    class Unsupported(Exception):
+        status_code = 400
+
+    class CompatibleModel(Model):
+        def bind_tools(self, tools, **kwargs):
+            if "tool_choice" in kwargs:
+                raise Unsupported("tool_choice is unsupported")
+            return super().bind_tools(tools, **kwargs)
+
+    result = LiveAgent("validation", ValidationAgent(), CompatibleModel, "test").run(
+        state.validation_input
+    )
+    assert result.execution.mode == "live"
+    assert result.execution.calls == 3
+    assert result.execution.corrections == [
+        {"phase": "role_tool_call", "reason": "NAMED_TOOL_UNSUPPORTED"}
+    ]
+
+
+def test_persistent_bad_focus_stops_after_one_repair_with_safe_diagnostics(state):
+    model = Model("unknown_focus")
+    result = LiveAgent("validation", ValidationAgent(), lambda: model, "test").run(
+        state.validation_input
+    )
+    assert result.execution.mode == "fallback"
+    assert result.execution.error_code == "MODEL_OUTPUT_INVALID"
+    assert result.execution.calls == 3
+    assert result.execution.failure_phase == "focus_selection"
+    assert result.execution.failure_reason == "UNKNOWN_OR_DUPLICATE_FOCUS"
+    assert len(result.execution.corrections) == 1
+    assert result.execution.highlights == []
 
 
 def test_stale_request_is_rejected_before_any_model_call(state):

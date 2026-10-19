@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -111,6 +111,110 @@ beforeEach(() => {
 });
 
 describe('Schedule Copilot workflow', () => {
+  it('runs a labelled one-shot fallback demo and keeps normal generation available in cooldown', async () => {
+    const user = userEvent.setup();
+    let triggered = false;
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      const status = {
+        available: !triggered,
+        remaining_seconds: triggered ? 1200 : 0,
+        retry_at: triggered ? new Date(Date.now() + 1200000).toISOString() : null,
+      };
+      if (String(url) === '/api/workflow/demo') return new Response(JSON.stringify(status));
+      if (String(url) === '/api/workflow' && JSON.parse(String(options?.body)).demo_fallback) {
+        triggered = true;
+        calls.push({ path: String(url), body: JSON.parse(String(options?.body)) });
+        return new Response(
+          JSON.stringify({
+            ...workflowFixture,
+            workflow: {
+              ...workflowFixture.workflow,
+              demo: {
+                ...status,
+                available: false,
+                remaining_seconds: 1200,
+                retry_at: new Date(Date.now() + 1200000).toISOString(),
+              },
+              trace: workflowFixture.workflow.trace.map((step) =>
+                step.action === 'schedule'
+                  ? {
+                      ...step,
+                      execution: {
+                        mode: 'fallback',
+                        model: null,
+                        calls: 0,
+                        input_tokens: null,
+                        output_tokens: null,
+                        elapsed_ms: 0,
+                        error_code: 'DEMO_FALLBACK',
+                        prompt_sha256: 'hash',
+                        highlights: [],
+                        simulated: true,
+                      },
+                    }
+                  : step,
+              ),
+            },
+          }),
+        );
+      }
+      return originalFetch(url, options);
+    });
+    render(<App />);
+    await screen.findByRole('heading', { name: '当前正式计划' });
+    await user.click(screen.getByText('兜底演示', { selector: 'summary' }));
+    const checkbox = screen.getByRole('checkbox', {
+      name: /下一次生成模拟排产/,
+    }) as HTMLInputElement;
+    await user.click(checkbox);
+    await waitFor(() => expect(checkbox.checked).toBe(true));
+    await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
+    await screen.findByText('排产执行：兜底演示（模拟）');
+    await waitFor(() => expect(checkbox.checked).toBe(false));
+    expect(checkbox.disabled).toBe(true);
+    expect(calls.some((call) => call.body?.demo_fallback === true)).toBe(true);
+    const generate = screen.getByRole('button', { name: /生成候选方案/ }) as HTMLButtonElement;
+    expect(generate.disabled).toBe(false);
+    await user.click(generate);
+    await screen.findByRole('heading', { name: '方案比较' });
+    expect(
+      calls.filter((call) => call.path === '/api/workflow').at(-1)?.body?.demo_fallback,
+    ).not.toBe(true);
+  });
+
+  it('cancels a pending generation without accepting late results and allows regeneration', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', { name: '当前正式计划' });
+    let finish!: (response: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    vi.mocked(fetch).mockImplementationOnce((_url, options) => {
+      signal = options?.signal;
+      // Simulate a response that arrives after cancellation despite the abort.
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(signal?.aborted).toBe(true);
+    await act(async () =>
+      finish(
+        new Response(JSON.stringify(workflowFixture), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    await screen.findByText('工作流：已取消');
+    expect(screen.queryByRole('heading', { name: '方案比较' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
+    await screen.findByRole('heading', { name: '方案比较' });
+    expect(screen.getByText('工作流：已完成')).toBeTruthy();
+  });
+
   it('updates only the active Agent from real streamed events and opens its completed details', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -134,17 +238,53 @@ describe('Schedule Copilot workflow', () => {
     await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
     await send({ type: 'plan', actions: ['validate', 'schedule', 'evaluate', 'explain'] });
     await send({ type: 'stage_started', action: 'validate' });
-    const stages = screen.getByLabelText('Agent 执行顺序');
+    const stages = screen.getByLabelText('智能环节执行顺序');
     expect(stages.querySelectorAll('[data-status="running"]')).toHaveLength(1);
     expect(stages.children[0].getAttribute('aria-current')).toBe('step');
     expect(within(stages).getAllByText('等待前序环节')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: '查看数据校验详情' })).toBeNull();
+    await send({ type: 'quality_phase', action: 'validate', phase: 'checking', round: 1 });
+    expect(within(stages).getByText('检查中 · 第 1/3 轮')).toBeTruthy();
+    await send({
+      type: 'quality_checked',
+      action: 'validate',
+      round: 1,
+      outcome: 'failed',
+      issues: [{ code: 'COVERAGE', message: '检查覆盖遗漏', repairable: true }],
+    });
+    expect(stages.children[0].getAttribute('data-status')).toBe('running');
+    expect(screen.queryByRole('button', { name: '查看数据校验详情' })).toBeNull();
+    await send({ type: 'quality_phase', action: 'validate', phase: 'repairing', round: 2 });
+    expect(within(stages).getByText('修正中 · 第 2/3 轮')).toBeTruthy();
+    expect(stages.children[1].getAttribute('data-status')).toBe('pending');
+    await send({ type: 'quality_phase', action: 'validate', phase: 'checking', round: 2 });
+    expect(within(stages).getByText('检查中 · 第 2/3 轮')).toBeTruthy();
     await send({
       type: 'stage_completed',
       action: 'validate',
       name: 'validation',
       step: { ...workflowFixture.workflow.trace[0], status: 'success' },
-      report: { status: 'success', warnings: [], errors: [], data: {} },
+      report: {
+        status: 'success',
+        warnings: [],
+        errors: [],
+        data: {},
+        quality: {
+          version: 'AGD-V1.3-I1',
+          outcome: 'passed',
+          round: 2,
+          issues: [],
+          stop_reason: '检查通过',
+          history: [
+            {
+              round: 1,
+              issues: [{ code: 'COVERAGE', message: '检查覆盖遗漏', repairable: true }],
+              repair: null,
+            },
+            { round: 2, issues: [], repair: '按原始快照重建校验覆盖' },
+          ],
+        },
+      },
     });
     await send({ type: 'stage_started', action: 'schedule' });
     expect(stages.children[0].getAttribute('data-status')).toBe('success');
@@ -153,6 +293,9 @@ describe('Schedule Copilot workflow', () => {
     await user.click(screen.getByRole('button', { name: '查看数据校验详情' }));
     expect(document.activeElement?.tagName).toBe('ARTICLE');
     expect(document.activeElement?.closest('details')?.open).toBe(true);
+    expect(screen.getByRole('heading', { name: '输出质量检查' })).toBeTruthy();
+    expect(screen.getByText(/第 1 轮：检查覆盖遗漏/)).toBeTruthy();
+    expect(screen.getByText(/第 2 轮：按原始快照重建校验覆盖；检查通过/)).toBeTruthy();
     await send({ type: 'result', data: workflowFixture });
     await act(async () => controller.close());
     await screen.findByRole('heading', { name: '方案比较' });
@@ -196,7 +339,7 @@ describe('Schedule Copilot workflow', () => {
       await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
       await screen.findByText('工作流：已完成');
       expect(
-        within(screen.getByLabelText('Agent 执行顺序')).getAllByText(
+        within(screen.getByLabelText('智能环节执行顺序')).getAllByText(
           mode === 'live' ? '模型辅助' : '规则回退',
         ),
       ).toHaveLength(4);
@@ -295,7 +438,7 @@ describe('Schedule Copilot workflow', () => {
     expect(calls.find((call) => call.path === '/api/workflow')?.body?.intent).toBe('validate');
     expect(screen.getByText('请补充预计恢复时间。')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '方案比较' })).toBeNull();
-    expect(screen.getByLabelText('Agent 执行顺序').children).toHaveLength(1);
+    expect(screen.getByLabelText('智能环节执行顺序').children).toHaveLength(1);
   });
 
   it('re-explains the same batch without scheduling again or losing comparison', async () => {
@@ -334,7 +477,7 @@ describe('Schedule Copilot workflow', () => {
     await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
     expect(screen.getAllByText('等待结果中').length).toBeGreaterThan(0);
     expect(screen.queryByText('工作流：已完成')).toBeNull();
-    const stages = screen.getByLabelText('Agent 执行顺序');
+    const stages = screen.getByLabelText('智能环节执行顺序');
     expect(within(stages).getAllByText('等待前序环节')).toHaveLength(3);
     expect(within(stages).getByText('等待后台开始')).toBeTruthy();
     expect(stages.querySelectorAll('[data-status="running"]')).toHaveLength(0);
@@ -405,10 +548,10 @@ describe('Schedule Copilot workflow', () => {
     await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
     const notice = await screen.findByLabelText('模型辅助执行情况');
     expect(notice.textContent).toContain(
-      '模型辅助已完成 3/4 个 Agent：数据校验 Agent、排产执行 Agent、方案评估 Agent',
+      '模型辅助已完成 3/4 个智能环节：数据校验、排产执行、方案评估',
     );
     expect(within(notice).getAllByRole('listitem')).toHaveLength(1);
-    expect(notice.textContent).toContain('结果解释 Agent：模型辅助未完成');
+    expect(notice.textContent).toContain('结果解释：模型辅助未完成');
     expect(notice.textContent).toContain('模型请求超时');
     expect(notice.textContent).toContain('模板解释已完成');
     expect(screen.getByText(/本次已完成 4\/4/)).toBeTruthy();
@@ -441,7 +584,7 @@ describe('Schedule Copilot workflow', () => {
     );
     await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
     await screen.findByText('工作流：失败');
-    const stages = screen.getByLabelText('Agent 执行顺序');
+    const stages = screen.getByLabelText('智能环节执行顺序');
     expect(within(stages).getByText('失败')).toBeTruthy();
     expect(within(stages).getAllByText('未执行（前序阻断或失败）')).toHaveLength(3);
     expect(screen.queryByRole('heading', { name: '方案比较' })).toBeNull();
@@ -456,7 +599,7 @@ describe('Schedule Copilot workflow', () => {
     expect(screen.queryByRole('button', { name: '生成并评估方案' })).toBeNull();
     await user.click(screen.getByRole('button', { name: /生成候选方案/ }));
     await screen.findByText('工作流：已完成');
-    expect(screen.getByLabelText('Agent 执行顺序').children).toHaveLength(4);
+    expect(screen.getByLabelText('智能环节执行顺序').children).toHaveLength(4);
     expect(
       within(screen.getByLabelText('方案评估结果')).getByText(
         '缺少换型和班次数据，无法计算利用率。',

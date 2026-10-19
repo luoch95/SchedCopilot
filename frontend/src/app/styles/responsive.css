@@ -100,8 +100,11 @@
   .decision-fields {
     grid-template-columns: 1fr;
   }
-  .simulation-actions > button {
+  .simulation-action-buttons {
     width: 100%;
+  }
+  .simulation-action-buttons > button {
+    flex: 1;
   }
   .evidence-grid {
     gap: 9px;

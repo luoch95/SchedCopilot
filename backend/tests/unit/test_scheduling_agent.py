@@ -356,7 +356,13 @@ def test_fake_pass_record_cannot_authorize_invalid_candidate(scheduling_request)
         output.evidence_catalog[ref].content["operations"][3]["machine_id"] = "unknown"
         return output
 
-    assert SchedulingAgent(tool=broken).run(request).result.status == "failed"
+    run = SchedulingAgent(tool=broken).run(request)
+    expected = SchedulingAgent().run(request)
+    assert run.result.data == expected.result.data
+    assert run.request.evidence_catalog == expected.request.evidence_catalog
+    assert run.result.quality.round == 2
+    assert run.result.quality.history[0].issues
+    assert not run.result.quality.history[1].issues
 
 
 def test_incorrect_change_record_is_rejected(scheduling_request):
@@ -368,7 +374,13 @@ def test_incorrect_change_record_is_rejected(scheduling_request):
         output.evidence_catalog[ref].content["items"][0]["before_machine_id"] = "unknown"
         return output
 
-    assert SchedulingAgent(tool=broken).run(request).result.status == "failed"
+    run = SchedulingAgent(tool=broken).run(request)
+    expected = SchedulingAgent().run(request)
+    assert run.result.data == expected.result.data
+    assert run.request.evidence_catalog == expected.request.evidence_catalog
+    assert run.result.quality.round == 2
+    assert run.result.quality.history[0].issues
+    assert not run.result.quality.history[1].issues
 
 
 def test_empty_tool_result_does_not_claim_success(scheduling_request):
@@ -379,7 +391,13 @@ def test_empty_tool_result_does_not_claim_success(scheduling_request):
         output.data.candidates.clear()
         return output
 
-    assert SchedulingAgent(tool=broken).run(request).result.status == "failed"
+    run = SchedulingAgent(tool=broken).run(request)
+    expected = SchedulingAgent().run(request)
+    assert run.result.data == expected.result.data
+    assert run.request.evidence_catalog == expected.request.evidence_catalog
+    assert run.result.quality.round == 2
+    assert run.result.quality.history[0].issues
+    assert not run.result.quality.history[1].issues
 
 
 def test_unknown_tool_reference_is_rejected(scheduling_request):
@@ -388,7 +406,13 @@ def test_unknown_tool_reference_is_rejected(scheduling_request):
     def broken(source):
         return replace(generate_schedule(source), summary_refs=("invented",))
 
-    assert SchedulingAgent(tool=broken).run(request).result.status == "failed"
+    run = SchedulingAgent(tool=broken).run(request)
+    expected = SchedulingAgent().run(request)
+    assert run.result.data == expected.result.data
+    assert run.request.evidence_catalog == expected.request.evidence_catalog
+    assert run.result.quality.round == 2
+    assert run.result.quality.history[0].issues
+    assert not run.result.quality.history[1].issues
 
 
 def test_repeated_run_is_deterministic(scheduling_request):

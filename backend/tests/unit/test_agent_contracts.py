@@ -418,3 +418,29 @@ def test_old_requirement_baseline_cannot_be_used_as_upstream_result():
     with pytest.raises(AgentContractError) as error:
         run("explanation", request, result)
     assert error.value.code == "UPSTREAM_VERSION_MISMATCH"
+
+
+@pytest.mark.parametrize("change", ["status", "empty", "gap", "pending"])
+def test_quality_claim_must_match_status_and_completed_checks(change):
+    request, result = scenario("validation")
+    result["quality"] = {
+        "version": "AGD-V1.3-I1",
+        "outcome": "passed",
+        "round": 1,
+        "issues": [],
+        "stop_reason": "checked",
+        "history": [{"round": 1, "issues": [], "repair": None}],
+    }
+    if change == "status":
+        result["quality"]["outcome"] = "failed"
+    elif change == "empty":
+        result["quality"]["history"] = []
+    elif change == "gap":
+        result["quality"]["round"] = 2
+    else:
+        result["quality"]["history"][0]["issues"] = [
+            {"code": "PENDING", "message": "unresolved", "repairable": True}
+        ]
+    with pytest.raises(AgentContractError) as caught:
+        run("validation", request, result)
+    assert caught.value.code.startswith("QUALITY_")

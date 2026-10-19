@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from ..application.contracts import SnapshotVersion
 
@@ -41,3 +41,10 @@ class WorkflowRequest(SnapshotRequest):
     intent: Literal["generate_candidates", "re_evaluate", "explain", "validate"]
     question: str = Field(default="解释候选方案的取舍和风险", min_length=1, max_length=2000)
     workflow_id: str | None = Field(default=None, min_length=1, max_length=100)
+    demo_fallback: bool = False
+
+    @model_validator(mode="after")
+    def check_demo(self):
+        if self.demo_fallback and self.intent != "generate_candidates":
+            raise ValueError("兜底演示仅支持生成候选方案")
+        return self

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+﻿import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkflowResult, WorkflowProgress } from '../../shared/api/contracts';
 import { WorkflowPanel } from './WorkflowPanel';
@@ -23,7 +23,7 @@ describe('workflow execution notices', () => {
     const { rerender } = render(
       <WorkflowPanel running disabled result={null} progress={progress} onRun={vi.fn()} />,
     );
-    const stages = screen.getByLabelText('Agent 执行顺序');
+    const stages = screen.getByLabelText('智能环节执行顺序');
     expect(stages.children[0].getAttribute('data-status')).toBe('blocked');
     expect(stages.querySelectorAll('[data-status="skipped"]')).toHaveLength(2);
     expect(stages.children[3].getAttribute('data-status')).toBe('running');
@@ -72,7 +72,7 @@ describe('workflow execution notices', () => {
     };
     render(<WorkflowPanel running={false} disabled={false} result={result} onRun={vi.fn()} />);
     const notice = screen.getByLabelText('模型辅助执行情况');
-    expect(notice.textContent).toContain('方案评估 Agent：模型辅助未完成');
+    expect(notice.textContent).toContain('方案评估：模型辅助未完成');
     expect(notice.textContent).toContain('业务工具执行失败');
     expect(notice.textContent).toContain('该环节执行失败，未得到可用结果');
     expect(notice.textContent).not.toContain('规则评估已完成');

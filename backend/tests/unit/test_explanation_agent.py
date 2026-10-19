@@ -277,8 +277,8 @@ def test_contract_rejected_before_tool(explanation_request, change):
         )
 
 
-@pytest.mark.parametrize("change", ["empty", "invented", "exception", "mutate"])
-def test_invalid_renderer_fails_without_leaking(explanation_request, change, caplog):
+@pytest.mark.parametrize("change", ["empty", "invented", "exception", "mutate", "risks"])
+def test_invalid_renderer_repairs_or_stops_without_leaking(explanation_request, change, caplog):
     before = explanation_request.model_dump_json()
 
     def tool(source):
@@ -289,15 +289,28 @@ def test_invalid_renderer_fails_without_leaking(explanation_request, change, cap
             return None
         if change == "invented":
             data.facts[0].text = "订单已经交付，无须人工确认"
+        elif change == "risks":
+            data.risks.clear()
+            data.limitations.clear()
         else:
             source.request.question = "不受支持的自由文本"
             return explain_results(source)
         return data
 
     run = ExplanationAgent(tool=tool).run(explanation_request)
-    assert run.result.status == "failed"
-    assert run.result.data is None
-    assert run.result.errors[0].code == "EXPLANATION_TOOL_FAILED"
+    if change == "exception":
+        assert run.result.status == "failed"
+        assert run.result.data is None
+        assert run.result.errors[0].code == "EXPLANATION_TOOL_FAILED"
+        assert run.result.quality.round == 1
+    else:
+        expected = ExplanationAgent().run(explanation_request)
+        assert run.result.data == expected.result.data
+        assert run.result.status == expected.result.status
+        assert run.result.quality.round == 2
+        assert run.result.quality.history[0].issues
+        assert run.result.quality.history[1].repair
+        assert not run.result.quality.history[1].issues
     assert "secret-api-key" not in run.result.model_dump_json() + caplog.text
     assert explanation_request.model_dump_json() == before
 

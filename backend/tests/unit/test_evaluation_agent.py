@@ -151,7 +151,7 @@ def test_context_and_evidence_rejected_before_tool(evaluation_request):
 
 
 @pytest.mark.parametrize("change", ["metric", "diff", "empty", "ref", "mutation"])
-def test_invalid_tool_output_fails(evaluation_request, change):
+def test_invalid_tool_output_is_recomputed_before_handoff(evaluation_request, change):
     def tool(source):
         output = evaluate_candidates(source)
         evaluation = output.data.evaluations[0]
@@ -169,9 +169,14 @@ def test_invalid_tool_output_fails(evaluation_request, change):
         return output
 
     run = EvaluationAgent(tool=tool).run(evaluation_request)
-    assert run.result.status == "failed"
-    assert run.result.errors[0].code == "EVALUATION_TOOL_FAILED"
-    assert run.result.data is None
+    expected = EvaluationAgent().run(evaluation_request)
+    assert run.result.status == expected.result.status
+    assert run.result.data == expected.result.data
+    assert run.request.evidence_catalog == expected.request.evidence_catalog
+    assert run.result.quality.round == 2
+    assert run.result.quality.history[0].issues
+    assert run.result.quality.history[1].repair
+    assert not run.result.quality.history[1].issues
 
 
 def test_tool_exception_is_sanitized(evaluation_request, caplog):

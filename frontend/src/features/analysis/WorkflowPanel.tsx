@@ -34,6 +34,7 @@ const labels: Record<string, string> = {
   completed: '已完成',
 };
 const modelErrors: Record<string, string> = {
+  DEMO_FALLBACK: '兜底演示：人为模拟模型辅助失败',
   MODEL_TIMEOUT: '模型请求超时',
   MODEL_AUTH_FAILED: '模型服务鉴权失败',
   MODEL_RATE_LIMITED: '模型服务请求受限',
@@ -48,6 +49,43 @@ const ruleResults: Record<string, string> = {
   scheduling: '规则排产已完成',
   evaluation: '规则评估已完成',
   explanation: '模板解释已完成',
+};
+const modelPhases: Record<string, string> = {
+  role_tool_call: '角色工具调用',
+  rule_execution: '规则执行',
+  focus_catalog: '分析依据准备',
+  focus_selection: '分析重点选择',
+  demo: '兜底演示',
+};
+const correctionReasons: Record<string, string> = {
+  NAMED_TOOL_UNSUPPORTED: '模型接口不支持指定工具，已切换兼容调用方式',
+  TOOL_CALL_COUNT: '工具调用数量不符合要求',
+  TOOL_CALL_SHAPE: '工具调用格式不符合要求',
+  ROLE_TOOL_ARGUMENTS: '角色工具参数不符合要求',
+  ARGUMENT_SCHEMA: '参数结构不符合要求',
+  UNKNOWN_OR_DUPLICATE_FOCUS: '分析重点不存在或重复',
+};
+const executionCodes: Record<string, string> = {
+  DEMO_FALLBACK: '兜底演示（模拟失败）',
+  MODEL_OUTPUT_INVALID: '模型返回内容未通过校验',
+  AGENT_TOOL_FAILED: '业务工具执行失败',
+  MODEL_TIMEOUT: '模型请求超时',
+  MODEL_UNAVAILABLE: '模型服务连接失败',
+  MODEL_API_ERROR: '模型服务接口报错',
+  MODEL_AUTH_FAILED: '模型服务鉴权失败',
+  MODEL_RATE_LIMITED: '模型服务请求受限',
+};
+const qualityLabels = {
+  passed: '检查通过',
+  warning: '检查通过，保留业务警告',
+  blocked: '已阻断',
+  failed: '未通过',
+};
+const phaseLabels = {
+  executing: '执行中',
+  checking: '检查中',
+  repairing: '修正中',
+  checked: '检查完成，整理结果中',
 };
 
 function stageSummary(name: string, report?: WorkflowReport) {
@@ -107,12 +145,14 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
   const modelCount = executions.filter(({ step }) => step.execution).length;
   const completed = executions.filter(({ step }) => ['success', 'warning'].includes(step.status));
   return (
-    <section className="workflow-progress" aria-label="四 Agent 执行状态" aria-busy={running}>
+    <section className="workflow-progress" aria-label="四个智能环节执行状态" aria-busy={running}>
       <div className="workflow-caption">
-        <h2>本次 Agent 链路</h2>
+        <h2>本次智能分析链路</h2>
         <span role="status">
           {running ? (
             <WaitingResult />
+          ) : progress?.cancelled ? (
+            '工作流：已取消'
           ) : progress?.interrupted ? (
             '执行进度已中断'
           ) : result ? (
@@ -124,7 +164,7 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
       </div>
       <ol
         className="workflow-stages"
-        aria-label="Agent 执行顺序"
+        aria-label="智能环节执行顺序"
         style={{ '--stage-count': visibleStages.length } as React.CSSProperties}
       >
         {visibleStages.map((stage, index) => {
@@ -141,7 +181,9 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
             !execution;
           const isStopped = progress?.interrupted && status === 'pending';
           const pendingText = isStopped
-            ? '状态未确认'
+            ? progress?.cancelled
+              ? '已取消（未完成）'
+              : '状态未确认'
             : wasSkipped || (result && !running)
               ? '未执行（前序阻断或失败）'
               : index === 0
@@ -161,11 +203,13 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                       ? '!'
                       : index + 1}
                 </span>
-                {stage.label} Agent
+                {stage.label}
               </span>
               <small>
                 {status === 'running'
-                  ? '执行中'
+                  ? progress?.quality?.action === stage.action
+                    ? `${phaseLabels[progress.quality.phase]} · 第 ${progress.quality.round}/3 轮`
+                    : '执行中'
                   : status !== 'pending'
                     ? labels[status]
                     : intent
@@ -175,8 +219,19 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
               {execution && (
                 <p className="workflow-node-summary">{stageSummary(stage.name, report)}</p>
               )}
+              {report?.quality && (
+                <small>
+                  质量{qualityLabels[report.quality.outcome]} · {report.quality.round} 轮
+                </small>
+              )}
               {execution?.execution && (
-                <small>{execution.execution.mode === 'live' ? '模型辅助' : '规则回退'}</small>
+                <small>
+                  {execution.execution.simulated
+                    ? '模拟失败 · 规则接管'
+                    : execution.execution.mode === 'live'
+                      ? '模型辅助'
+                      : '规则回退'}
+                </small>
               )}
               {execution && (
                 <button
@@ -196,22 +251,23 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
         <p className="hint" role="status">
           已完成 {completed.length}/{visibleStages.length} 个环节；
           {progress?.active
-            ? `正在执行${stages.find((stage) => stage.action === progress.active)?.label} Agent。`
+            ? `正在执行${stages.find((stage) => stage.action === progress.active)?.label}。`
             : '等待后台更新进度。'}
           已完成的节点可查看详情，整条链路结束后展示可用方案。
         </p>
       )}
-      {progress?.interrupted && (
+      {progress?.cancelled && (
+        <p className="hint">本次执行已取消。已完成环节的记录保留，未完成的结果不作为候选方案。</p>
+      )}
+      {progress?.interrupted && !progress.cancelled && (
         <p className="message warning">
           进度连接或请求已中断。已收到的节点结果保留，其余状态未确认；请检查后台后重新生成方案。
         </p>
       )}
       {result && !running && (
         <p className="hint">
-          本次已完成 {completed.length}/{executions.length} 个 Agent 环节
-          {completed.length > 0 &&
-            `：${completed.map((stage) => `${stage.label} Agent`).join('、')}`}
-          。
+          本次已完成 {completed.length}/{executions.length} 个智能环节
+          {completed.length > 0 && `：${completed.map((stage) => stage.label).join('、')}`}。
           {executions.some(({ step }) => step.status === 'blocked') &&
             '阻断环节已标注，后续依赖环节未执行。'}
         </p>
@@ -219,16 +275,21 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
       {!!fallback.length && !running && (
         <div className="message warning" aria-label="模型辅助执行情况">
           <p>
-            模型辅助已完成 {modelCompleted.length}/{modelCount} 个 Agent
+            模型辅助已完成 {modelCompleted.length}/{modelCount} 个智能环节
             {modelCompleted.length > 0 &&
-              `：${modelCompleted.map((stage) => `${stage.label} Agent`).join('、')}`}
+              `：${modelCompleted.map((stage) => stage.label).join('、')}`}
             。
           </p>
           <ul>
             {fallback.map(({ name, label, step }) => (
               <li key={name}>
-                <strong>{label} Agent：模型辅助未完成</strong>（
-                {modelErrors[step.execution?.error_code ?? ''] ?? '模型辅助执行异常'}）；
+                <strong>
+                  {label}：{step.execution?.simulated ? '兜底演示（模拟）' : '模型辅助未完成'}
+                </strong>
+                （{modelErrors[step.execution?.error_code ?? ''] ?? '模型辅助执行异常'}）；
+                {!step.execution?.simulated &&
+                  step.execution?.failure_phase &&
+                  `未完成步骤：${modelPhases[step.execution.failure_phase] ?? '模型辅助'}；`}
                 {step.status === 'failed'
                   ? '该环节执行失败，未得到可用结果。'
                   : step.status === 'blocked'
@@ -287,10 +348,32 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                     </span>
                   </header>
                   <p>{stageSummary(stage.name, report)}</p>
+                  {report?.quality && (
+                    <section className="workflow-agent-notices">
+                      <h5>输出质量检查</h5>
+                      <p>
+                        <strong>{qualityLabels[report.quality.outcome]}</strong> · 共{' '}
+                        {report.quality.round} 轮
+                      </p>
+                      <ol>
+                        {report.quality.history.map((item) => (
+                          <li key={item.round}>
+                            第 {item.round} 轮：{item.repair && `${item.repair}；`}
+                            {item.issues.length
+                              ? item.issues.map((issue) => issue.message).join('；')
+                              : '检查通过'}
+                          </li>
+                        ))}
+                      </ol>
+                      {report.quality.stop_reason && (
+                        <p className="hint">停止原因：{report.quality.stop_reason}</p>
+                      )}
+                    </section>
+                  )}
                   {!report && (
                     <p className="hint">
                       {step?.error_code
-                        ? `执行异常：${step.error_code}。`
+                        ? `执行异常：${executionCodes[step.error_code] ?? '工作流执行异常'}。`
                         : '该环节未返回详细报告。'}
                     </p>
                   )}
@@ -311,6 +394,18 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                       items={execution.highlights}
                     />
                   )}
+                  {!!execution?.corrections?.length && (
+                    <p className="hint">
+                      模型调用修正记录：
+                      {execution.corrections
+                        .map(
+                          (item) =>
+                            `${modelPhases[item.phase] ?? '模型辅助步骤'}（${correctionReasons[item.reason] ?? '校验未通过'}）`,
+                        )
+                        .join('；')}
+                      。
+                    </p>
+                  )}
                 </article>
               );
             })}
@@ -323,15 +418,22 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                   <li key={i}>
                     {stages.find((stage) => stage.action === step.action)?.label ?? step.action}：
                     {labels[step.status] ?? step.status}
-                    {step.error_code && ` · ${step.error_code}`}
+                    {step.error_code && ` · ${executionCodes[step.error_code] ?? '执行异常'}`}
                     {step.execution && (
                       <span>
                         {' · '}
-                        {step.execution.mode === 'live' ? '模型辅助' : '规则回退'}
+                        {step.execution.simulated
+                          ? '兜底演示（模拟）'
+                          : step.execution.mode === 'live'
+                            ? '模型辅助'
+                            : '规则回退'}
                         {step.execution.model && ` · ${step.execution.model}`}
                         {` · ${step.execution.calls} 次请求 · ${(step.execution.elapsed_ms / 1000).toFixed(1)} 秒`}
                         {` · 已返回输入/输出 Token：${step.execution.input_tokens ?? '未提供'}/${step.execution.output_tokens ?? '未提供'}`}
-                        {step.execution.error_code && ` · ${step.execution.error_code}`}
+                        {step.execution.error_code &&
+                          ` · ${executionCodes[step.execution.error_code] ?? '执行异常'}`}
+                        {step.execution.failure_reason &&
+                          ` · ${correctionReasons[step.execution.failure_reason] ?? '校验未通过'}`}
                       </span>
                     )}
                   </li>

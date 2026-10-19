@@ -29,12 +29,9 @@ export function EventEditor({
     <aside className="sidebar">
       <a className="brand" href="#">
         <span className="brand-mark">SC</span>
-        <span>
-          Schedule Copilot<small>排产辅助决策工作台</small>
-        </span>
+        <span>排产辅助决策工作台</span>
       </a>
       <div className="sidebar-section">
-        <p className="eyebrow">EVENT INPUT</p>
         <h2>设备故障事件</h2>
         <p className="snapshot-note">
           仿真快照 <strong>{stamp(state.snapshot_time)}</strong>
@@ -118,7 +115,7 @@ export function EventEditor({
         <span className="status-dot" />
         本地仿真 · 人工确认发布
         <br />
-        <small>React 界面 / FastAPI 服务</small>
+        <small>本地仿真 · 人工确认发布</small>
       </div>
     </aside>
   );

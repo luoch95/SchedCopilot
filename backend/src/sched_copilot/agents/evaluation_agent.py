@@ -17,6 +17,7 @@ from ..tools.evaluation import (
 from .contracts.common import AgentContext, Notice
 from .contracts.inputs import EvaluationInput
 from .contracts.results import EvaluationResult
+from .quality import QualityFailure, checked_execute, finish_quality, verify_evidence
 from .result_validation import AgentContractError, validate_request, validate_result
 
 logger = logging.getLogger(__name__)
@@ -47,12 +48,25 @@ class EvaluationAgent:
         if expected_context is not None and checked.context != expected_context:
             raise AgentContractError("STALE_CONTEXT", "请求版本已过期，请重新读取当前快照。")
         original = checked
+        quality = None
         try:
             source = prepare_evaluation(checked)
-            # 工具只接收独立副本，不能通过修改输入来影响后续结果复核。
-            tool_source = prepare_evaluation(checked.model_copy(deep=True))
-            output = self._tool(tool_source)
-            verify_evaluation_output(source, output)
+
+            def inspect(output):
+                verify_evidence(output, original)
+                verify_evaluation_output(source, output)
+
+            output, quality = checked_execute(
+                lambda: self._tool(prepare_evaluation(original.model_copy(deep=True))),
+                inspect,
+                lambda rejected, issues: evaluate_candidates(
+                    prepare_evaluation(original.model_copy(deep=True))
+                ),
+                blocked=(EvaluationBlocked,),
+                repair_label="独立重算指标并重建风险和缺失指标说明",
+                check_code="EVALUATION_RECOMPUTE_MISMATCH",
+                check_message="指标、差异或风险与独立重算结果不一致，需要重新计算并核对证据。",
+            )
             catalog = dict(checked.evidence_catalog)
             for ref, evidence in output.evidence_catalog.items():
                 if ref in catalog and catalog[ref] != evidence:
@@ -78,6 +92,7 @@ class EvaluationAgent:
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         except EvaluationBlocked as exc:
+            quality = getattr(exc, "quality_report", None)
             checked = original
             result = EvaluationResult(
                 agent_name="evaluation",
@@ -92,6 +107,8 @@ class EvaluationAgent:
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         except Exception as exc:
+            if isinstance(exc, QualityFailure):
+                quality = exc.report
             # 日志不包含异常正文，避免泄露业务输入或凭据。
             logger.warning("评估工具执行失败：%s", type(exc).__name__)
             checked = original
@@ -114,4 +131,6 @@ class EvaluationAgent:
                 ],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
+        result = finish_quality(result, quality)
+        result = validate_result(result.model_dump_json(), checked, prompt)
         return EvaluationRun(checked, result, prompt.content_sha256)

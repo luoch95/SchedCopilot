@@ -148,6 +148,7 @@ class WorkbenchService:
         question: str,
         workflow_id: str | None = None,
         on_progress=None,
+        demo_fallback=False,
     ) -> tuple[dict, SimulationResult | None]:
         baseline, event, revision = self.checked_snapshot(version)
         if self.workflow_runner is None:
@@ -163,6 +164,7 @@ class WorkbenchService:
             question=question,
             workflow_id=workflow_id,
             **({"on_progress": on_progress} if on_progress else {}),
+            **({"demo_fallback": True} if demo_fallback else {}),
         )
         self.checked_snapshot(version)
         simulation = None

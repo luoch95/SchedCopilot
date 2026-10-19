@@ -269,11 +269,16 @@ def test_invalid_tool_evidence_is_not_accepted(request_data):
     assert run.result.status == "failed"
 
 
-def test_missing_tool_reference_cannot_be_reported_as_success(request_data):
+def test_missing_tool_reference_is_repaired_before_success(request_data):
     def broken(case, context):
         return replace(validate_data(case, context), summary_refs=("invented",))
 
-    assert ValidationAgent(tool=broken).run(request(request_data)).result.status == "failed"
+    run = ValidationAgent(tool=broken).run(request(request_data))
+    expected = ValidationAgent().run(request(request_data))
+    assert run.result.data == expected.result.data
+    assert run.request.evidence_catalog == expected.request.evidence_catalog
+    assert run.result.quality.round == 2
+    assert run.result.quality.history[0].issues
 
 
 def test_tool_cannot_mutate_callers_case(request_data):
@@ -342,3 +347,17 @@ def test_in_progress_operation_without_remaining_time_is_not_treated_as_finished
     run = ValidationAgent().run(request(request_data))
     assert "IN_PROGRESS_STATUS_STALE" in codes(run)
     assert run.result.status == "blocked"
+
+
+def test_omitted_check_coverage_is_rebuilt(request_data):
+    def incomplete(case, context):
+        output = validate_data(case, context)
+        output.data.checked_items.clear()
+        return output
+
+    original = request(request_data)
+    run = ValidationAgent(tool=incomplete).run(original)
+    assert run.result.data == ValidationAgent().run(original).result.data
+    assert run.result.quality.round == 2
+    assert run.result.quality.history[0].issues
+    assert not run.result.quality.history[-1].issues

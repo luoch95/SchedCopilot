@@ -10,6 +10,7 @@ from ..tools.validation import ValidationToolOutput, validate_data
 from .contracts.common import AgentContext, Notice
 from .contracts.inputs import SchedulingCase, ValidationInput
 from .contracts.results import ValidationResult
+from .quality import QualityFailure, checked_execute, finish_quality, verify_evidence
 from .result_validation import AgentContractError, validate_request, validate_result
 
 logger = logging.getLogger(__name__)
@@ -49,9 +50,33 @@ class ValidationAgent:
             raise AgentContractError("STALE_CONTEXT", "请求版本已过期，请重新读取当前快照。")
 
         original = checked
+        quality = None
         try:
-            output = self._tool(
-                checked.case_data.model_copy(deep=True), checked.context.model_copy(deep=True)
+
+            def inspect(output):
+                verify_evidence(output, original)
+                snapshots = [
+                    e.content for e in output.evidence_catalog.values() if e.kind == "case"
+                ]
+                if snapshots != [original.case_data.model_dump(mode="json")]:
+                    raise AgentContractError("TOOL_INPUT_MISMATCH", "工具校验快照不一致。")
+                expected = validate_data(
+                    original.case_data.model_copy(deep=True), original.context.model_copy(deep=True)
+                )
+                if output != expected:
+                    raise ValueError("数据校验覆盖、问题或证据不一致")
+
+            output, quality = checked_execute(
+                lambda: self._tool(
+                    original.case_data.model_copy(deep=True), original.context.model_copy(deep=True)
+                ),
+                inspect,
+                lambda rejected, issues: validate_data(
+                    original.case_data.model_copy(deep=True), original.context.model_copy(deep=True)
+                ),
+                repair_label="按原始快照重建校验覆盖和问题清单",
+                check_code="VALIDATION_COVERAGE_OR_EVIDENCE_INVALID",
+                check_message="校验覆盖、问题清单或证据不完整，需要按原始快照重新校验。",
             )
             case_evidence = [
                 output.evidence_catalog[ref]
@@ -109,6 +134,8 @@ class ValidationAgent:
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         except Exception as exc:
+            if isinstance(exc, QualityFailure):
+                quality = exc.report
             # 原始工具异常可能包含业务数据或凭据，因此只记录异常类型。
             logger.warning("Validation tool execution failed: %s", type(exc).__name__)
             checked = original
@@ -131,4 +158,6 @@ class ValidationAgent:
                 ],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
+        result = finish_quality(result, quality)
+        result = validate_result(result.model_dump_json(), checked, prompt)
         return ValidationRun(checked, result, prompt.content_sha256)

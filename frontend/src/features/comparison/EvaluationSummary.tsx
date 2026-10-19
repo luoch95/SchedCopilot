@@ -5,6 +5,9 @@ const metrics: Record<string, string> = {
   extra_changeovers: '新增换型次数',
   extra_changeover_minutes: '新增换型时长',
   machine_utilization: '班次利用率',
+  material_availability: '物料可用性',
+  staffing: '人员配置',
+  mold_maintenance: '模具维护状态',
 };
 
 const record = (value: unknown): Record<string, unknown> =>

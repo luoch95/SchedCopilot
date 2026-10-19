@@ -121,6 +121,51 @@ def test_validate_only_and_session_requirements(client):
     )
 
 
+def test_explicit_demo_only_simulates_scheduling_and_keeps_normal_generation_available(client):
+    before = client.get("/api/workbench").json()
+    request = {**token(before), "intent": "generate_candidates", "demo_fallback": True}
+    assert client.get("/api/workflow/demo").json()["available"]
+    response = client.post("/api/workflow", json=request)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["workflow"]["status"] == "completed"
+    assert len(data["simulation"]["candidates"]) == 2
+    trace = data["workflow"]["trace"]
+    execution = next(t["execution"] for t in trace if t["action"] == "schedule")
+    assert execution["simulated"] is True
+    assert execution["error_code"] == "DEMO_FALLBACK"
+    assert execution["calls"] == 0
+    assert all(t["execution"] is None for t in trace if t["action"] != "schedule")
+    assert not data["workflow"]["demo"]["available"]
+    again = client.post("/api/workflow", json=request)
+    assert again.status_code == 409
+    assert again.json()["code"] == "demo_cooldown"
+    normal = client.post("/api/workflow", json={**request, "demo_fallback": False})
+    assert normal.status_code == 200
+    assert all(t["execution"] is None for t in normal.json()["workflow"]["trace"])
+    assert client.get("/api/workbench").json()["baseline"] == before["baseline"]
+    assert client.post("/api/workflow", json={**request, "intent": "validate"}).status_code == 422
+
+
+def test_blocked_validation_does_not_consume_demo(client):
+    before = client.get("/api/workbench").json()
+    unknown = client.put(
+        "/api/event",
+        json={
+            **token(before),
+            **{k: before["event"][k] for k in ("machine_id", "started_at", "source")},
+            "recovered_at": None,
+        },
+    ).json()
+    response = client.post(
+        "/api/workflow",
+        json={**token(unknown), "intent": "generate_candidates", "demo_fallback": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["workflow"]["status"] == "blocked"
+    assert client.get("/api/workflow/demo").json()["available"]
+
+
 def test_session_reuse_rejects_changed_event_even_with_current_request_version(client):
     before = client.get("/api/workbench").json()
     result = client.post("/api/workflow", json={**token(before), "intent": "validate"}).json()

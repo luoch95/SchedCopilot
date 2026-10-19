@@ -6,13 +6,20 @@ from fastapi.responses import JSONResponse
 from ..application.errors import (
     AnalysisUnavailable,
     ApplicationError,
+    DemoCooldown,
     InvalidInput,
     ResourceNotFound,
     SnapshotConflict,
 )
 from ..domain.errors import RuleViolation
 
-STATUS = {SnapshotConflict: 409, ResourceNotFound: 404, InvalidInput: 422, AnalysisUnavailable: 502}
+STATUS = {
+    SnapshotConflict: 409,
+    DemoCooldown: 409,
+    ResourceNotFound: 404,
+    InvalidInput: 422,
+    AnalysisUnavailable: 502,
+}
 
 
 def register_errors(app: FastAPI) -> None:

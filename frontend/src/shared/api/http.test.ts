@@ -2,6 +2,26 @@ import { describe, expect, it, vi } from 'vitest';
 import { workflowStream } from './http';
 
 describe('workflow progress transport failures', () => {
+  it('aborts a pending stream read without reporting a connection error or retrying', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({ cancel });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        headers: { 'Content-Type': 'application/x-ndjson' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    const progress = vi.fn();
+    const pending = workflowStream({}, progress, controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cancel).toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a truncated stream without inventing a final result or retrying', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"type":"stage_started","action":"validate"}\n', {

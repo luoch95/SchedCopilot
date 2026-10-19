@@ -17,6 +17,7 @@ from ..agents.contracts.results import (
 )
 from ..domain.evaluation import compare_plans
 from ..domain.models import MachineFailure
+from ..domain.production_conditions import production_condition_labels
 from .case_mapping import to_validation_case
 from .scheduling import SchedulingToolOutput, verify_tool_output
 from .scheduling_context import prepare_scheduling
@@ -252,7 +253,8 @@ def evaluate_candidates(source: EvaluationSource) -> EvaluationToolOutput:
         if check["unchecked_items"]:
             risks.append(
                 Statement(
-                    text="尚未检查的生产条件：" + "、".join(check["unchecked_items"]),
+                    text="尚未检查的生产条件："
+                    + "、".join(production_condition_labels(check["unchecked_items"])),
                     evidence_refs=[candidate.constraint_check_ref],
                 )
             )

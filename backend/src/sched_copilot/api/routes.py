@@ -88,6 +88,7 @@ def workflow(request: WorkflowRequest, service: Service, http_request: Request):
                 question=request.question,
                 workflow_id=request.workflow_id,
                 on_progress=emit,
+                demo_fallback=request.demo_fallback,
             )
             return {
                 "workflow": result,
@@ -100,5 +101,11 @@ def workflow(request: WorkflowRequest, service: Service, http_request: Request):
         intent=request.intent,
         question=request.question,
         workflow_id=request.workflow_id,
+        demo_fallback=request.demo_fallback,
     )
     return {"workflow": result, "simulation": simulation_view(simulation) if simulation else None}
+
+
+@router.get("/workflow/demo")
+def fallback_demo_status(service: Service):
+    return service.workflow_runner.demo_gate.status()

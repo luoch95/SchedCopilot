@@ -6,6 +6,7 @@ import re
 from ..agents.contracts.artifacts import EvaluationDifferences, EvaluationMetrics
 from ..agents.contracts.common import Statement
 from ..agents.contracts.results import ExplanationData, ExplanationTradeoff, NextStep
+from ..domain.production_conditions import production_condition_labels
 from ..domain.time_display import production_time
 from .explanation_context import ExplanationSource
 
@@ -68,7 +69,11 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
             )
         if validation.data and validation.data.unchecked_items:
             risks.append(
-                statement("未检查的生产条件：" + "、".join(validation.data.unchecked_items), [ref])
+                statement(
+                    "未检查的生产条件："
+                    + "、".join(production_condition_labels(validation.data.unchecked_items)),
+                    [ref],
+                )
             )
     if source.case:
         for event in source.case.failures:
@@ -120,7 +125,8 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
             if check["unchecked_items"]:
                 risks.append(
                     statement(
-                        "候选未检查的生产条件：" + "、".join(check["unchecked_items"]),
+                        "候选未检查的生产条件："
+                        + "、".join(production_condition_labels(check["unchecked_items"])),
                         [candidate.constraint_check_ref],
                     )
                 )

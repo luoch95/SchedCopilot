@@ -8,7 +8,8 @@ from hashlib import sha256
 from ..agents.contracts.common import Evidence
 from ..agents.evaluation_agent import EvaluationAgent
 from ..agents.explanation_agent import ExplanationAgent
-from ..agents.live_agent import ModelExecution
+from ..agents.live_agent import LiveAgent, ModelExecution
+from ..agents.quality import quality_progress, validate_handoff
 from ..agents.scheduling_agent import SchedulingAgent
 from ..agents.validation_agent import ValidationAgent
 from .routing import Action, Intent, route
@@ -45,6 +46,7 @@ class DynamicOrchestrator:
         *,
         max_steps: int = 6,
         on_progress: Callable[[dict], None] | None = None,
+        fallback_demo: Callable[[], None] | None = None,
     ) -> WorkflowRun:
         current = state.model_copy(deep=True)
         current.workflow_status, current.failure_code = "running", None
@@ -94,6 +96,11 @@ class DynamicOrchestrator:
                 current.workflow_status, current.failure_code = "failed", "WORKFLOW_STEP_LIMIT"
                 trace.append(WorkflowTrace("router", "failed", None, current.failure_code))
                 break
+            simulate_failure = action is Action.SCHEDULE and fallback_demo is not None
+            if simulate_failure:
+                # Claim outside Agent error handling: a concurrent cooldown
+                # rejection is a request conflict, not a broken business Agent.
+                fallback_demo()
             steps += 1
             try:
                 self._sync_requests(current)
@@ -103,10 +110,21 @@ class DynamicOrchestrator:
                     raise ValueError("Missing Agent input")
                 if on_progress:
                     on_progress({"type": "stage_started", "action": action.value})
-                run = getattr(self, name).run(
-                    request.model_copy(deep=True), expected_context=current.context
-                )
-                result = run.result
+                agent = getattr(self, name)
+                if simulate_failure and not isinstance(agent, LiveAgent):
+                    agent = LiveAgent(name, agent, lambda: None, None)
+
+                def emit_quality(event):
+                    if on_progress:
+                        on_progress({**event, "action": action.value})
+
+                with quality_progress(emit_quality):
+                    run = agent.run(
+                        request.model_copy(deep=True),
+                        expected_context=current.context,
+                        **({"simulate_failure": True} if simulate_failure else {}),
+                    )
+                result = validate_handoff(run, name)
                 if result.context != current.context or result.agent_name != name:
                     raise ValueError("Agent result mismatch")
                 for ref, evidence in run.request.evidence_catalog.items():

@@ -76,9 +76,12 @@ def test_progress_matches_real_agent_boundaries_and_reports(state):
     runner.validation.run = validate
     run = runner.run(state, on_progress=events.append)
     assert events[0] == {"type": "plan", "actions": actions(run)}
-    assert [(e["type"], e["action"]) for e in events[1:]] == [
+    assert [(e["type"], e["action"]) for e in events[1:] if e["type"].startswith("stage_")] == [
         (kind, action) for action in actions(run) for kind in ("stage_started", "stage_completed")
     ]
+    checked = [e for e in events if e["type"] == "quality_checked"]
+    assert [e["action"] for e in checked] == actions(run)
+    assert all(e["round"] == 1 and e["outcome"] == "passed" for e in checked)
     completed = [e for e in events if e["type"] == "stage_completed"]
     for event, step in zip(completed, run.trace, strict=True):
         assert event["step"]["status"] == step.status
@@ -175,3 +178,77 @@ def test_step_limit_and_unknown_intent(state):
     assert run.state.failure_code == "WORKFLOW_STEP_LIMIT"
     state.intent = "unknown"
     assert DynamicOrchestrator().run(state).state.failure_code == "WORKFLOW_INVALID_STATE"
+
+
+def test_repair_events_finish_before_next_agent_starts(state):
+    from sched_copilot.agents.scheduling_agent import SchedulingAgent
+    from sched_copilot.tools.scheduling import generate_schedule
+
+    def invalid(source):
+        output = generate_schedule(source)
+        output.data.candidates.clear()
+        return output
+
+    events = []
+    run = DynamicOrchestrator(scheduling=SchedulingAgent(tool=invalid)).run(
+        state, on_progress=events.append
+    )
+    assert run.state.workflow_status == "completed"
+    assert run.state.scheduling_result.quality.round == 2
+    repaired = next(
+        i
+        for i, e in enumerate(events)
+        if e["type"] == "quality_phase" and e["action"] == "schedule" and e["phase"] == "repairing"
+    )
+    checked = next(
+        i
+        for i, e in enumerate(events)
+        if e["type"] == "quality_checked" and e["action"] == "schedule" and e["round"] == 2
+    )
+    evaluated = next(
+        i
+        for i, e in enumerate(events)
+        if e["type"] == "stage_started" and e["action"] == "evaluate"
+    )
+    assert repaired < checked < evaluated
+
+
+def test_repair_failure_drops_candidate_evidence_and_stops_downstream(state, monkeypatch):
+    from sched_copilot.agents.scheduling_agent import SchedulingAgent
+    from sched_copilot.tools.scheduling import generate_schedule
+
+    def invalid(source):
+        output = generate_schedule(source)
+        output.data.candidates.clear()
+        return output
+
+    monkeypatch.setattr("sched_copilot.agents.scheduling_agent.generate_schedule", invalid)
+    run = DynamicOrchestrator(scheduling=SchedulingAgent(tool=invalid)).run(state)
+    result = run.state.scheduling_result
+    assert result.status in {"blocked", "failed"}
+    assert result.quality.outcome in {"blocked", "failed"}
+    assert result.quality.round == 2
+    assert result.data is None
+    assert run.state.evaluation_result is None
+    assert run.state.explanation_result is None
+    assert not any(
+        e.kind in {"candidate_plan", "candidate_batch", "candidate_constraints"}
+        for e in run.state.evidence_catalog.values()
+    )
+
+
+def test_agent_without_quality_report_cannot_handoff(state):
+    from dataclasses import replace
+
+    from sched_copilot.agents.validation_agent import ValidationAgent
+
+    class Unchecked:
+        def run(self, request, **kwargs):
+            run = ValidationAgent().run(request, **kwargs)
+            return replace(run, result=run.result.model_copy(update={"quality": None}))
+
+    run = DynamicOrchestrator(validation=Unchecked()).run(state)
+    assert run.state.workflow_status == "failed"
+    assert run.state.validation_result is None
+    assert run.state.scheduling_result is None
+    assert actions(run) == ["validate"]

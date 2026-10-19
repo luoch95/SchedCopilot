@@ -45,7 +45,6 @@ export function CurrentPlan({ state, range, zoom, pan, onZoom, onPan }: Props) {
       <section className="section">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">CURRENT PLAN</p>
             <h2>当前正式计划</h2>
           </div>
           <div className="chart-controls">

@@ -168,6 +168,20 @@ def validate_result(raw: str, request: AgentRequest, prompt: LoadedPrompt) -> Ag
         _reject("UNKNOWN_REFERENCE", "输出引用了未提供的证据或结果。")
 
     completed = result.status in {"success", "warning"}
+    if result.quality is not None:
+        expected = {
+            "success": "passed",
+            "warning": "warning",
+            "blocked": "blocked",
+            "failed": "failed",
+        }[result.status]
+        if result.quality.outcome != expected:
+            _reject("QUALITY_STATUS_CONFLICT", "质量结论与业务状态不一致。")
+        history = result.quality.history
+        if (
+            history and [item.round for item in history] != list(range(1, result.quality.round + 1))
+        ) or (completed and (not history or history[-1].issues or result.quality.issues)):
+            _reject("QUALITY_HISTORY_INVALID", "质量轮次不连续或尚有未解决的检查问题。")
     if completed and (result.data is None or not result.evidence_refs or result.errors):
         _reject("EMPTY_OR_INVALID_REPORT", "完成结果必须有内容和证据，且不能包含错误。")
     if result.status == "success" and result.warnings:
