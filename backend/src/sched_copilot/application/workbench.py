@@ -18,7 +18,7 @@ from .contracts import (
     WorkbenchSnapshot,
 )
 from .errors import AnalysisUnavailable, InvalidInput, ResourceNotFound, SnapshotConflict
-from .ports import Analyzer, DecisionRepository
+from .ports import Analyzer, DecisionRepository, WorkflowRunner
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ class WorkbenchService:
         snapshot_time: datetime,
         example: MachineFailure,
         analyzer: Analyzer,
+        workflow_runner: WorkflowRunner | None = None,
     ):
         self.repository = repository
         self.machines = machines
@@ -39,6 +40,7 @@ class WorkbenchService:
         self.snapshot_time = snapshot_time
         self.example = example
         self.analyzer = analyzer
+        self.workflow_runner = workflow_runner
 
     def initialize(self) -> None:
         if self.repository.active_event() is None:
@@ -137,6 +139,49 @@ class WorkbenchService:
             "Human decision recorded: action=%s plan_version=%s", command.action, result.version
         )
         return result.version, self.workbench()
+
+    def run_workflow(
+        self,
+        version: SnapshotVersion,
+        *,
+        intent: str,
+        question: str,
+        workflow_id: str | None = None,
+        on_progress=None,
+    ) -> tuple[dict, SimulationResult | None]:
+        baseline, event, revision = self.checked_snapshot(version)
+        if self.workflow_runner is None:
+            raise InvalidInput("动态编排器未配置")
+        outcome = self.workflow_runner(
+            baseline,
+            event,
+            self.machines,
+            self.orders,
+            self.snapshot_time,
+            revision,
+            intent=intent,
+            question=question,
+            workflow_id=workflow_id,
+            **({"on_progress": on_progress} if on_progress else {}),
+        )
+        self.checked_snapshot(version)
+        simulation = None
+        if outcome.candidates:
+            simulation_id = str(uuid4())
+            self.repository.record_simulation(simulation_id, outcome.candidates, event)
+            simulation = SimulationResult(
+                simulation_id,
+                version,
+                tuple(
+                    CandidateComparison(
+                        c,
+                        operation_changes(baseline, c, event),
+                        order_impacts(baseline, c, self.orders),
+                    )
+                    for c in outcome.candidates
+                ),
+            )
+        return outcome.payload, simulation
 
     def analyze(self, command: Analyze) -> dict:
         baseline, event, _ = self.checked_snapshot(command.version)

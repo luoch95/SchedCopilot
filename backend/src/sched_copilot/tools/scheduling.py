@@ -19,7 +19,7 @@ from ..domain.scheduling import ASSUMPTIONS, generate_candidates, validate_sched
 from .case_mapping import to_validation_case
 from .scheduling_context import SchedulingBlocked, SchedulingSource
 
-RULESET_VERSION = "1.0.0"
+RULESET_VERSION = "1.2.1"
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,19 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
     """按指定策略生成；每个候选重新检查约束，按实际工序安排去重。"""
     request, case = source.request, source.case
     domain = to_validation_case(case)
+    assumptions = list(ASSUMPTIONS)
+    if domain.production:
+        assumptions = [
+            f"生产资源来源：{domain.production.source}",
+            f"按登记班次排产；不同实体模具换型需 {domain.production.changeover_minutes} 分钟。",
+            "物料、人员及模具保养尚未建模；预计恢复时间为人工估计。",
+            "合格设备加工时长相同；规则方案不保证最优，正式发布仍需人工确认。",
+        ]
+    assumptions.append(
+        "原计划对照保留原设备及加工顺序，按故障和生产约束顺延；"
+        "允许转移方案比较全部待加工工序的合格设备，优先最早开工，"
+        "同一开工时间优先原设备，因此也可能主动转移未在故障设备上的工序。"
+    )
     raw_event = case.failures[0]
     event = MachineFailure(
         raw_event.machine_id,
@@ -70,7 +83,7 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
         "scheduling_rules",
         {
             "ruleset_version": RULESET_VERSION,
-            "assumptions": list(ASSUMPTIONS),
+            "assumptions": assumptions,
             "unchecked_items": source.validation.data.unchecked_items,
         },
     )
@@ -89,6 +102,7 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
                 request.context.event_version,
                 strategies=(strategy.strategy_id,),
                 eligible_machine_ids=source.eligible_machine_ids,
+                production=domain.production,
             )[0]
             _check_schedule(source, candidate.schedule, event)
         except RuleViolation:
@@ -164,6 +178,8 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
         ]
         if all(op.mold_id is not None for op in case.operations):
             checked.append("physical_mold_compatibility")
+        if domain.production:
+            checked.extend(["shift_calendar", "changeover_duration", "physical_mold_occupancy"])
         check = CandidateConstraintCheck(
             candidate_id=candidate_id,
             passed=True,
@@ -203,7 +219,7 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
     data = SchedulingData(
         candidate_batch_id=batch_id,
         candidates=candidates,
-        assumptions=[Statement(text=text, evidence_refs=[rules_ref]) for text in ASSUMPTIONS],
+        assumptions=[Statement(text=text, evidence_refs=[rules_ref]) for text in assumptions],
         limitations=limitations,
     )
     batch_ref = f"{batch_id}:manifest"
@@ -217,6 +233,8 @@ def _check_schedule(source: SchedulingSource, schedule: Schedule, event: Machine
     """独立复核候选，防止生成过程遗漏约束或错误转移。"""
     domain = to_validation_case(source.case)
     issues = validate_schedule(schedule, domain.machines, event, domain.schedule)
+    if domain.production:
+        issues += tuple(domain.production.check(schedule, event))
     if issues:
         raise RuleViolation("候选未通过独立约束检查")
     original = {op.id: op for op in domain.schedule.operations}
@@ -298,6 +316,28 @@ def verify_tool_output(source: SchedulingSource, output: SchedulingToolOutput) -
             op.machine_id != original[op.operation_id].machine_id for op in snapshot.operations
         ):
             raise ValueError("等待恢复策略不允许设备转移")
+        if candidate.strategy_id == "wait-recovery":
+            for machine in domain.machines:
+                before_queue = [
+                    op.id
+                    for op in sorted(
+                        (
+                            o
+                            for o in to_validation_case(source.case).schedule.operations
+                            if o.machine_id == machine.id
+                        ),
+                        key=lambda o: (o.start, o.id),
+                    )
+                ]
+                after_queue = [
+                    op.id
+                    for op in sorted(
+                        (o for o in schedule.operations if o.machine_id == machine.id),
+                        key=lambda o: (o.start, o.id),
+                    )
+                ]
+                if before_queue != after_queue:
+                    raise ValueError("等待恢复策略不允许改变原设备加工顺序")
     if not output.data.candidates:
         raise ValueError("工具没有返回候选")
     manifest = [

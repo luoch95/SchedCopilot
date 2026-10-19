@@ -16,6 +16,7 @@ ALLOWED = {
     "tools": {"tools", "domain", "agents"},
     "prompts": {"prompts"},
     "scenarios": {"scenarios", "domain"},
+    "orchestration": {"orchestration", "agents", "domain", "application"},
 }
 
 

@@ -84,6 +84,7 @@ export function CurrentPlan({ state, range, zoom, pan, onZoom, onPan }: Props) {
         />
         <p className="hint">
           浅色条为已完成工序，红色虚线区域为故障窗口。三个甘特图使用共同时间轴。
+          此图保留已发布安排，生成候选不会自动修改正式计划。
         </p>
         <h3 className="block-title">
           {state.event.recovered_at ? '直接影响范围' : '潜在风险范围'}

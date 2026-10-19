@@ -29,6 +29,17 @@ class Settings:
     database_path: Path
     frontend_dir: Path
     log_level: str = "INFO"
+    workflow_model_mode: str = "rules"
+    llm_timeout_seconds: float = 30
+    llm_api_type: str = "chat_completions"
+
+    def __post_init__(self):
+        if self.workflow_model_mode not in {"rules", "auto", "live"}:
+            raise ValueError("SCHED_WORKFLOW_MODEL_MODE 必须是 rules、auto 或 live")
+        if not 1 <= self.llm_timeout_seconds <= 60:
+            raise ValueError("LLM_TIMEOUT_SECONDS 必须在 1 到 60 秒之间")
+        if self.llm_api_type not in {"chat_completions", "responses"}:
+            raise ValueError("LLM_API_TYPE 必须是 chat_completions 或 responses")
 
     @property
     def llm_configured(self) -> bool:
@@ -42,4 +53,7 @@ class Settings:
             Path(os.getenv("SCHED_DB_PATH") or REPOSITORY_ROOT / ".data/injection_molding.sqlite3"),
             Path(os.getenv("SCHED_FRONTEND_DIR") or REPOSITORY_ROOT / "frontend/dist"),
             os.getenv("SCHED_LOG_LEVEL", "INFO").upper(),
+            os.getenv("SCHED_WORKFLOW_MODEL_MODE", "auto"),
+            float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
+            os.getenv("LLM_API_TYPE", "chat_completions"),
         )

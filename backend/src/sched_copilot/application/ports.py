@@ -4,9 +4,11 @@ from collections.abc import Callable
 from typing import Protocol
 
 from ..domain.models import CandidatePlan, Machine, MachineFailure, Schedule
+from .contracts import WorkflowOutcome
 
 EventSelector = Callable[[Schedule, tuple[MachineFailure, ...]], MachineFailure]
 Analyzer = Callable[..., dict[str, str]]
+WorkflowRunner = Callable[..., WorkflowOutcome]
 
 
 class DecisionRepository(Protocol):

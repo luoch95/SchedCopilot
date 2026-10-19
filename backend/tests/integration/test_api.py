@@ -60,6 +60,7 @@ def test_api_exposes_computed_end_and_reuses_existing_store(tmp_path, monkeypatc
         assert client.get("/api/health").json() == {
             "status": "ok",
             "live_analysis_configured": False,
+            "workflow_model_mode": "rules",
         }
 
 

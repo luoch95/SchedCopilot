@@ -3,9 +3,13 @@
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from .models import Machine, Order, Schedule, TaskStatus
 from .scheduling import overlaps, validate_schedule
+
+if TYPE_CHECKING:
+    from .production import ProductionResources
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,7 @@ class ValidationCase:
     unavailable_machine_ids: frozenset[str]
     report_snapshot_at: datetime
     wip_policy: str | None
+    production: "ProductionResources | None" = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +72,26 @@ def validate_case(case: ValidationCase) -> CaseValidation:
     _check_records(case, add)
     _check_resources_and_reporting(case, add)
     _check_events(case, add)
+    if case.production:
+        mold_map = {m.mold_id: m for m in case.molds}
+        for machine_id, mold_id in case.production.initial_molds.items():
+            if (
+                mold_id not in mold_map
+                or machine_id not in mold_map[mold_id].compatible_machine_ids
+            ):
+                add(
+                    "PRODUCTION_DATA_INVALID",
+                    "初始装模不存在或与设备不兼容。",
+                    "无法确认换型起点。",
+                    "修正初始装模记录。",
+                )
+        for error in case.production.configuration_errors(case.schedule, case.machines):
+            add(
+                "PRODUCTION_DATA_INVALID",
+                error,
+                "班次或换型数据不可用。",
+                "修正生产资源快照后重试。",
+            )
     missing_mold = any(value is None for value in case.operation_molds)
 
     unchecked = [
@@ -79,6 +104,12 @@ def validate_case(case: ValidationCase) -> CaseValidation:
     ]
     if missing_mold:
         unchecked.append("physical_mold_compatibility")
+    if case.production and not case.production.configuration_errors(case.schedule, case.machines):
+        unchecked = [
+            item
+            for item in unchecked
+            if item not in {"shift_calendar", "physical_mold_occupancy", "changeover_duration"}
+        ]
     return CaseValidation(
         tuple(issues),
         (

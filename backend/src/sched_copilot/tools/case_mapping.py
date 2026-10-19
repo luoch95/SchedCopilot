@@ -2,6 +2,7 @@
 
 from ..agents.contracts.inputs import SchedulingCase
 from ..domain.models import Machine, Operation, Order, Schedule, TaskStatus
+from ..domain.production import ProductionResources
 from ..domain.validation import FailureRecord, MoldCompatibility, ValidationCase
 
 
@@ -41,4 +42,26 @@ def to_validation_case(case: SchedulingCase) -> ValidationCase:
         unavailable_machine_ids=frozenset(m.machine_id for m in case.machines if not m.available),
         report_snapshot_at=case.report_snapshot_at,
         wip_policy=case.wip_policy,
+        production=production_resources(case),
+    )
+
+
+def production_resources(case: SchedulingCase) -> ProductionResources | None:
+    if case.production is None:
+        return None
+    data = case.production
+    return ProductionResources(
+        source=data.source,
+        shifts={
+            machine_id: tuple(
+                (shift.start_at, shift.end_at)
+                for shift in data.shifts
+                if shift.machine_id == machine_id
+            )
+            for machine_id in {m.machine_id for m in case.machines}
+            | {s.machine_id for s in data.shifts}
+        },
+        operation_molds={o.operation_id: o.mold_id for o in case.operations if o.mold_id},
+        initial_molds=dict(data.initial_molds),
+        changeover_minutes=data.changeover_minutes,
     )

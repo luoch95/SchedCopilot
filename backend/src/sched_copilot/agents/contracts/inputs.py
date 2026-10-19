@@ -46,6 +46,19 @@ class FailureSnapshot(Contract):
     source: Text
 
 
+class ShiftSnapshot(Contract):
+    machine_id: Text
+    start_at: AwareDatetime
+    end_at: AwareDatetime
+
+
+class ProductionSnapshot(Contract):
+    source: Text
+    shifts: list[ShiftSnapshot]
+    initial_molds: dict[Text, Text]
+    changeover_minutes: Annotated[int, Field(gt=0)]
+
+
 class SchedulingCase(Contract):
     """A DTO, not a business validator; conflicts are reported by the validation tool."""
 
@@ -56,6 +69,7 @@ class SchedulingCase(Contract):
     molds: list[MoldSnapshot]
     failures: list[FailureSnapshot]
     wip_policy: Text | None
+    production: ProductionSnapshot | None = None
 
 
 class ValidationInput(AgentInput):

@@ -63,3 +63,9 @@ class SimulationResult:
     id: str
     version: SnapshotVersion
     candidates: tuple[CandidateComparison, ...]
+
+
+@dataclass(frozen=True)
+class WorkflowOutcome:
+    payload: dict
+    candidates: tuple[CandidatePlan, ...]

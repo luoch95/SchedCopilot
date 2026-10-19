@@ -1,4 +1,5 @@
 import type { Candidate } from '../../shared/api/contracts';
+import { DecisionText } from '../../shared/ui/DecisionText';
 
 const IMPACT_TYPES = ['直接影响', '连锁影响', '策略调整'];
 
@@ -8,16 +9,12 @@ export function ImpactChains({ candidates }: { candidates: Candidate[] }) {
       {' '}
       <h3 className="block-title">工序变化与影响链</h3>
       <div className="impact-type-legend" aria-label="影响类型图例">
-        {IMPACT_TYPES.map((type) => {
-          // Keep every impact type visible; direct impact is the primary legend state.
-          const active = type === '直接影响';
-          return (
-            <span className={active ? 'impact-type active' : 'impact-type dim'} key={type}>
-              <i />
-              {type}
-            </span>
-          );
-        })}
+        {IMPACT_TYPES.map((type) => (
+          <span className="impact-type" key={type}>
+            <i />
+            {type}
+          </span>
+        ))}
       </div>
       <div className="candidate-grid">
         {candidates.map((item) => (
@@ -38,7 +35,10 @@ export function ImpactChains({ candidates }: { candidates: Candidate[] }) {
                   ))}
                 </div>
                 <p>{change.影响链}</p>
-                <small>依据：{change.依据}</small>
+                <small>
+                  依据：
+                  <DecisionText text={change.依据} />
+                </small>
               </div>
             ))}
             {!item.changes.length && <p className="hint">该方案没有改变任何工序。</p>}

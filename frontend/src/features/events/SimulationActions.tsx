@@ -15,7 +15,7 @@ export function SimulationActions({
     <section className="simulation-actions">
       <div>
         <h2>生成候选方案</h2>
-        <p>对比“等待修复”与“允许合格设备转移”，不会修改正式计划。</p>
+        <p>对比“原计划对照（原设备顺延）”与“允许合格设备转移”，不会修改正式计划。</p>
       </div>
       <button className="primary" disabled={blocked || !!busy} onClick={onGenerate}>
         生成候选方案 <span aria-hidden="true">→</span>

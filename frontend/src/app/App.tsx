@@ -1,4 +1,4 @@
-import { AnalysisPanel } from '../features/analysis';
+import { AnalysisPanel, WorkflowPanel } from '../features/analysis';
 import { Comparison } from '../features/comparison';
 import { DecisionPanel } from '../features/decisions';
 import { EventEditor, SimulationActions } from '../features/events';
@@ -41,7 +41,7 @@ export default function App() {
             <h1>故障影响与方案决策</h1>
             <p>先看影响，再比较代价。正式计划由你确认。</p>
           </div>
-          <span className="environment-tag">仿真数据 · UTC+08:00</span>
+          <span className="environment-tag">仿真数据 · 北京时间</span>
         </header>
         <div aria-live="polite">
           {controller.busy && (
@@ -78,34 +78,45 @@ export default function App() {
           blocked={controller.blocked}
           onGenerate={controller.generate}
         />
+        <WorkflowPanel
+          running={controller.activeIntent !== null}
+          disabled={!!controller.busy || controller.dirty || controller.stale}
+          result={controller.workflow}
+          progress={controller.progress}
+          onRun={controller.runWorkflow}
+        />
         {currentSimulation && (
-          <>
-            <Comparison state={state} simulation={currentSimulation} range={range} />
-            <AnalysisPanel
-              busy={controller.busy}
-              blocked={controller.blocked}
-              question={controller.question}
-              live={controller.live}
-              reports={controller.reports}
-              onQuestion={controller.changeQuestion}
-              onLive={controller.changeLive}
-              onAnalyze={controller.analyze}
-            />
-            <DecisionPanel
-              state={state}
-              currentSimulation={currentSimulation}
-              candidate={controller.candidate}
-              busy={controller.busy}
-              blocked={controller.blocked}
-              selected={controller.selected}
-              reason={controller.reason}
-              action={controller.action}
-              onSelected={controller.setSelected}
-              onReason={controller.setReason}
-              onAction={controller.setAction}
-              onDecide={controller.decide}
-            />
-          </>
+          <Comparison
+            state={state}
+            simulation={currentSimulation}
+            range={range}
+            workflow={controller.workflow}
+          />
+        )}
+        {controller.workflow && (
+          <AnalysisPanel
+            busy={controller.busy}
+            question={controller.question}
+            result={controller.workflow}
+            onQuestion={controller.changeQuestion}
+            onExplain={() => controller.runWorkflow('explain')}
+          />
+        )}
+        {currentSimulation && (
+          <DecisionPanel
+            state={state}
+            currentSimulation={currentSimulation}
+            candidate={controller.candidate}
+            busy={controller.busy}
+            blocked={controller.blocked}
+            selected={controller.selected}
+            reason={controller.reason}
+            action={controller.action}
+            onSelected={controller.setSelected}
+            onReason={controller.setReason}
+            onAction={controller.setAction}
+            onDecide={controller.decide}
+          />
         )}
         <DecisionHistory history={state.history} />
         <footer className="workspace-footer">

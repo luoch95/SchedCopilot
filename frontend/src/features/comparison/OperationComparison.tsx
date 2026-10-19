@@ -1,5 +1,6 @@
 import { stamp } from '../../shared/lib/time';
 import type { Candidate, Operation, Workbench } from '../../shared/api/contracts';
+import { DecisionText } from '../../shared/ui/DecisionText';
 const slot = (op: Operation) => `${op.machine_id} · ${stamp(op.start)} → ${stamp(op.end)}`;
 const differs = (values: (string | number)[]) => new Set(values).size > 1;
 export function OperationComparison({
@@ -52,12 +53,24 @@ export function OperationComparison({
                         </span>
                         {op.machine_id !== value.machine_id ? (
                           <small className="transfer-text">
-                            设备转移 {op.machine_id} → {value.machine_id}
+                            <strong>
+                              设备转移 {op.machine_id} → {value.machine_id}
+                            </strong>
                           </small>
                         ) : op.start !== value.start ? (
                           <small className="time-text">时间调整</small>
                         ) : (
                           <small>保持原安排</small>
+                        )}
+                        {candidates[index].changes.find((change) => change.工序 === op.id) && (
+                          <small>
+                            <DecisionText
+                              text={
+                                candidates[index].changes.find((change) => change.工序 === op.id)
+                                  ?.依据 ?? ''
+                              }
+                            />
+                          </small>
                         )}
                       </div>
                     </td>

@@ -121,3 +121,91 @@ export interface AnalysisResult {
   reports: Record<string, string>;
   mode: 'live' | 'offline';
 }
+
+export type WorkflowIntent = 'generate_candidates' | 're_evaluate' | 'explain' | 'validate';
+export interface WorkflowNotice {
+  code: string;
+  message: string;
+  repair_hint: string;
+  evidence_refs: string[];
+}
+export interface WorkflowStatement {
+  text: string;
+  evidence_refs: string[];
+}
+export interface WorkflowReport {
+  status: 'success' | 'warning' | 'blocked' | 'failed';
+  warnings: WorkflowNotice[];
+  errors: WorkflowNotice[];
+  data: {
+    summary?: string;
+    facts?: WorkflowStatement[];
+    assumptions?: WorkflowStatement[];
+    risks?: WorkflowStatement[];
+    tradeoffs?: WorkflowStatement[];
+    next_steps?: {
+      action: string;
+      requires_human_confirmation: boolean;
+      evidence_refs: string[];
+    }[];
+    limitations?: string[];
+    evaluations?: {
+      candidate_id: string;
+      metrics_ref: string;
+      differences_ref?: string;
+      missing_metrics: string[];
+    }[];
+    candidates?: { candidate_id: string; strategy_id: string }[];
+  } | null;
+}
+export interface WorkflowResult {
+  id: string;
+  intent: WorkflowIntent;
+  status: 'completed' | 'blocked' | 'failed';
+  failure_code: string | null;
+  trace: {
+    action: string;
+    status: string;
+    result_ref: string | null;
+    error_code: string | null;
+    execution?: {
+      mode: 'live' | 'fallback';
+      model: string | null;
+      calls: number;
+      input_tokens: number | null;
+      output_tokens: number | null;
+      elapsed_ms: number;
+      error_code: string | null;
+      prompt_sha256: string;
+      highlights: WorkflowStatement[];
+    } | null;
+  }[];
+  results: Partial<
+    Record<'validation' | 'scheduling' | 'evaluation' | 'explanation', WorkflowReport>
+  >;
+  evidence_catalog: Record<string, { kind: string; content: unknown }>;
+}
+export interface WorkflowResponse {
+  workflow: WorkflowResult;
+  simulation: Simulation | null;
+}
+
+export type WorkflowAction = 'validate' | 'schedule' | 'evaluate' | 'explain';
+export type WorkflowProgressEvent =
+  | { type: 'plan'; actions: WorkflowAction[] }
+  | { type: 'stage_started'; action: WorkflowAction }
+  | {
+      type: 'stage_completed';
+      action: WorkflowAction;
+      name: keyof WorkflowResult['results'];
+      report: WorkflowReport | null;
+      step: WorkflowResult['trace'][number];
+    };
+export interface WorkflowProgress {
+  intent: WorkflowIntent;
+  actions: WorkflowAction[];
+  active: WorkflowAction | null;
+  trace: WorkflowResult['trace'];
+  results: WorkflowResult['results'];
+  interrupted: boolean;
+}

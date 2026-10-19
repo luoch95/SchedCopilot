@@ -7,7 +7,14 @@ from fastapi import APIRouter, Depends, Request
 from ..application.contracts import Analyze, Decide, SaveEvent
 from ..application.workbench import WorkbenchService
 from .presenters import simulation_view, workbench_view
-from .schemas import AnalysisRequest, DecisionRequest, EventRequest, SnapshotRequest
+from .schemas import (
+    AnalysisRequest,
+    DecisionRequest,
+    EventRequest,
+    SnapshotRequest,
+    WorkflowRequest,
+)
+from .workflow_stream import workflow_stream
 
 router = APIRouter(prefix="/api")
 
@@ -25,6 +32,7 @@ def health(request: Request):
     return {
         "status": "ok",
         "live_analysis_configured": settings.llm_configured,
+        "workflow_model_mode": settings.workflow_model_mode,
     }
 
 
@@ -67,3 +75,30 @@ def decide(request: DecisionRequest, service: Service):
 @router.post("/analysis")
 def analyze(request: AnalysisRequest, service: Service):
     return service.analyze(Analyze(request.version(), request.live, request.question))
+
+
+@router.post("/workflow")
+def workflow(request: WorkflowRequest, service: Service, http_request: Request):
+    if "application/x-ndjson" in http_request.headers.get("accept", ""):
+
+        def execute(emit):
+            result, simulation = service.run_workflow(
+                request.version(),
+                intent=request.intent,
+                question=request.question,
+                workflow_id=request.workflow_id,
+                on_progress=emit,
+            )
+            return {
+                "workflow": result,
+                "simulation": simulation_view(simulation) if simulation else None,
+            }
+
+        return workflow_stream(execute)
+    result, simulation = service.run_workflow(
+        request.version(),
+        intent=request.intent,
+        question=request.question,
+        workflow_id=request.workflow_id,
+    )
+    return {"workflow": result, "simulation": simulation_view(simulation) if simulation else None}

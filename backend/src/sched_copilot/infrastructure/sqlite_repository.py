@@ -25,6 +25,18 @@ from .serialization import (
 )
 
 
+def backup_database(path: Path) -> Path:
+    backup = (
+        path.parent
+        / "backups"
+        / f"{path.stem}-before-production-{datetime.now():%Y%m%d-%H%M%S-%f}.sqlite3"
+    )
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as source, sqlite3.connect(backup) as target:
+        source.backup(target)
+    return backup
+
+
 class DecisionStore:
     def __init__(self, path: str | Path, baseline: Schedule):
         self.path = str(path)
@@ -52,6 +64,9 @@ class DecisionStore:
                 CREATE TABLE IF NOT EXISTS simulations (
                     id TEXT PRIMARY KEY, candidates TEXT NOT NULL, event TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS production_inputs (
+                    id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL
+                );
             """)
             conn.execute(
                 "INSERT OR IGNORE INTO current_plan VALUES (1, ?)", (schedule_json(baseline),)
@@ -67,6 +82,20 @@ class DecisionStore:
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=10)
+
+    def seed_production_inputs(self, payload: dict) -> bool:
+        """Only fill a missing supplementary snapshot; never replace user inputs."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO production_inputs VALUES (1, ?)",
+                (json.dumps(payload, ensure_ascii=False, sort_keys=True),),
+            )
+            return cursor.rowcount == 1
+
+    def production_snapshot(self) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT payload FROM production_inputs WHERE id=1").fetchone()
+        return json.loads(row[0]) if row else None
 
     def current(self) -> Schedule:
         with self._connect() as conn:

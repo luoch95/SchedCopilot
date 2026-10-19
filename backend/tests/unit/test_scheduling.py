@@ -50,9 +50,10 @@ def test_candidate_is_bound_to_baseline_and_event():
 def test_manual_expected_metrics_and_fixed_completed_tasks():
     baseline = demo_schedule()
     wait, transfer = generate_candidates(baseline, failure(), demo_machines(), demo_orders())
-    assert (wait.metrics.late_orders, wait.metrics.total_lateness_minutes) == (1, 150)
-    assert wait.metrics.moved_operations == 4
-    assert wait.metrics.makespan == BASE_TIME.replace(hour=21)
+    # M3 must keep O1002-OP2 before O1004-OP1, even when O1002 is delayed.
+    assert (wait.metrics.late_orders, wait.metrics.total_lateness_minutes) == (2, 390)
+    assert wait.metrics.moved_operations == 6
+    assert wait.metrics.makespan == BASE_TIME.replace(hour=23)
     assert (transfer.metrics.late_orders, transfer.metrics.moved_operations) == (0, 3)
     for candidate in (wait, transfer):
         for operation in baseline.operations:
@@ -83,3 +84,25 @@ def test_validator_rejects_precedence_overlap_and_wrong_machine():
     errors = validate_schedule(replace(baseline, operations=tuple(tasks)), demo_machines())
     assert any("资格" in error for error in errors)
     assert any("重叠" in error for error in errors)
+
+
+def test_wait_preserves_published_machine_queue_despite_changed_due_date():
+    baseline = demo_schedule()
+    # Urgent later work must not overtake the earlier queue in the waiting strategy.
+    orders = tuple(
+        replace(order, due=BASE_TIME.replace(hour=14)) if order.id == "O1005" else order
+        for order in demo_orders()
+    )
+    wait = generate_candidates(
+        baseline, failure(), demo_machines(), orders, strategies=("wait-recovery",)
+    )[0]
+    for machine in demo_machines():
+        before = sorted(
+            (op for op in baseline.operations if op.machine_id == machine.id),
+            key=lambda op: (op.start, op.id),
+        )
+        after = sorted(
+            (op for op in wait.schedule.operations if op.machine_id == machine.id),
+            key=lambda op: (op.start, op.id),
+        )
+        assert [op.id for op in before] == [op.id for op in after]

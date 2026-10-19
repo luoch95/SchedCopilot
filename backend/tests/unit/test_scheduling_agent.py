@@ -284,6 +284,8 @@ def test_unavailable_idle_machine_is_not_selected_for_transfer():
 
 def test_no_qualified_alternative_produces_one_distinct_candidate():
     initial = validation_request()
+    # Short recovery leaves no benefit from changing the existing machine queues.
+    initial.case_data.failures[0].estimated_recovery_at = EVENT_TIME.replace(hour=14)
     # 本案例模具 A 的原设备均为 M1，因此收窄兼容表不会破坏原计划。
     next(m for m in initial.case_data.molds if m.mold_id == "mold_a").compatible_machine_ids = [
         "M1"

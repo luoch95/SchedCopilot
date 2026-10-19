@@ -42,7 +42,7 @@ export function MetricsTable({ candidates }: { candidates: Candidate[] }) {
                         !different ? '' : value === Math.min(...values) ? 'better' : 'worse'
                       }
                     >
-                      {metric.display ? metric.display(value) : value}
+                      <strong>{metric.display ? metric.display(value) : value}</strong>
                       {different && (
                         <small>{value === Math.min(...values) ? '较优' : '较差'}</small>
                       )}

@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../shared/api/errors';
-import type { Simulation, SnapshotVersion, Workbench } from '../../shared/api/contracts';
+import type {
+  Simulation,
+  SnapshotVersion,
+  Workbench,
+  WorkflowIntent,
+  WorkflowResult,
+  WorkflowProgress,
+} from '../../shared/api/contracts';
 import { draftFingerprint, draftFor, type EventDraft } from '../events';
 import { workbenchApi } from './api';
 
@@ -17,16 +24,19 @@ export function useWorkbench() {
   const [reason, setReason] = useState('');
   const [action, setAction] = useState('reject');
   const [question, setQuestion] = useState('设备故障后，应该如何比较方案？');
-  const [live, setLive] = useState(false);
-  const [reports, setReports] = useState<Record<string, string> | null>(null);
+  const [workflow, setWorkflow] = useState<WorkflowResult | null>(null);
+  const [activeIntent, setActiveIntent] = useState<WorkflowIntent | null>(null);
+  const [progress, setProgress] = useState<WorkflowProgress | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState(0);
   const inFlight = useRef(false);
   const decisionRequest = useRef({ key: '', id: '' });
+  const initialLoad = useRef<Promise<Workbench> | null>(null);
 
   function clearResults() {
     setSimulation(null);
-    setReports(null);
+    setWorkflow(null);
+    setProgress(null);
     setReason('');
     setSelected('');
   }
@@ -42,8 +52,8 @@ export function useWorkbench() {
 
   useEffect(() => {
     let active = true;
-    workbenchApi
-      .load()
+    initialLoad.current ??= workbenchApi.load();
+    initialLoad.current
       .then((value) => {
         if (active) accept(value);
       })
@@ -135,22 +145,79 @@ export function useWorkbench() {
       setNotice('已恢复可试算事件。正式计划与历史记录均保留。');
     });
 
-  const generate = () =>
-    run('生成方案', async () => {
-      if (blocked) return;
-      const result = await workbenchApi.simulate(version());
-      setSimulation(result);
-      setSelected(result.candidates[0].id);
-      setReports(null);
-      setReason('');
-    });
+  const runWorkflow = (intent: WorkflowIntent) =>
+    run(
+      {
+        generate_candidates: '生成方案',
+        validate: '校验数据',
+        re_evaluate: '重新评估',
+        explain: '重新解释',
+      }[intent],
+      async () => {
+        if (!state || dirty || stale) return;
+        if (intent === 'generate_candidates' && blocked) return;
+        if ((intent === 'explain' || intent === 're_evaluate') && !workflow) return;
+        if (intent === 'generate_candidates' || intent === 'validate') clearResults();
+        if (intent === 're_evaluate' && workflow) {
+          setWorkflow({ ...workflow, results: { ...workflow.results, explanation: undefined } });
+        }
+        setActiveIntent(intent);
+        setProgress({
+          intent,
+          actions: {
+            generate_candidates: ['validate', 'schedule', 'evaluate', 'explain'],
+            validate: ['validate'],
+            re_evaluate: ['evaluate'],
+            explain: ['explain'],
+          }[intent] as WorkflowProgress['actions'],
+          active: null,
+          trace: [],
+          results: {},
+          interrupted: false,
+        });
+        try {
+          const result = await workbenchApi.workflow(
+            {
+              ...version(),
+              intent,
+              question: question.trim() || '解释校验结果',
+              workflow_id:
+                intent === 'explain' || intent === 're_evaluate' ? workflow?.id : undefined,
+            },
+            (event) =>
+              setProgress((previous) => {
+                if (!previous) return previous;
+                if (event.type === 'plan') return { ...previous, actions: event.actions };
+                if (event.type === 'stage_started') return { ...previous, active: event.action };
+                return {
+                  ...previous,
+                  active: null,
+                  trace: [...previous.trace, event.step],
+                  results: event.report
+                    ? { ...previous.results, [event.name]: event.report }
+                    : previous.results,
+                };
+              }),
+          );
+          setWorkflow(result.workflow);
+          setProgress(null);
+          if (result.simulation) {
+            setSimulation(result.simulation);
+            setSelected(result.simulation.candidates[0]?.id ?? '');
+            setReason('');
+          }
+        } catch (err) {
+          setProgress((previous) =>
+            previous ? { ...previous, active: null, interrupted: true } : null,
+          );
+          throw err;
+        } finally {
+          setActiveIntent(null);
+        }
+      },
+    );
 
-  const analyze = () =>
-    run('运行分析', async () => {
-      if (blocked || !question.trim()) return;
-      const result = await workbenchApi.analyze({ ...version(), live, question });
-      setReports(result.reports);
-    });
+  const generate = () => runWorkflow('generate_candidates');
 
   const decide = () =>
     run('提交人工决定', async () => {
@@ -180,11 +247,6 @@ export function useWorkbench() {
 
   function changeQuestion(value: string) {
     setQuestion(value);
-    setReports(null);
-  }
-  function changeLive(value: boolean) {
-    setLive(value);
-    setReports(null);
   }
 
   return {
@@ -202,8 +264,10 @@ export function useWorkbench() {
     reason,
     action,
     question,
-    live,
-    reports,
+    activeIntent,
+    workflow,
+    progress,
+    runWorkflow,
     candidate,
     zoom,
     pan,
@@ -212,13 +276,11 @@ export function useWorkbench() {
     save,
     recover,
     generate,
-    analyze,
     decide,
     setSelected,
     setReason,
     setAction,
     changeQuestion,
-    changeLive,
     setZoom,
     setPan,
   };

@@ -82,20 +82,30 @@ uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host
 
 旧 Streamlit 实现及专用依赖已移除，历史版本保留在 Git 中。当前只有 React + FastAPI 这一套主实现。
 
-## API 多 Agent
+## 四 Agent 与真实模型
 
-生产计划 Agent 与设备资源 Agent 并行读取各自证据，决策协调 Agent 汇总并解释已经计算和校验的方案。三个角色均没有发布权限。
+“生成候选方案”调用 `/api/workflow`：数据校验 → 排产执行 → 方案评估 → 结果解释。也支持仅校验、重新评估和针对已有结果提问。四个角色均可接入真实模型，旧 `/api/analysis` 三角色接口仅保留兼容，前端不再使用。
 
-在启动应用的同一 PowerShell 会话配置兼容 OpenAI 工具调用协议的模型服务：
+将 `backend/.env.example` 复制为项目根目录 `.env`，配置后重启后端：
 
-```powershell
-$env:LLM_API_KEY = "你的密钥"
-$env:LLM_MODEL = "供应商提供的模型名称"
-$env:LLM_BASE_URL = "供应商提供的兼容 API 地址"
-uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000
+```dotenv
+LLM_API_KEY=你的密钥
+LLM_MODEL=供应商提供的模型名称
+LLM_BASE_URL=供应商提供的兼容API地址
+SCHED_WORKFLOW_MODEL_MODE=auto
+LLM_API_TYPE=chat_completions
+LLM_TIMEOUT_SECONDS=30
 ```
 
-然后在“AI 辅助分析”区域启用 API 多 Agent 并点击“运行分析”。密钥只配置在后端，不传给浏览器。配置以 `backend/.env.example` 为参考，应用不会自动读取 `.env`。未提供真实凭据进行联调；供应商必须支持工具调用，API 费用由调用方承担。不要提交密钥、生产数据或本地数据库。
+根目录 `.env` 自动加载，终端环境变量优先。密钥只在后台使用。OpenAI 官方服务的 `LLM_BASE_URL` 可留空；需要 Responses 工具调用的模型将 `LLM_API_TYPE` 改为 `responses`。兼容服务必须支持工具调用，模型名称按供应商实际配置。
+
+`auto` 在密钥和模型齐全时启用模型，否则使用规则；`rules` 完全不调用模型；`live` 显式尝试模型，缺配置也披露回退。前端保持一个生成入口。
+
+模型每个角色先调用本角色工具，再依据问题选择最多六条已有证据作为分析重点。事实原文与引用由服务器提供，模型不能编写排程、改指标、解除阻断或发布计划。当前使用受约束的事实选择与组织，尚不开放任意自由改写，也不由模型决定工作流路由。
+
+页面标记“模型辅助”或“规则回退”；辅助分析显示模型选取的重点，并保留完整事实、风险和假设。执行详情记录请求数、耗时、已返回的 Token 用量及安全错误码。未知用量显示“未提供”，不估算费用。每个角色最多两次请求、不自动重试；模型异常回退，业务工具自身失败仍停止流程。
+
+详见[真实模型接入说明](docs/live-model-integration.md)。自动测试隔离真实供应商，不会因个人配置自动产生模型调用费用。
 
 ## 验证与打包
 
@@ -126,7 +136,7 @@ backend/
   src/sched_copilot/application/     业务用例、命令结果和依赖契约
   src/sched_copilot/domain/          领域模型、排程与影响规则
   src/sched_copilot/infrastructure/  SQLite 与序列化
-  src/sched_copilot/agents/          三 Agent 工作流
+  src/sched_copilot/agents/          四角色规则与真实模型适配、旧接口兼容
   src/sched_copilot/scenarios/       仿真案例
   tests/                    单元、集成与架构边界测试
   pyproject.toml            后端依赖、测试及构建配置
@@ -143,6 +153,7 @@ docs/                       业务说明、开发流程和架构决策
 | `PUT /api/event` | 显式保存故障，检查编辑版本 |
 | `POST /api/event/recover` | 恢复最近可试算事件 |
 | `POST /api/simulations` | 生成并持久化候选批次、变化与影响证据 |
+| `POST /api/workflow` | 当前前端主入口：四 Agent 校验、排产、评估和解释，支持真实模型及回退 |
 | `POST /api/analysis` | 离线脚本或 API 三 Agent 分析 |
 | `POST /api/decisions` | 按后端候选 ID 人工发布或暂不发布 |
 

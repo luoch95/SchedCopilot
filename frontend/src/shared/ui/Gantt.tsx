@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { stamp } from '../lib/time';
-import type { Failure, Machine, Operation, Schedule } from '../api/contracts';
+import type { Change, Failure, Machine, Operation, Schedule } from '../api/contracts';
+import { DecisionText } from './DecisionText';
 
 const colors = ['#2E748C', '#489B78', '#A87939', '#7B71A4', '#C17467'];
 const hour = (value: number) => stamp(new Date(value).toISOString()).split(' ')[1];
@@ -11,12 +12,14 @@ export default function Gantt({
   failure,
   machines,
   range,
+  changes = [],
 }: {
   schedule: Schedule;
   baseline?: Schedule;
   failure: Failure;
   machines: Machine[];
   range: [number, number];
+  changes?: Change[];
 }) {
   const [hover, setHover] = useState<Operation | null>(null);
   const width = 920,
@@ -42,6 +45,7 @@ export default function Gantt({
     (a, b) => a - b,
   );
   const before = hover && baseline?.operations.find((op) => op.id === hover.id);
+  const change = hover && changes.find((item) => item.工序 === hover.id);
   const faultEnd = failure.recovered_at ? +new Date(failure.recovered_at) : range[1];
   return (
     <div className="gantt">
@@ -174,6 +178,12 @@ export default function Gantt({
           <span>悬停或聚焦工序条，查看设备、起止时间与调整前安排</span>
         )}
       </div>
+      {change && (
+        <p className="hint">
+          调整依据：
+          <DecisionText text={change.依据} />
+        </p>
+      )}
       <div className="order-legend">
         {orderIds.map((id, index) => (
           <span key={id}>

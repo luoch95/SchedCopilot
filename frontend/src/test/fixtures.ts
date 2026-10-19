@@ -43,7 +43,7 @@ function candidate(id: string, transfer: boolean): Candidate {
   };
   return {
     id,
-    label: transfer ? '允许合格设备转移' : '等待修复',
+    label: transfer ? '允许合格设备转移' : '原计划对照',
     schedule: { version: 2, fingerprint: id, operations: [op] },
     metrics: {
       late_orders: transfer ? 0 : 1,

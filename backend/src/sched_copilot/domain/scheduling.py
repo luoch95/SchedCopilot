@@ -16,6 +16,7 @@ from .models import (
     TaskStatus,
     digest,
 )
+from .time_display import production_time
 
 ASSUMPTIONS = (
     "仿真数据；连续工作日历，未建模班次、物料、人员和模具保养",
@@ -130,6 +131,7 @@ def _replan(
     orders: tuple[Order, ...],
     allow_transfer: bool,
     eligible_machine_ids: Mapping[str, frozenset[str]] | None = None,
+    production=None,
 ) -> tuple[Schedule, tuple[tuple[str, tuple[str, ...]], ...]]:
     occupied: dict[str, list[tuple[datetime, datetime, str]]] = defaultdict(list)
     root = f"故障:{failure.machine_id}"
@@ -141,6 +143,17 @@ def _replan(
     pending = [op for op in baseline.operations if op.status == TaskStatus.PLANNED]
     direct = {op.id for op in affected_operations(baseline, failure)}
     causes = {}
+    # Waiting preserves each machine's published queue, including cross-order sequencing.
+    machine_predecessors = {}
+    if not allow_transfer:
+        for machine in machines:
+            queue = sorted(
+                (op for op in baseline.operations if op.machine_id == machine.id),
+                key=lambda op: (op.start, op.id),
+            )
+            machine_predecessors.update(
+                {right.id: left.id for left, right in zip(queue, queue[1:])}
+            )
     while pending:
         eligible = [
             op
@@ -150,6 +163,7 @@ def _replan(
                 for previous in baseline.operations
                 if previous.order_id == op.order_id and previous.sequence < op.sequence
             )
+            and (op.id not in machine_predecessors or machine_predecessors[op.id] in placed)
         ]
         if not eligible:
             raise RuleViolation("工序依赖无法解析")
@@ -168,6 +182,8 @@ def _replan(
         earliest = max(
             op.start, failure.started_at, predecessor.end if predecessor else failure.started_at
         )
+        if op.id in machine_predecessors:
+            earliest = max(earliest, placed[machine_predecessors[op.id]].end)
         options = []
         original_blockers = ()
         for machine in machines:
@@ -180,6 +196,11 @@ def _replan(
             if not allow_transfer and machine.id != op.machine_id:
                 continue
             start, blockers = _available_start(earliest, op.duration_minutes, occupied[machine.id])
+            if production is not None:
+                try:
+                    start = production.place(op, machine.id, earliest, placed, failure)
+                except RuleViolation:
+                    continue
             if machine.id == op.machine_id:
                 original_blockers = blockers
             options.append((start, machine.id != op.machine_id, machine.id, blockers))
@@ -187,12 +208,40 @@ def _replan(
             raise RuleViolation(f"{op.id} 无合格设备")
         start, transferred, machine_id, blockers = min(options)
         references = list(blockers)
+        machine_predecessor = placed.get(machine_predecessors.get(op.id))
+        if machine_predecessor and machine_predecessor.end > op.start:
+            references.append(machine_predecessor.id)
         if op.id in direct:
             references.insert(0, root)
         if predecessor and predecessor.end > op.start:
             references.append(predecessor.id)
         if transferred:
             references.extend(original_blockers)
+            original_option = next((item for item in options if item[2] == op.machine_id), None)
+            status = (
+                f"{op.machine_id}发生故障"
+                if op.machine_id == failure.machine_id
+                else (f"{op.machine_id}没有故障")
+            )
+            selected_time = production_time(start)
+            if original_option:
+                original_time = production_time(original_option[0])
+                minutes = (original_option[0] - start).total_seconds() / 60
+                conditions = "算上换模具和设备占用时间" if production else "按当前设备和工序安排"
+                references.append(
+                    f"{status}。{conditions}，留在{op.machine_id}最早可在{original_time}开工，"
+                    f"转到{machine_id}可在{selected_time}开工。"
+                    f"因此将该工序转到{machine_id}，可提前{minutes:g}分钟开工。"
+                )
+            else:
+                references.append(
+                    f"{status}。按当前生产条件，原设备没有可用时段；"
+                    f"{machine_id}可在{selected_time}开工，因此转到{machine_id}加工。"
+                )
+        if production is not None and start > op.start:
+            references.extend(
+                production.placement_causes(op, machine_id, earliest, placed, failure)
+            )
         causes[op.id] = tuple(dict.fromkeys(references))
         updated = op.move_to(machine_id, start)
         placed[op.id] = updated
@@ -230,6 +279,7 @@ def generate_candidates(
     *,
     strategies: tuple[str, ...] = ("wait-recovery", "allow-transfer"),
     eligible_machine_ids: Mapping[str, frozenset[str]] | None = None,
+    production=None,
 ) -> tuple[CandidatePlan, ...]:
     # 新入口按明确指定的策略执行；旧调用不传参数时保留原有两方案行为。
     supported = {"wait-recovery", "allow-transfer"}
@@ -243,18 +293,20 @@ def generate_candidates(
     affected = affected_operations(schedule, failure)
     candidates = []
     for strategy, label, transfer in (
-        ("wait-recovery", "原设备等待恢复", False),
+        ("wait-recovery", "原计划对照", False),
         ("allow-transfer", "允许合格设备转移", True),
     ):
         if strategy not in strategies:
             continue
         if affected:
             result, causes = _replan(
-                schedule, failure, machines, orders, transfer, eligible_machine_ids
+                schedule, failure, machines, orders, transfer, eligible_machine_ids, production
             )
         else:
             result, causes = Schedule(schedule.version + 1, schedule.operations), ()
         errors = validate_schedule(result, machines, failure, schedule)
+        if production is not None:
+            errors += tuple(production.check(result, failure))
         if errors:
             raise RuleViolation("候选校验失败：" + "; ".join(errors))
         evidence = (
