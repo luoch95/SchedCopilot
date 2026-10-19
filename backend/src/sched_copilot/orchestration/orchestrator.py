@@ -254,6 +254,13 @@ class DynamicOrchestrator:
             question = state.explanation_input.question
             if (
                 state.intent == "generate_candidates"
+                and state.scheduling_result
+                and state.scheduling_result.data
+                and len(state.scheduling_result.data.candidates) == 1
+            ):
+                question = "解释唯一可行候选的影响、风险和限制，说明没有其他不同方案"
+            if (
+                state.intent == "generate_candidates"
                 and state.validation_result
                 and state.validation_result.status == "blocked"
             ):

@@ -80,3 +80,21 @@ def build_orchestrator(settings: Settings, model_factory=None) -> DynamicOrchest
         )
     }
     return DynamicOrchestrator(**agents)
+
+
+def build_sales(settings: Settings):
+    from .application.sales import SalesService
+    from .application.sales_requests import SalesRequestService
+    from .infrastructure.insertion_repository import InsertionStore
+    from .orchestration.insertion import InsertionWorkflow
+    from .scenarios.insertion_demo import demo_routes, insertion_resources
+    from .scenarios.sales_catalog import demo_products
+
+    sales = SalesService(demo_products())
+    return sales, SalesRequestService(
+        InsertionStore(settings.database_path),
+        sales,
+        demo_routes(),
+        insertion_resources,
+        InsertionWorkflow(),
+    )

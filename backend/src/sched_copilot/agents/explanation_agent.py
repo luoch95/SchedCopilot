@@ -30,6 +30,11 @@ class ExplanationRun:
 class ExplanationAgent:
     """首版使用可追溯模板；工具只接收副本，不拥有写入或发布权限。"""
 
+    def run_insertion(self, result):
+        from ..tools.insertion import explain_request
+
+        return explain_request(result)
+
     def __init__(
         self, tool: Callable[[ExplanationSource], ExplanationData] = explain_results
     ) -> None:

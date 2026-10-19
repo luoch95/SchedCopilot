@@ -98,3 +98,28 @@ frontend/src/
 | 修改恢复或发布规则 | 业务用例和事务持久化协作修改，补版本与幂等回归 |
 
 新增功能前说明输入、输出、依赖和验收示例；公共行为改变时同步接口契约、测试和文档。测试优先覆盖业务规则、状态失效和发布正确性，不靠增加目录层级代替设计。
+
+
+## 插单审批持久化位置（2026-10-19 / IMPL-03）
+
+个人演示采用三表简化方案，和既有计划/故障表共用 SQLite。ORM 定义位于 `backend/src/sched_copilot/infrastructure/models/requests.py`，数据库连接、缺表初始化和三表提交事务位于 `infrastructure/insertion_repository.py`。`application/sales_requests.py` 依赖 `application/ports.py` 的 InsertionRepository 协议，不能导入 SQLAlchemy 或 HTTP 模型；`bootstrap.py` 注入具体仓储。`api/schemas.py` 校验输入，`api/routes.py` 只转换字段并调用服务。现有 sqlite3 决策仓储保留，不为本步改写原有发布事务。
+
+前端提交/查询仍通过 `features/workbench/api.ts` 与 `shared/api/contracts.ts`。业务员表单在 `features/sales/SalesPage.tsx`；数据库待审批列表在 `features/sales/PendingRequestsPanel.tsx`，通过 `features/sales/index.ts` 导出供计划员页面组合。页面刷新和角色切换重新请求后端；sessionStorage 只保存角色，业务状态不以浏览器内存为准。
+
+接口与数据字段、简化范围及验证结果见 [IMPL-03](tasks.md#urg-03-impl-03)。后续结构变化继续更新本节，不新建重复结构说明。
+
+
+### 独立插单试排（URG-04 / IMPL-04）
+
+`domain/insertion.py` 定义ProcessStep、InsertionResources、纯规则trial_insertion及独立约束校验；不复用故障专用编排，不引入Agent依赖。`scenarios/insertion_demo.py` 提供固定工艺与资源工厂，由bootstrap注入application/sales_requests服务；服务通过InsertionRepository端口获取申请和保存结果。SQLAlchemy仓储复用assessment_json，事务内核对计划/事件/生产资源版本；API只做转换和调用。
+
+前端完整JSON契约位于shared/api/contracts，运输仍集中于workbench/api。sales/PendingRequestsPanel控制已保存申请试排与恢复；sales/AssessmentView按planner参数选择是否渲染设备和工序。业务员顶部摘要绑定明确申请编号；计划员工作台通过sales公开入口组合。完整JSON返回与前端展示的决策变更见D-04，本步不把界面隐藏当作正式权限隔离。
+
+
+### 插单流程闭环（URG-05～08 / IMPL-05）
+
+纯领域重建/独立重算在domain/insertion_workflow.py；tools/insertion.py提供插单角色工具，既有四Agent增加run_insertion，由orchestration/insertion.py顺序执行，bootstrap注入application/sales_requests.py。此专用入口固定规则模式，不使用旧故障契约或模型包装。应用层只依赖端口和领域，不导入ORM、Agent或HTTP。
+
+infrastructure/insertion_repository.py沿用三表；审批记录comment存储结构化理由及结果绑定，状态历史保留每次状态转换与理由。发布事务同时更新正式计划、生产资源快照和现有决策日志，最后核对版本，失败全部回滚。sqlite_repository.published_orders从已发布申请恢复正式订单；WorkbenchService读取新增订单供概况、后续插单及故障流程使用，不增加业务表。
+
+前端新增sales/LeaderPage，通过公开index供App组合；session支持leader会话及角色卡。PendingRequestsPanel提供按角色审批/发布操作，AssessmentView销售/领导只渲染摘要，计划员渲染全部；发布后调用原工作台reload清除旧候选并加载正式计划。HTTP仍集中workbench/api.ts，契约位于shared/api/contracts.ts。

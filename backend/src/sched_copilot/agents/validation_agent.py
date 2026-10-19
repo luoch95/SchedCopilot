@@ -32,6 +32,11 @@ class ValidationAgent:
     业务校验是否通过由确定性规则决定，不交给模型判断。
     """
 
+    def run_insertion(self, request, snapshot):
+        from ..tools.insertion import validate_request as validate_insertion_request
+
+        return validate_insertion_request(request, snapshot)
+
     def __init__(
         self,
         tool: Callable[[SchedulingCase, AgentContext], ValidationToolOutput] = validate_data,

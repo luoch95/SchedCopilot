@@ -29,6 +29,11 @@ class SchedulingRun:
 class SchedulingAgent:
     """先检查校验报告，再调用工具；不调用模型或其他 Agent。"""
 
+    def run_insertion(self, calculate, snapshot):
+        from ..tools.insertion import schedule_request
+
+        return schedule_request(calculate, snapshot)
+
     def __init__(
         self, tool: Callable[[SchedulingSource], SchedulingToolOutput] = generate_schedule
     ):

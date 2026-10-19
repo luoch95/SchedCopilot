@@ -12,6 +12,8 @@ WorkflowRunner = Callable[..., WorkflowOutcome]
 
 
 class DecisionRepository(Protocol):
+    def published_orders(self) -> tuple: ...
+
     def active_event(self) -> tuple[MachineFailure, int] | None: ...
 
     def snapshot(self) -> tuple[Schedule, MachineFailure, int]: ...
@@ -41,3 +43,35 @@ class DecisionRepository(Protocol):
         reason: str,
         request_id: str,
     ) -> Schedule: ...
+
+
+class InsertionRepository(Protocol):
+    def submission(self, key: str, fingerprint: str) -> dict | None: ...
+
+    def submit(
+        self,
+        values: dict,
+        key: str,
+        fingerprint: str,
+        estimate: dict,
+        plan_version: int,
+        plan_fingerprint: str,
+    ) -> dict: ...
+
+    def pending(self) -> list[dict]: ...
+
+    def get(self, request_id: str) -> dict | None: ...
+
+    def save_assessment(self, request_id: str, result: dict) -> None: ...
+
+    def records(self, status: str | None = None) -> list[dict]: ...
+
+    def transition(
+        self,
+        request_id: str,
+        action: str,
+        reason: str,
+        assessment_id: str | None,
+        schedule=None,
+        production=None,
+    ) -> dict: ...

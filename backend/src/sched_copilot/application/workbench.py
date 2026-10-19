@@ -36,11 +36,16 @@ class WorkbenchService:
     ):
         self.repository = repository
         self.machines = machines
-        self.orders = orders
+        self._orders = orders
         self.snapshot_time = snapshot_time
         self.example = example
         self.analyzer = analyzer
         self.workflow_runner = workflow_runner
+
+    @property
+    def orders(self):
+        provider = getattr(self.repository, "published_orders", lambda: ())
+        return self._orders + provider()
 
     def initialize(self) -> None:
         if self.repository.active_event() is None:

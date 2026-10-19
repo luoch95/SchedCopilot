@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from ..bootstrap import build_workbench
+from ..bootstrap import build_sales, build_workbench
 from ..config import Settings
 from ..observability import configure_logging
 from .errors import register_errors
@@ -28,6 +28,7 @@ def create_app(
     app = FastAPI(title="Schedule Copilot API", version="0.2.0")
     app.state.settings = settings
     app.state.workbench = build_workbench(settings)
+    app.state.sales, app.state.sales_requests = build_sales(settings)
     register_errors(app)
     app.include_router(router)
     if (settings.frontend_dir / "index.html").exists():

@@ -1,6 +1,6 @@
 """HTTP adapters only: validate, invoke a use case, present its result."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request
 
@@ -11,6 +11,10 @@ from .schemas import (
     AnalysisRequest,
     DecisionRequest,
     EventRequest,
+    InsertionAction,
+    ProcessingEstimateRequest,
+    SalesRequestCreate,
+    SalesRequestView,
     SnapshotRequest,
     WorkflowRequest,
 )
@@ -109,3 +113,54 @@ def workflow(request: WorkflowRequest, service: Service, http_request: Request):
 @router.get("/workflow/demo")
 def fallback_demo_status(service: Service):
     return service.workflow_runner.demo_gate.status()
+
+
+@router.get("/sales/overview")
+def sales_overview(service: Service, request: Request):
+    return request.app.state.sales.overview(service.workbench())
+
+
+@router.post("/sales/processing-estimate")
+def sales_processing_estimate(payload: ProcessingEstimateRequest, request: Request):
+    return request.app.state.sales.estimate(payload.product_id, payload.quantity)
+
+
+@router.post("/sales/requests", response_model=SalesRequestView, status_code=201)
+def submit_sales_request(payload: SalesRequestCreate, service: Service, request: Request):
+    snapshot = service.workbench()
+    return request.app.state.sales_requests.submit(
+        **payload.model_dump(),
+        plan_version=snapshot.baseline.version,
+        plan_fingerprint=snapshot.baseline.fingerprint,
+        snapshot_time=snapshot.snapshot_time,
+    )
+
+
+@router.get("/sales/requests", response_model=list[SalesRequestView])
+def pending_sales_requests(
+    request: Request,
+    service: Service,
+    status: Literal["all", "pending_approval", "approved", "rejected", "published"] = "all",
+):
+    return request.app.state.sales_requests.pending(
+        service.workbench(), service.repository.production_snapshot(), status
+    )
+
+
+@router.post("/sales/requests/{request_id}/assessment")
+def assess_sales_request(request_id: str, request: Request, service: Service):
+    return request.app.state.sales_requests.assess(
+        request_id, service.workbench(), service.repository.production_snapshot()
+    )
+
+
+@router.post("/sales/requests/{request_id}/actions", response_model=SalesRequestView)
+def act_on_sales_request(
+    request_id: str, payload: InsertionAction, request: Request, service: Service
+):
+    return request.app.state.sales_requests.act(
+        request_id,
+        **payload.model_dump(),
+        snapshot=service.workbench(),
+        production_snapshot=service.repository.production_snapshot(),
+    )

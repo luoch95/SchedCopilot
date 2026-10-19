@@ -253,3 +253,121 @@ export interface WorkflowProgress {
   interrupted: boolean;
   cancelled?: boolean;
 }
+
+export interface SalesProduct {
+  id: string;
+  name: string;
+  material: string;
+  units_per_cycle: number;
+  cycle_seconds: number;
+  buffer_percent: number;
+}
+export interface SalesOverview {
+  plan_version: number;
+  plan_fingerprint: string;
+  snapshot_time: string;
+  source: string;
+  product_source: string;
+  products: SalesProduct[];
+  orders: {
+    id: string;
+    name: string;
+    due: string;
+    planned_completion: string | null;
+    lateness_minutes: number | null;
+  }[];
+}
+export interface ProcessingEstimate {
+  product_id: string;
+  quantity: number;
+  cycles: number;
+  theoretical_seconds: number;
+  buffer_percent: number;
+  buffer_seconds: number;
+  planned_minutes: number;
+  source: string;
+}
+
+export interface InsertionRequestCreate {
+  product_id: string;
+  quantity: number;
+  earliest_start_at: string;
+  requested_due_at: string;
+  reason: string;
+  submission_key: string;
+}
+export interface InsertionRequestRecord {
+  id: string;
+  request_no: string;
+  status: 'pending_approval' | 'approved' | 'rejected' | 'published';
+  product_id: string;
+  quantity: number;
+  earliest_start_at: string;
+  requested_due_at: string;
+  reason: string;
+  plan_version: number;
+  estimate: ProcessingEstimate;
+  assessment?: InsertionAssessment | null;
+  assessment_stale?: boolean;
+  approval?: { status: string; reason?: string; assessment_id?: string } | null;
+  status_history?: {
+    from_status: string;
+    to_status: string;
+    operator_role: string;
+    comment: string;
+    created_at: string;
+  }[];
+  created_at: string;
+}
+
+export interface InsertionAssessment {
+  assessment_id?: string;
+  workflow?: {
+    mode: string;
+    trace: { agent: string; status: string; mode: string }[];
+    explanation: { facts: string[]; risks: string[]; limitations: string[]; next_steps: string[] };
+  };
+  request_id: string;
+  baseline_version: number;
+  baseline_fingerprint: string;
+  event_revision: number;
+  tool_version: string;
+  created_at: string;
+  summary: {
+    estimated_completion_at: string;
+    meets_due: boolean;
+    affected_order_count: number;
+    newly_delayed_order_count: number;
+    order_impacts: {
+      order_id: string;
+      order_name: string;
+      due: string;
+      original_completion_at: string;
+      projected_completion_at: string;
+      original_lateness_minutes: number;
+      projected_lateness_minutes: number;
+      delay_delta_minutes: number;
+      completion_changed: boolean;
+    }[];
+  };
+  details: {
+    inserted_order_id: string;
+    process_steps: { sequence: number; name: string }[];
+    operations: {
+      operation_id: string;
+      order_id: string;
+      sequence: number;
+      machine_id: string;
+      mold_id: string;
+      capability: string;
+      status: string;
+      start: string;
+      end: string;
+      duration_minutes: number;
+      setup_minutes: number;
+      setup_start: string;
+    }[];
+  };
+  assumptions: string[];
+  baseline_resource_issues: string[];
+}

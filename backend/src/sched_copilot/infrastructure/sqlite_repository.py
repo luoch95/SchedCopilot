@@ -12,6 +12,7 @@ from ..domain.models import (
     CandidatePlan,
     Machine,
     MachineFailure,
+    Order,
     Schedule,
     digest,
 )
@@ -101,6 +102,26 @@ class DecisionStore:
         with self._connect() as conn:
             row = conn.execute("SELECT payload FROM current_plan WHERE id=1").fetchone()
         return parse_schedule(row[0])
+
+    def published_orders(self) -> tuple[Order, ...]:
+        with self._connect() as conn:
+            if not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='insertion_requests'"
+            ).fetchone():
+                return ()
+            rows = conn.execute(
+                "SELECT id,product_id,quantity,requested_due_at FROM insertion_requests "
+                "WHERE status='published' ORDER BY created_at,id"
+            ).fetchall()
+        return tuple(
+            Order(
+                f"URG-{i}",
+                f"紧急插单 {product} / {qty}件",
+                datetime.fromisoformat(due).replace(tzinfo=timezone.utc),
+                1,
+            )
+            for i, product, qty, due in rows
+        )
 
     def active_event(self) -> tuple[MachineFailure, int] | None:
         with self._connect() as conn:

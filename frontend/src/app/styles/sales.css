@@ -1,0 +1,149 @@
+.sales-workspace {
+  max-width: 1460px;
+  padding: 36px;
+  margin: 0 auto;
+}
+.sales-reference {
+  border-left: 4px solid var(--accent);
+  background: #e4eff3;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+  color: #164459;
+}
+.sales-panel {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+  padding: 24px;
+  min-width: 0;
+}
+.sales-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.sales-section-heading p,
+.sales-muted {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 8px;
+}
+.sales-plan-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+}
+.sales-plan-facts strong,
+.sales-duration dd {
+  font-variant-numeric: tabular-nums;
+}
+.sales-orders {
+  margin-top: 18px;
+}
+.sales-workspace summary {
+  cursor: pointer;
+  color: var(--accent);
+  padding: 8px 0;
+}
+.sales-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 24px;
+  align-items: start;
+}
+.sales-results {
+  display: grid;
+  gap: 24px;
+}
+.sales-panel form {
+  margin-top: 24px;
+}
+.sales-date-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.sales-product-note {
+  background: #f2f7fa;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+.sales-product-note p {
+  font-weight: 400;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.sales-field-error {
+  color: #a13629;
+  font-size: 13px;
+}
+.sales-panel [aria-invalid='true'] {
+  border-color: #a13629;
+}
+.sales-duration {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 20px;
+}
+.sales-duration dl,
+.sales-empty-metrics {
+  margin: 16px 0;
+}
+.sales-duration dl > div,
+.sales-empty-metrics > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sales-duration dd,
+.sales-empty-metrics dd {
+  margin: 0;
+  font-weight: 600;
+}
+.sales-empty-metrics dt {
+  color: var(--muted);
+}
+.sales-panel > button {
+  margin-top: 16px;
+}
+@media (max-width: 650px) {
+  .sales-workspace {
+    padding: 24px 16px;
+  }
+  .sales-panel {
+    padding: 18px;
+  }
+  .sales-date-fields {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .sales-section-heading {
+    flex-wrap: wrap;
+  }
+}
+
+.pending-requests {
+  min-width: 0;
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  background: white;
+}
+.pending-requests table {
+  overflow-wrap: anywhere;
+}
+
+.insertion-assessment {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.insertion-assessment table {
+  min-width: 660px;
+}

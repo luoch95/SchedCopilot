@@ -35,6 +35,11 @@ class EvaluationRun:
 class EvaluationAgent:
     """先检查已有候选，再调用评价工具；不调用模型或其他 Agent。"""
 
+    def run_insertion(self, result, snapshot, request):
+        from ..tools.insertion import evaluate_request
+
+        return evaluate_request(result, snapshot, request)
+
     def __init__(
         self, tool: Callable[[EvaluationSource], EvaluationToolOutput] = evaluate_candidates
     ):
