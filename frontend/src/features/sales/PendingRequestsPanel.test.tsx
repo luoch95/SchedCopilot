@@ -311,6 +311,53 @@ it('uses shared business stage labels and management bullets based on the actual
   expect(document.querySelectorAll('.trial-step-success')).toHaveLength(4);
 });
 
+it.each(['live', 'fallback'])(
+  'shows saved %s model assistance without exposing equipment to sales',
+  (mode) => {
+    render(
+      <AssessmentView
+        result={{
+          ...result,
+          workflow: {
+            mode,
+            trace: [
+              {
+                agent: 'evaluation',
+                status: 'success',
+                mode,
+                execution: {
+                  mode,
+                  model: 'test-model',
+                  calls: 1,
+                  elapsed_ms: 100,
+                  error_code: mode === 'fallback' ? 'MODEL_TIMEOUT' : null,
+                  highlights:
+                    mode === 'live'
+                      ? [
+                          {
+                            text: '原订单未新增交期延误。',
+                            evidence_refs: ['summary.order_impacts'],
+                          },
+                        ]
+                      : [],
+                },
+              },
+            ],
+            explanation: { facts: [], risks: [], limitations: [], next_steps: [] },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText(mode === 'live' ? '大模型辅助完成' : '已回退规则分析')).toBeTruthy();
+    if (mode === 'live') expect(screen.getByText('原订单未新增交期延误。')).toBeTruthy();
+    else expect(screen.getByText(/已保留规则试排结果/)).toBeTruthy();
+    expect(screen.queryByText('设备与工序排布明细')).toBeNull();
+    expect(screen.queryByText('M2')).toBeNull();
+    expect(screen.queryByText('MD-URG-A')).toBeNull();
+    expect(screen.queryByText('MODEL_TIMEOUT')).toBeNull();
+  },
+);
+
 it('keeps sales details outside the table and loads the saved summary by request number', async () => {
   records = [
     {

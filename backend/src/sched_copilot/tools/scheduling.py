@@ -207,7 +207,7 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
             refs[:2],
         )
     if len(candidates) < 2:
-        limitations.append("仅有一个不同的可行候选，未满足多方案比较目标。")
+        limitations.append("当前策略下仅有一个不同的可行候选，将继续评价并解释其影响与风险。")
         warnings.append(
             Notice(
                 code="SINGLE_CANDIDATE",

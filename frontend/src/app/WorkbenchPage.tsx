@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { stamp } from '../shared/lib/time';
 import { Modal } from '../shared/ui/Modal';
+import { GenerationLoading } from '../shared/ui/GenerationLoading';
+import { FaultOutline } from './FaultOutline';
 import { GanttSelectionProvider } from '../shared/ui/GanttSelection';
 import type { InsertionRequestRecord } from '../shared/api/contracts';
 import { PendingRequestsPanel, PlannerInsertionComparison } from '../features/sales';
@@ -20,6 +23,19 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
   const [requestRecord, setRequestRecord] = useState<InsertionRequestRecord | null>(null);
   const [requestsVersion, setRequestsVersion] = useState(0);
   const [requestBusy, setRequestBusy] = useState(false);
+  const [notificationReady, setNotificationReady] = useState(true);
+  const notificationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const generating = controller.activeIntent === 'generate_candidates';
+  const generated = !!controller.currentSimulation && controller.workflow?.status === 'completed';
+  useEffect(() => {
+    if (!generating) return;
+    setNotificationReady(false);
+    // Navigation and request completion must not restart the demonstration delay.
+    clearTimeout(notificationTimer.current);
+    notificationTimer.current = setTimeout(() => setNotificationReady(true), 4000);
+  }, [generating]);
+  useEffect(() => () => clearTimeout(notificationTimer.current), []);
+  const backgroundPending = generating || (generated && !notificationReady);
   const openRequest = useCallback(
     (record: InsertionRequestRecord) => {
       navigateRequest({
@@ -47,6 +63,11 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       setRequestsVersion((value) => value + 1);
     }
   }
+  function analyzeFault() {
+    if (controller.busy || controller.blocked || controller.demoLoading) return;
+    navigation.openFault();
+    void controller.generate();
+  }
   const { state, draft, currentSimulation } = controller;
   function switchRole() {
     if (controller.dirty && !window.confirm('未保存的故障输入将丢失，是否切换角色？')) return;
@@ -68,7 +89,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
     );
   const range = timelineRange(state, currentSimulation, controller.zoom, controller.pan);
   return (
-    <div className="planner-console">
+    <div className={`planner-console${view === 'fault' ? ' fault-decision-layout' : ''}`}>
       <main className="workspace">
         {view === 'fault' && (
           <nav className="console-breadcrumb" aria-label="当前位置">
@@ -81,9 +102,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                 </li>
               )}
               <li>
-                <button disabled={!!controller.busy} onClick={navigation.back}>
-                  工作台总览
-                </button>
+                <button onClick={navigation.back}>工作台总览</button>
               </li>
               <li>
                 <span aria-current="page">故障影响与方案决策</span>
@@ -106,7 +125,8 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
           </div>
         </header>
         <div aria-live="polite">
-          {controller.busy && (
+          {view === 'fault' && <GenerationLoading running={generating} />}
+          {controller.busy && !(view === 'fault' && generating) && (
             <div className="message info" role="status">
               正在{controller.busy}…
             </div>
@@ -137,33 +157,84 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
             disabled={!!controller.busy || controller.dirty || controller.stale}
           />
         ) : (
-          <button className="console-back" disabled={!!controller.busy} onClick={navigation.back}>
+          <button className="console-back primary" onClick={navigation.back}>
             ← 返回工作台总览
           </button>
         )}
-        <CurrentPlan
-          compact={view === 'dashboard'}
-          actions={
-            <div className="console-actions">
-              <button
-                className="primary"
-                disabled={!!controller.busy}
-                onClick={navigation.openEvent}
-              >
-                + 录入设备故障
-              </button>
-              {view === 'dashboard' && (
-                <button onClick={navigation.openFault}>故障影响与方案决策</button>
+        {view === 'dashboard' && (
+          <section className="fault-event-banner" aria-label="已登记设备故障">
+            <div>
+              <h2>
+                <span aria-hidden="true">⚠️</span> 已登记设备故障：{state.event.machine_id} 停机
+              </h2>
+              <p>
+                {stamp(state.event.started_at)} —{' '}
+                {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复时间未知'}
+              </p>
+              <p className="hint">
+                来源：{state.event.source} · 故障登记与方案发布分开进行，试算不会修改执行计划。
+              </p>
+              {controller.blocked && (
+                <p className="inline-error">
+                  {controller.dirty
+                    ? '请先保存或放弃故障输入。'
+                    : controller.stale
+                      ? '请重新载入已保存事件后再分析。'
+                      : !state.event.recovered_at
+                        ? '请补充预计恢复时间并保存后再分析。'
+                        : '事件与执行记录冲突，请修正故障信息后再分析。'}
+                </p>
               )}
             </div>
-          }
-          state={state}
-          range={range}
-          zoom={controller.zoom}
-          pan={controller.pan}
-          onZoom={controller.setZoom}
-          onPan={controller.setPan}
-        />
+            <div className="fault-task-actions">
+              {backgroundPending ? (
+                <>
+                  <p role="status" className="fault-task-status">
+                    <span className="fault-task-spinner" aria-hidden="true" /> ⏳ 方案生成中...
+                  </p>
+                  <button onClick={navigation.openFault}>查看生成进度</button>
+                </>
+              ) : generated ? (
+                <button className="primary" onClick={navigation.openFault}>
+                  ✅ 方案生成完成，点击查看
+                </button>
+              ) : (
+                <button
+                  className="primary"
+                  disabled={!!controller.busy || controller.blocked || controller.demoLoading}
+                  onClick={analyzeFault}
+                >
+                  分析影响并生成候选方案
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+        <div id={view === 'fault' ? 'fault-plan' : undefined} tabIndex={-1}>
+          {view === 'fault' && <h2 id="section-plan">执行计划概览</h2>}
+          <CurrentPlan
+            compact={view === 'dashboard'}
+            actions={
+              view === 'dashboard' && (
+                <div className="console-actions">
+                  <button
+                    className="primary"
+                    disabled={!!controller.busy}
+                    onClick={navigation.openEvent}
+                  >
+                    + 录入设备故障
+                  </button>
+                </div>
+              )
+            }
+            state={state}
+            range={range}
+            zoom={controller.zoom}
+            pan={controller.pan}
+            onZoom={controller.setZoom}
+            onPan={controller.setPan}
+          />
+        </div>
         {view === 'fault' && (
           <>
             <SimulationActions
@@ -225,8 +296,15 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
           规则排程与约束校验提供计算结果，模型辅助解释证据，人工决定是否发布。
         </footer>
       </main>
+      {view === 'fault' && <FaultOutline />}
       {eventOpen && (
-        <Modal title="录入设备故障" onClose={closeEvent} busy={!!controller.busy}>
+        <Modal
+          drawer
+          drawerWidth="min(540px, 100vw)"
+          title="录入设备故障"
+          onClose={closeEvent}
+          busy={!!controller.busy}
+        >
           {controller.error && (
             <p role="alert" className="message error">
               {controller.error}

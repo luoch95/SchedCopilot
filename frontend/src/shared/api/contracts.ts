@@ -335,7 +335,19 @@ export interface InsertionAssessment {
   assessment_id?: string;
   workflow?: {
     mode: string;
-    trace: { agent: string; status: string; mode: string }[];
+    trace: {
+      agent: string;
+      status: string;
+      mode: string;
+      execution?: {
+        mode: string;
+        model: string | null;
+        calls: number;
+        elapsed_ms: number;
+        error_code: string | null;
+        highlights: { text: string; evidence_refs: string[] }[];
+      };
+    }[];
     explanation: { facts: string[]; risks: string[]; limitations: string[]; next_steps: string[] };
   };
   request_id: string;

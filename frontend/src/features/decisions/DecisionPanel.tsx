@@ -28,14 +28,17 @@ export function DecisionPanel({
   onDecide,
 }: Props) {
   return (
-    <section className="section decision-section">
+    <section id="fault-confirm" tabIndex={-1} className="section decision-section">
       <div className="section-heading">
         <div>
           <p className="eyebrow">HUMAN IN THE LOOP</p>
-          <h2>人工确认</h2>
+          <h2 id="section-confirm">人工确认</h2>
         </div>
         <span className="tag">当前执行计划 V{state.baseline.version}</span>
       </div>
+      <h3 id="section-input" className="block-title">
+        决策输入
+      </h3>
       <fieldset disabled={!!busy}>
         <div className="decision-fields">
           <label>

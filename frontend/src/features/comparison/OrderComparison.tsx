@@ -1,4 +1,5 @@
 import { stamp } from '../../shared/lib/time';
+import { Accordion } from '../../shared/ui/Accordion';
 import type { Candidate, Workbench } from '../../shared/api/contracts';
 const differs = (values: string[]) => new Set(values).size > 1;
 export function OrderComparison({
@@ -9,9 +10,7 @@ export function OrderComparison({
   candidates: Candidate[];
 }) {
   return (
-    <>
-      {' '}
-      <h3 className="block-title">订单交付对照</h3>
+    <Accordion title="订单交付对照">
       <div className="table-wrap">
         <table>
           <thead>
@@ -57,6 +56,6 @@ export function OrderComparison({
           </tbody>
         </table>
       </div>
-    </>
+    </Accordion>
   );
 }

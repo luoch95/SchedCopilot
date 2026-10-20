@@ -1,11 +1,13 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import WorkbenchPage from './WorkbenchPage';
 import App from './App';
 import { PlannerInsertionComparison } from '../features/sales';
-import { workbench } from '../test/fixtures';
+import { workbench, simulation } from '../test/fixtures';
 import type { InsertionAssessment, InsertionRequestRecord } from '../shared/api/contracts';
+
+afterEach(() => vi.useRealTimers());
 
 const result: InsertionAssessment = {
   assessment_id: 'assessment-1',
@@ -145,6 +147,19 @@ beforeEach(() => {
             { ...request, id: 'other', request_no: 'URG-OTHER', status: 'published' },
           ]),
         );
+      if (url === '/api/workflow')
+        return new Response(
+          JSON.stringify({
+            workflow: {
+              id: 'w1',
+              status: 'completed',
+              results: {},
+              trace: [],
+              evidence_catalog: {},
+            },
+            simulation: null,
+          }),
+        );
       if (url === '/api/event') {
         const body = JSON.parse(String(options?.body));
         return new Response(
@@ -169,7 +184,7 @@ it('returns through planner pages before role selection and preserves explicit r
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: /进入排产工作台/ }));
   await screen.findByRole('heading', { name: '当前执行计划' });
-  fireEvent.click(screen.getByRole('button', { name: '故障影响与方案决策' }));
+  await analyzeFault();
   act(() => history.back());
   await screen.findByRole('heading', { name: '排产计划工作台' });
   expect(screen.queryByRole('heading', { name: '选择你的工作角色' })).toBeNull();
@@ -177,7 +192,7 @@ it('returns through planner pages before role selection and preserves explicit r
   await screen.findByRole('heading', { name: '选择你的工作角色' });
   act(() => history.forward());
   await screen.findByRole('heading', { name: '当前执行计划' });
-  fireEvent.click(screen.getByRole('button', { name: '故障影响与方案决策' }));
+  await analyzeFault();
   fireEvent.click(screen.getByRole('button', { name: '切换角色' }));
   await screen.findByRole('heading', { name: '选择你的工作角色' });
   fireEvent.click(screen.getByRole('button', { name: /进入排产工作台/ }));
@@ -188,13 +203,13 @@ it('shows the decision breadcrumb and navigates to either parent level', async (
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: /进入排产工作台/ }));
   await screen.findByRole('heading', { name: '排产计划工作台' });
-  fireEvent.click(screen.getByRole('button', { name: '故障影响与方案决策' }));
+  await analyzeFault();
   const path = screen.getByRole('navigation', { name: '当前位置' });
   expect(within(path).getByText('故障影响与方案决策').getAttribute('aria-current')).toBe('page');
   fireEvent.click(within(path).getByRole('button', { name: '工作台总览' }));
   await screen.findByRole('heading', { name: '排产计划工作台' });
   expect(location.hash).toBe('#/planner');
-  fireEvent.click(screen.getByRole('button', { name: '故障影响与方案决策' }));
+  await analyzeFault();
   fireEvent.click(
     within(screen.getByRole('navigation', { name: '当前位置' })).getByRole('button', {
       name: '选择角色',
@@ -216,7 +231,7 @@ it.each([null, { 'sched-copilot.demo-navigation.v1': null }])(
     await screen.findByRole('heading', { name: '排产计划工作台' });
     // Simulate an older tab or history entry that lost its role metadata.
     history.replaceState(legacyState, '', '/');
-    fireEvent.click(screen.getByRole('button', { name: '故障影响与方案决策' }));
+    await analyzeFault();
     expect(location.hash).toBe('#/planner/fault-decision');
     act(() => history.back());
     await screen.findByRole('heading', { name: '排产计划工作台' });
@@ -248,7 +263,8 @@ it('opens with only the actionable request list and formal plan, and keeps fault
     '状态',
   ]);
   expect(screen.queryByLabelText('故障设备')).toBeNull();
-  expect(screen.queryByRole('button', { name: /生成候选方案/ })).toBeNull();
+  expect(screen.getByRole('button', { name: '分析影响并生成候选方案' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '故障影响与方案决策' })).toBeNull();
   expect(screen.getAllByRole('img', { name: '设备工序甘特图' })).toHaveLength(1);
   const list = screen.getByRole('heading', { name: '待审批插单申请' });
   const plan = screen.getByRole('heading', { name: '当前执行计划' });
@@ -303,6 +319,21 @@ it('saves fault edits in the dialog, closes it on success and refreshes the faul
   expect(screen.getByRole('button', { name: '查看执行计划 V1 发布信息' })).toBeTruthy();
   expect(screen.getByText(/已保存故障 M2/)).toBeTruthy();
   expect(screen.getByRole('img').querySelector('rect[fill="#F6DAD5"]')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
+  expect(location.hash).toBe('#/planner');
+  const banner = screen.getByRole('region', { name: '已登记设备故障' });
+  expect(banner.textContent).toContain('M2 停机');
+  expect(banner.textContent).toContain('10/19 13:00');
+  expect(banner.textContent).toContain('10/19 17:00');
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(0);
+  await analyzeFault();
+  const workflowCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow');
+  expect(workflowCalls).toHaveLength(1);
+  expect(JSON.parse(String(workflowCalls[0][1]?.body))).toMatchObject({
+    intent: 'generate_candidates',
+    event_revision: 2,
+    baseline_fingerprint: 'plan-1',
+  });
 });
 
 it('keeps failed saves editable and allows canceling a draft without an API write', async () => {
@@ -330,16 +361,20 @@ it('keeps failed saves editable and allows canceling a draft without an API writ
 it('uses browser Back and Forward for fault pages and nested dialogs', async () => {
   render(<WorkbenchPage />);
   await screen.findByRole('heading', { name: '当前执行计划' });
-  fireEvent.click(screen.getByRole('button', { name: '故障影响与方案决策' }));
+  await analyzeFault();
+  expect(screen.queryByRole('button', { name: '+ 录入设备故障' })).toBeNull();
+  expect(screen.getByLabelText('甘特图缩放')).toBeTruthy();
+  expect(screen.getByLabelText('甘特图查看起点')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+  await screen.findByRole('heading', { name: '排产计划工作台' });
   fireEvent.click(screen.getByRole('button', { name: '+ 录入设备故障' }));
   expect(screen.getByRole('dialog')).toBeTruthy();
   act(() => history.back());
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(screen.getByRole('heading', { name: '故障影响与方案决策', level: 1 })).toBeTruthy();
-  act(() => history.back());
-  await screen.findByRole('heading', { name: '排产计划工作台' });
+  expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
   act(() => history.forward());
-  await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+  await screen.findByRole('dialog', { name: '录入设备故障' });
+  expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
 });
 
 it('restores insertion details on Forward and remount after returning to the dashboard', async () => {
@@ -395,3 +430,221 @@ it('synchronizes baseline and trial operation clicks with the matching table row
   expect(tableLabel.closest('tr')?.getAttribute('aria-selected')).toBe('true');
   expect(trialBar.parentElement?.dataset.selected).toBe('true');
 });
+
+async function analyzeFault() {
+  fireEvent.click(screen.getByRole('button', { name: '分析影响并生成候选方案' }));
+  await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+  await waitFor(() => expect(screen.queryByText('正在生成方案…')).toBeNull());
+}
+
+it('starts one workflow only on explicit analysis and presents the returned candidates', async () => {
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+  let finish!: (value: Response) => void;
+  vi.mocked(fetch).mockImplementation((url, options) =>
+    url === '/api/workflow'
+      ? new Promise<Response>((resolve) => {
+          finish = resolve;
+        })
+      : originalFetch(url, options),
+  );
+  render(<WorkbenchPage />);
+  const analyze = await screen.findByRole('button', { name: '分析影响并生成候选方案' });
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/workflow')).toBe(false);
+  fireEvent.click(analyze);
+  fireEvent.click(analyze);
+  expect(screen.getByRole('heading', { name: '故障影响与方案决策', level: 1 })).toBeTruthy();
+  expect(screen.getByText('正在生成方案…')).toBeTruthy();
+  expect((screen.getByRole('button', { name: /生成候选方案/ }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(1);
+  await act(async () =>
+    finish(
+      new Response(
+        JSON.stringify({
+          workflow: { id: 'w1', status: 'completed', results: {}, trace: [], evidence_catalog: {} },
+          simulation,
+        }),
+      ),
+    ),
+  );
+  await screen.findByRole('heading', { name: '方案比较' });
+  expect(screen.getByRole('heading', { name: '本次智能分析链路' })).toBeTruthy();
+  expect(screen.getAllByRole('img')).toHaveLength(3);
+  for (const title of ['工序调整对照', '订单交付对照', '历史记录']) {
+    const heading = screen.getByRole('heading', { name: new RegExp(title) });
+    const accordion = heading.closest('details')!;
+    expect(accordion.open).toBe(false);
+    fireEvent.click(heading.closest('summary')!);
+    expect(accordion.open).toBe(true);
+    fireEvent.click(heading.closest('summary')!);
+    expect(accordion.open).toBe(false);
+  }
+  expect(screen.getByRole('heading', { name: '执行详情' }).closest('details')?.open).toBe(false);
+  expect(screen.getByRole('heading', { name: '人工确认' }).closest('details')).toBeNull();
+  expect(screen.getByLabelText('确认理由（必填）')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '方案比较' }).closest('details')).toBeNull();
+  expect(screen.getByRole('navigation', { name: '故障决策大纲' })).toBeTruthy();
+  const outline = screen.getByRole('navigation', { name: '故障决策大纲' });
+  const generation = await within(outline).findByRole('link', { name: '智能分析链路' });
+  const generationBranch = generation.closest('li')!;
+  expect(within(generationBranch).getByRole('link', { name: '本次智能分析链路' })).toBeTruthy();
+  const detailLink = within(generationBranch).getByRole('link', { name: '执行详情' });
+  const detailHeading = screen.getByRole('heading', { name: '执行详情' });
+  const scroll = vi.fn();
+  detailHeading.scrollIntoView = scroll;
+  fireEvent.click(detailLink);
+  expect(detailHeading.closest('details')?.open).toBe(true);
+  await waitFor(() => expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' }));
+  expect(generation.dataset.active).toBe('true');
+});
+
+it('blocks analysis of saved events with unknown recovery time', async () => {
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation((url, options) =>
+    url === '/api/workbench'
+      ? Promise.resolve(
+          new Response(
+            JSON.stringify({ ...workbench, event: { ...workbench.event, recovered_at: null } }),
+          ),
+        )
+      : originalFetch(url, options),
+  );
+  render(<WorkbenchPage />);
+  const analyze = await screen.findByRole('button', { name: '分析影响并生成候选方案' });
+  expect((analyze as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText('请补充预计恢复时间并保存后再分析。')).toBeTruthy();
+  fireEvent.click(analyze);
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/workflow')).toBe(false);
+  expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
+});
+
+it.each([1000, 5000])(
+  'keeps generation alive across navigation and reuses results (backend takes %i ms)',
+  async (duration) => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    let finish!: (value: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    vi.mocked(fetch).mockImplementation((url, options) => {
+      if (url !== '/api/workflow') return originalFetch(url, options);
+      signal = options?.signal;
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    });
+    render(<WorkbenchPage />);
+    const analyze = await screen.findByRole('button', { name: '分析影响并生成候选方案' });
+    vi.useFakeTimers();
+    fireEvent.click(analyze);
+    const back = screen.getByRole('button', { name: '← 返回工作台总览' }) as HTMLButtonElement;
+    expect(back.disabled).toBe(false);
+    expect(back.classList.contains('primary')).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: /生成候选方案 · 生成中/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(back);
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
+    expect(screen.getByText('⏳ 方案生成中...')).toBeTruthy();
+    expect(signal?.aborted).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '查看生成进度' }));
+    expect(screen.getByRole('heading', { name: '故障影响与方案决策', level: 1 })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    await act(() => vi.advanceTimersByTimeAsync(duration));
+    expect(screen.queryByRole('button', { name: /方案生成完成/ })).toBeNull();
+    await act(async () =>
+      finish(
+        new Response(
+          JSON.stringify({
+            workflow: {
+              id: 'w1',
+              status: 'completed',
+              results: {},
+              trace: [],
+              evidence_catalog: {},
+            },
+            simulation,
+          }),
+        ),
+      ),
+    );
+    if (duration < 4000) {
+      expect(screen.getByText('⏳ 方案生成中...')).toBeTruthy();
+      await act(() => vi.advanceTimersByTimeAsync(4000 - duration));
+    }
+    fireEvent.click(screen.getByRole('button', { name: '✅ 方案生成完成，点击查看' }));
+    expect(screen.getByRole('heading', { name: '方案比较' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '本次智能分析链路' })).toBeTruthy();
+    expect(screen.getAllByRole('img')).toHaveLength(3);
+    expect(signal?.aborted).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    fireEvent.click(screen.getByRole('button', { name: '+ 录入设备故障' }));
+    fireEvent.change(screen.getByLabelText('事件来源'), {
+      target: { value: '新故障，旧结果失效' },
+    });
+    expect(screen.queryByRole('button', { name: /方案生成完成/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '保存故障事件' }));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(screen.queryByRole('button', { name: /方案生成完成/ })).toBeNull();
+    expect(
+      (screen.getByRole('button', { name: '分析影响并生成候选方案' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(1);
+  },
+);
+
+it.each(['failed', 'blocked'])(
+  'never announces a %s workflow as completed and allows retry',
+  async (status) => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    let finish!: (value: Response) => void;
+    vi.mocked(fetch).mockImplementation((url, options) =>
+      url === '/api/workflow'
+        ? new Promise<Response>((resolve) => {
+            finish = resolve;
+          })
+        : originalFetch(url, options),
+    );
+    render(<WorkbenchPage />);
+    const analyze = await screen.findByRole('button', { name: '分析影响并生成候选方案' });
+    vi.useFakeTimers();
+    fireEvent.click(analyze);
+    fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    await act(async () =>
+      finish(
+        new Response(
+          JSON.stringify({
+            workflow: { id: 'w1', status, results: {}, trace: [], evidence_catalog: {} },
+            simulation: null,
+          }),
+        ),
+      ),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(screen.queryByRole('button', { name: /方案生成完成/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '分析影响并生成候选方案' }));
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(2);
+    await act(async () =>
+      finish(
+        new Response(
+          JSON.stringify({
+            workflow: {
+              id: 'w2',
+              status: 'completed',
+              results: {},
+              trace: [],
+              evidence_catalog: {},
+            },
+            simulation,
+          }),
+        ),
+      ),
+    );
+    expect(screen.getByRole('heading', { name: '方案比较' })).toBeTruthy();
+  },
+);

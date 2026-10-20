@@ -1,7 +1,7 @@
 .chart-scroll {
   overflow-x: auto;
 }
-svg {
+.gantt .chart-scroll > svg {
   display: block;
   width: 100%;
   min-width: 490px;

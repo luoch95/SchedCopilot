@@ -26,7 +26,7 @@ export function SimulationActions({
   return (
     <section className="simulation-actions">
       <div>
-        <h2>生成候选方案</h2>
+        <h2 id="section-generation">智能分析链路</h2>
         <p>对比“原计划对照（原设备顺延）”与“允许合格设备转移”，不会修改执行计划。</p>
       </div>
       <div className="simulation-action-buttons">
@@ -38,7 +38,7 @@ export function SimulationActions({
         >
           {running ? (
             <>
-              生成候选方案 · 生成中
+              生成中
               <span className="loading-dots" aria-hidden="true">
                 ...
               </span>
@@ -85,7 +85,7 @@ export function SimulationActions({
       )}
       {!state.event.recovered_at && (
         <div className="blockers">
-          已保存事件的恢复时间未知。请取消左侧“恢复时间未知”，填写恢复时间并保存。
+          已保存事件的恢复时间未知。请打开“录入设备故障”，取消“恢复时间未知”，填写恢复时间并保存。
         </div>
       )}
     </section>

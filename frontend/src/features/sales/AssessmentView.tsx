@@ -116,6 +116,13 @@ export function AssessmentView({
         <details>
           <summary>试排影响明细</summary>
           <section aria-label="试排影响明细">
+            <p className="sales-muted">
+              {result.workflow.mode === 'live'
+                ? '大模型辅助分析 · 排产与交期指标由规则工具计算并校验'
+                : result.workflow.mode === 'fallback'
+                  ? '大模型辅助暂不可用，已保留规则试排结果，可继续审批与复核。'
+                  : '规则试排分析'}
+            </p>
             <div className="insertion-agent-strip">
               {result.workflow.trace.map((step) => (
                 <div key={step.agent}>
@@ -146,6 +153,20 @@ export function AssessmentView({
                       )[step.status] ?? '状态待确认')
                     )}
                   </span>
+                  {step.execution && (
+                    <>
+                      <small className="sales-muted">
+                        {step.mode === 'live' ? '大模型辅助完成' : '已回退规则分析'}
+                      </small>
+                      {step.execution.highlights.length > 0 && (
+                        <ul className="trial-impact-points">
+                          {step.execution.highlights.map((item) => (
+                            <li key={item.text}>{item.text}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
                 </div>
               ))}
             </div>

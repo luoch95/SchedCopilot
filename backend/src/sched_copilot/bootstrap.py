@@ -41,13 +41,14 @@ def build_workbench(settings: Settings) -> WorkbenchService:
     return service
 
 
-def build_orchestrator(settings: Settings, model_factory=None) -> DynamicOrchestrator:
-    """Only the composition root reads provider configuration; secrets stay server-side."""
-    enabled = settings.workflow_model_mode == "live" or (
+def model_enabled(settings: Settings) -> bool:
+    return settings.workflow_model_mode == "live" or (
         settings.workflow_model_mode == "auto" and settings.llm_configured
     )
-    if not enabled:
-        return DynamicOrchestrator()
+
+
+def build_model_factory(settings: Settings):
+    """Only the composition root reads provider configuration; secrets stay server-side."""
 
     @lru_cache(maxsize=1)
     def create_model():
@@ -63,6 +64,13 @@ def build_orchestrator(settings: Settings, model_factory=None) -> DynamicOrchest
             max_retries=0,
         )
 
+    return create_model
+
+
+def build_orchestrator(settings: Settings, model_factory=None) -> DynamicOrchestrator:
+    if not model_enabled(settings):
+        return DynamicOrchestrator()
+    create_model = build_model_factory(settings)
     unavailable = None if settings.llm_configured or model_factory else "MODEL_NOT_CONFIGURED"
     agents = {
         name: LiveAgent(
@@ -82,7 +90,8 @@ def build_orchestrator(settings: Settings, model_factory=None) -> DynamicOrchest
     return DynamicOrchestrator(**agents)
 
 
-def build_sales(settings: Settings):
+def build_sales(settings: Settings, model_factory=None):
+    from .agents.insertion_analysis import InsertionAnalysisAgent
     from .application.sales import SalesService
     from .application.sales_requests import SalesRequestService
     from .infrastructure.insertion_repository import InsertionStore
@@ -96,5 +105,15 @@ def build_sales(settings: Settings):
         sales,
         demo_routes(),
         insertion_resources,
-        InsertionWorkflow(),
+        InsertionWorkflow(
+            InsertionAnalysisAgent(
+                model_factory or build_model_factory(settings),
+                os.getenv("LLM_MODEL") or None,
+                unavailable_code=(
+                    None if settings.llm_configured or model_factory else "MODEL_NOT_CONFIGURED"
+                ),
+            )
+            if model_enabled(settings)
+            else None
+        ),
     )

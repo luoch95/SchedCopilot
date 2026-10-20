@@ -230,14 +230,26 @@
   margin-right: 12px;
   vertical-align: middle;
 }
-.plan-version-tag {
+.plan-version-tag,
+.stat-strip .event-revision-tag {
   border: 1px solid #b8cde2;
   border-radius: 999px;
   background: #edf4fb;
   color: #23496e;
   font-weight: 750;
   padding: 4px 12px;
+}
+.plan-version-tag {
   cursor: pointer;
+}
+.stat-strip .event-revision-tag {
+  display: inline-flex;
+  width: fit-content;
+}
+.stat-strip :is(.plan-version-tag, .event-revision-tag) {
+  font-size: 14px;
+  line-height: 22px;
+  white-space: nowrap;
 }
 .plan-version-tag:hover,
 .plan-version-tag:focus-visible {
@@ -400,5 +412,62 @@
   }
   .workshop-metric {
     flex-basis: 100%;
+  }
+}
+
+.fault-event-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  border: 1px solid #e5cc8b;
+  border-left: 4px solid #bc8a22;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+.fault-event-banner h2 {
+  font-size: 16px;
+  color: #76530d;
+  margin-bottom: 8px;
+}
+.fault-event-banner p + p {
+  margin-top: 8px;
+}
+.fault-task-actions > button {
+  flex-shrink: 0;
+}
+
+.fault-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.fault-task-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #76530d;
+}
+.fault-task-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e5cc8b;
+  border-top-color: #76530d;
+  border-radius: 50%;
+  animation: fault-task-spin 0.8s linear infinite;
+}
+@keyframes fault-task-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fault-task-spinner {
+    animation: none;
   }
 }

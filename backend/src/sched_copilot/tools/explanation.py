@@ -233,7 +233,11 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
                 evidence_refs=[ref],
             )
         )
-    if source.compare and not tradeoffs:
+    if (
+        source.compare
+        and not tradeoffs
+        and not (source.batch and len(source.batch.candidates) == 1)
+    ):
         limitations.append("已有评价未提供候选取舍说明，本次只展示已登记事实。")
     if order_ids and not (evaluation and evaluation.data):
         limitations.append("尚无有效订单交付评价，只能解释已有工序变化，不能判断订单延期。")
@@ -251,6 +255,16 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
         summary = "所询订单或工序的已有变化和交付证据如下；不推测证据之外的原因。"
     elif tradeoffs:
         summary = "候选取舍如下；请核对现场条件与恢复不确定性，最终由计划员决定。"
+    elif source.batch and len(source.batch.candidates) == 1 and evaluation and evaluation.data:
+        candidate = source.batch.candidates[0]
+        label = request.evidence_catalog[candidate.plan_ref].content["label"]
+        summary = (
+            f"当前约束与已运行策略下仅有一个不同的可行候选：{label}。"
+            "无需进行多方案取舍，建议核对下列影响和风险后由计划员确认执行。"
+        )
+        limitations.append(
+            "当前只比较已运行的规则策略，不构成全局唯一最优解证明；不会自动发布执行计划。"
+        )
     elif source.batch:
         summary = "候选变更及其依据如下；尚无可用于候选比较的取舍说明。"
     else:

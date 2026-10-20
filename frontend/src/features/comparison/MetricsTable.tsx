@@ -18,6 +18,9 @@ export function MetricsTable({ candidates }: { candidates: Candidate[] }) {
   ];
   return (
     <>
+      <h3 data-outline className="block-title">
+        对比决策指标
+      </h3>
       <div className="table-wrap">
         <table className="metrics-table">
           <thead>

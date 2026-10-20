@@ -109,7 +109,7 @@ def test_validate_only_and_session_requirements(client):
     result = client.post("/api/workflow", json={**token(before), "intent": "validate"}).json()
     assert [t["action"] for t in result["workflow"]["trace"]] == ["validate"]
     assert result["simulation"] is None
-    for intent in ("explain", "re_evaluate"):
+    for intent in ("explain", "re_evaluate", "explain"):
         assert (
             client.post(
                 "/api/workflow", json={**token(before), "intent": intent, "workflow_id": "missing"}
@@ -184,3 +184,50 @@ def test_session_reuse_rejects_changed_event_even_with_current_request_version(c
         ).status_code
         == 409
     )
+
+
+def test_single_candidate_continues_evaluation_explanation_and_followups(client):
+    state = client.get("/api/workbench").json()
+    response = client.put(
+        "/api/event",
+        json={
+            **token(state),
+            "machine_id": "M3",
+            "started_at": "2026-10-19T13:00:00+08:00",
+            "recovered_at": "2026-10-19T13:01:00+08:00",
+            "source": "no affected work",
+        },
+    )
+    assert response.status_code == 200
+    before = client.get("/api/workbench").json()
+    response = client.post("/api/workflow", json={**token(before), "intent": "generate_candidates"})
+    assert response.status_code == 200
+    data = response.json()
+    workflow = data["workflow"]
+    assert workflow["status"] == "completed"
+    assert len(data["simulation"]["candidates"]) == 1
+    assert len(workflow["results"]["evaluation"]["data"]["evaluations"]) == 1
+    for intent in ("explain", "re_evaluate", "explain"):
+        response = client.post(
+            "/api/workflow",
+            json={
+                **token(before),
+                "intent": intent,
+                "workflow_id": workflow["id"],
+                "question": "比较方案并推荐最优方案",
+            },
+        )
+        assert response.status_code == 200
+        workflow = response.json()["workflow"]
+        assert workflow["status"] == "completed"
+        if intent == "re_evaluate":
+            assert len(workflow["results"]["evaluation"]["data"]["evaluations"]) == 1
+            continue
+        explanation = workflow["results"]["explanation"]["data"]
+        assert "仅有一个不同的可行候选" in explanation["summary"]
+        assert "原计划对照" in explanation["summary"]
+        assert "无需进行多方案取舍" in explanation["summary"]
+        assert not explanation["tradeoffs"]
+        assert all(s["requires_human_confirmation"] for s in explanation["next_steps"])
+        assert any("全局唯一最优解" in item for item in explanation["limitations"])
+    assert client.get("/api/workbench").json()["baseline"] == before["baseline"]

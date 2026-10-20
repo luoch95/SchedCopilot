@@ -332,3 +332,20 @@ def test_explanation_does_not_invoke_other_agents_or_rule_tools(explanation_requ
     second = ExplanationAgent().run(explanation_request)
     assert first.result.status == "warning"
     assert first.result == second.result
+
+
+def test_partial_multi_candidate_evaluation_cannot_use_single_candidate_fallback(
+    explanation_request,
+):
+    catalog = explanation_request.evidence_catalog
+    for evidence in catalog.values():
+        if evidence.kind == "evaluation_result":
+            evidence.content["data"]["evaluations"] = evidence.content["data"]["evaluations"][:1]
+            evidence.content["data"]["tradeoffs"] = []
+        elif evidence.kind == "evaluation_report":
+            evidence.content["evaluations"] = evidence.content["evaluations"][:1]
+            evidence.content["tradeoffs"] = []
+    run = ExplanationAgent().run(explanation_request)
+    assert run.result.status == "blocked"
+    assert run.result.data is None
+    assert run.result.errors[0].code == "EVALUATION_REQUIRED"

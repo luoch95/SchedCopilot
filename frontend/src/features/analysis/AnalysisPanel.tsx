@@ -1,5 +1,6 @@
 import type { WorkflowResult } from '../../shared/api/contracts';
 import { WorkflowNotices, WorkflowStatements } from '../../shared/ui/WorkflowEvidence';
+import { Accordion } from '../../shared/ui/Accordion';
 
 interface Props {
   busy: string;
@@ -14,11 +15,11 @@ export function AnalysisPanel({ busy, question, result, onQuestion, onExplain }:
   const data = report?.data;
   const execution = result.trace.find((step) => step.action === 'explain')?.execution;
   return (
-    <section className="section ai-section" aria-label="辅助分析">
+    <section id="fault-analysis" tabIndex={-1} className="section ai-section" aria-label="辅助分析">
       <div className="section-heading">
         <div>
           <p className="eyebrow">COPILOT ASSIST</p>
-          <h2>辅助分析</h2>
+          <h2 id="section-analysis">辅助分析</h2>
         </div>
         <span className="tag">本次结果解释 · 人工决定是否发布</span>
       </div>
@@ -40,35 +41,57 @@ export function AnalysisPanel({ busy, question, result, onQuestion, onExplain }:
           <p className="explanation-summary">
             <strong>{data.summary}</strong>
           </p>
+          <h3 id="section-facts" className="block-title">
+            事实、假设与风险
+          </h3>
           <div className="explanation-grid">
-            <WorkflowStatements result={result} title="事实" items={data.facts} />
-            <WorkflowStatements result={result} title="假设" items={data.assumptions} />
-            <WorkflowStatements result={result} title="风险" items={data.risks} />
-            <WorkflowStatements result={result} title="取舍" items={data.tradeoffs} />
+            <WorkflowStatements result={result} title="事实" items={data.facts?.slice(0, 1)} />
+            <WorkflowStatements
+              result={result}
+              title="假设"
+              items={data.assumptions?.slice(0, 1)}
+            />
+            <WorkflowStatements result={result} title="风险" items={data.risks?.slice(0, 1)} />
           </div>
-          {!!data.limitations?.length && (
-            <div className="explanation-group">
-              <h3>限制</h3>
-              <ul>
-                {data.limitations.map((text, i) => (
-                  <li key={i}>{text}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {!!data.next_steps?.length && (
-            <div className="explanation-group">
-              <h3>下一步</h3>
-              <ul>
-                {data.next_steps.map((step, i) => (
-                  <li key={i}>
-                    <strong>{step.action}</strong>
-                    {step.requires_human_confirmation && '（需人工确认）'}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <h3 id="section-advice" className="block-title">
+            取舍与建议
+          </h3>
+          <div className="explanation-grid">
+            <WorkflowStatements result={result} title="取舍" items={data.tradeoffs?.slice(0, 1)} />
+            {!!data.next_steps?.length && (
+              <div className="explanation-group">
+                <h3>下一步</h3>
+                <ul>
+                  {data.next_steps.map((step, i) => (
+                    <li key={i}>
+                      <strong>{step.action}</strong>
+                      {step.requires_human_confirmation && '（需人工确认）'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <Accordion title="风险、假设与完整分析明细">
+            <WorkflowStatements result={result} title="更多事实" items={data.facts?.slice(1)} />
+            <WorkflowStatements
+              result={result}
+              title="更多假设"
+              items={data.assumptions?.slice(1)}
+            />
+            <WorkflowStatements result={result} title="更多风险" items={data.risks?.slice(1)} />
+            <WorkflowStatements result={result} title="更多取舍" items={data.tradeoffs?.slice(1)} />
+            {!!data.limitations?.length && (
+              <div className="explanation-group">
+                <h3>限制</h3>
+                <ul>
+                  {data.limitations.map((text, i) => (
+                    <li key={i}>{text}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </Accordion>
         </>
       ) : (
         <p className="empty-state">

@@ -100,7 +100,9 @@ export function EvaluationSummary({
     );
   return (
     <section className="evaluation-summary" aria-label="方案评估结果">
-      <h3 className="block-title">评估说明</h3>
+      <h3 data-outline className="block-title">
+        评估说明与差异
+      </h3>
       <p className="hint">
         班次利用率＝（加工时间＋换型时间）÷可用班次时间，已扣除故障停机时间。
         {reference && `箭头表示相对“${reference.candidate.label}”同一设备的变化。`}

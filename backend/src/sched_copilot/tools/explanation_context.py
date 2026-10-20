@@ -271,10 +271,14 @@ def prepare_explanation(request: ExplanationInput) -> ExplanationSource:
         evaluation is None
         or evaluation.data is None
         or evaluation.status not in {"success", "warning"}
-        or len(evaluation.data.evaluations) < 2
+        or batch is None
+        or {item.candidate_id for item in evaluation.data.evaluations}
+        != {item.candidate_id for item in batch.candidates}
     ):
         raise ExplanationBlocked(
-            "EVALUATION_REQUIRED", "比较方案需要至少两个候选的有效评价。", refs
+            "EVALUATION_REQUIRED",
+            "解释候选需要当前批次所有候选的有效评价；单候选也必须完成评价。",
+            refs,
         )
     return ExplanationSource(
         request, validation, scheduling, evaluation, batch, changes, case, case_ref, compare

@@ -43,8 +43,8 @@ export function CurrentPlan({
             <PlanVersionTag version={state.baseline.version} publication={state.plan_publication} />
           </div>
           <div>
-            <span>已保存事件版本</span>
-            <strong>R{state.event_revision}</strong>
+            <span>故障信息修订版</span>
+            <span className="event-revision-tag">第 {state.event_revision} 版</span>
           </div>
           <div className="event-stat">
             <span>已保存故障 · {state.event.machine_id}</span>
@@ -60,7 +60,7 @@ export function CurrentPlan({
       <section className="section">
         <div className="section-heading">
           <div>
-            <h2>当前执行计划</h2>
+            {compact ? <h2>当前执行计划</h2> : <h3 id="section-current-plan">当前执行计划</h3>}
             {compact && (
               <div className="hint plan-metadata-row">
                 <PlanVersionTag
@@ -115,7 +115,7 @@ export function CurrentPlan({
         </p>
         {!compact && (
           <>
-            <h3 className="block-title">
+            <h3 id="section-impact" className="block-title">
               {state.event.recovered_at ? '直接影响范围' : '潜在风险范围'}
             </h3>
             {affected.length ? (

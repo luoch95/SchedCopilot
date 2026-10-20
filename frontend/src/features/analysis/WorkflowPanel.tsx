@@ -147,7 +147,7 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
   return (
     <section className="workflow-progress" aria-label="四个智能环节执行状态" aria-busy={running}>
       <div className="workflow-caption">
-        <h2>本次智能分析链路</h2>
+        <h3 id="section-workflow">本次智能分析链路</h3>
         <span role="status">
           {running ? (
             <WaitingResult />
@@ -303,9 +303,9 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
       {result?.failure_code && (
         <p className="message error">执行失败：{result.failure_code}。请重新生成方案。</p>
       )}
-      <details className="workflow-details" ref={detailsRef}>
+      <details className="workflow-details decision-accordion" ref={detailsRef}>
         <summary>
-          <h3>执行详情</h3>
+          <h3 id="section-execution">执行详情</h3>
         </summary>
         <p className="hint">查看各环节的问题与处理建议。辅助操作使用已保存的数据。</p>
         <p className="hint">重新校验会清除本次候选；生成方案时会自动校验。</p>

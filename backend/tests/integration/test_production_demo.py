@@ -1,5 +1,7 @@
 """Optional SQLite demo data drives a complete, measurable four-Agent run."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -162,3 +164,65 @@ def test_m3_wait_changes_are_explained_and_keep_machine_queues(seeded):
         assert [load["setup_minutes"] for load in loads] == [n * 15 for n in expected_counts]
         assert metrics["changeovers"] == sum(expected_counts) == 5
         assert metrics["changeover_minutes"] == sum(load["setup_minutes"] for load in loads) == 75
+
+
+def test_fault_tradeoff_mock_has_real_delivery_costs_and_is_repeatable(tmp_path):
+    from datetime import datetime
+
+    from sched_copilot.seed_demo import seed_fault_comparison
+
+    path = tmp_path / "tradeoff.sqlite3"
+    with TestClient(create_app(path)) as client:
+        initial = client.get("/api/workbench").json()
+    loaded = seed_fault_comparison(path)
+    assert loaded["inserted"] and Path(loaded["backup"]).exists()
+    assert not seed_fault_comparison(path)["inserted"]
+    with TestClient(create_app(path)) as client:
+        state = client.get("/api/workbench").json()
+        assert state["baseline"]["version"] == initial["baseline"]["version"] + 1
+        response = client.put(
+            "/api/event",
+            json={
+                "event_revision": state["event_revision"],
+                "baseline_fingerprint": state["baseline"]["fingerprint"],
+                "machine_id": "M3",
+                "started_at": "2026-10-19T13:00:00+08:00",
+                "recovered_at": "2026-10-19T17:00:00+08:00",
+                "source": "test",
+            },
+        )
+        assert response.status_code == 200
+        baseline = client.get("/api/workbench").json()["baseline"]
+        result, _ = run(client)
+        assert result["workflow"]["status"] == "completed"
+        candidates = result["simulation"]["candidates"]
+        assert len(candidates) == 2
+        assert len({c["schedule"]["fingerprint"] for c in candidates}) == 2
+        wait, transfer = candidates
+        due = {o["id"]: datetime.fromisoformat(o["due"]) for o in state["orders"]}
+
+        def lateness(candidate, order):
+            end = max(
+                datetime.fromisoformat(op["end"])
+                for op in candidate["schedule"]["operations"]
+                if op["order_id"] == order
+            )
+            return max(0, (end - due[order]).total_seconds() / 60)
+
+        assert lateness(wait, "O1002") == 75
+        assert lateness(transfer, "O1002") == 0
+        assert lateness(wait, "O1005") == 0
+        assert lateness(transfer, "O1005") == 105
+        for candidate in candidates:
+            for before in baseline["operations"]:
+                if before["status"] != "planned":
+                    assert (
+                        next(
+                            o
+                            for o in candidate["schedule"]["operations"]
+                            if o["id"] == before["id"]
+                        )
+                        == before
+                    )
+        assert client.get("/api/workbench").json()["baseline"] == baseline
+        assert result["workflow"]["results"]["explanation"]["data"]["tradeoffs"]
