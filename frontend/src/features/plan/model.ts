@@ -10,7 +10,10 @@ export function timelineRange(
     ...state.baseline.operations,
     ...(simulation?.candidates.flatMap((item) => item.schedule.operations) || []),
   ];
-  const start = Math.min(...operations.map((op) => +new Date(op.start)));
+  const start = Math.min(
+    ...operations.map((op) => +new Date(op.start)),
+    +new Date(state.event.started_at),
+  );
   const end = Math.max(
     ...operations.map((op) => +new Date(op.end)),
     state.event.recovered_at

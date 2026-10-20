@@ -10,6 +10,14 @@ class Base(DeclarativeBase):
     pass
 
 
+class RequestNumberSequence(Base):
+    """Technical daily counter; independent of deletable business records."""
+
+    __tablename__ = "request_number_sequences"
+    day: Mapped[str] = mapped_column(String(8), primary_key=True)
+    last_value: Mapped[int] = mapped_column(Integer)
+
+
 class InsertionRequest(Base):
     __tablename__ = "insertion_requests"
     __table_args__ = (
@@ -21,6 +29,9 @@ class InsertionRequest(Base):
     payload_fingerprint: Mapped[str] = mapped_column(String(64))
     request_no: Mapped[str] = mapped_column(String(60), unique=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
+    assigned_planner: Mapped[str] = mapped_column(
+        String(100), default="planner_01", server_default="planner_01", index=True
+    )
     applicant_role: Mapped[str] = mapped_column(String(32))
     applicant_session_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     product_id: Mapped[str] = mapped_column(String(100))

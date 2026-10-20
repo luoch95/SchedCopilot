@@ -19,7 +19,12 @@ import type {
 export const workbenchApi = {
   assessRequest: (id: string) =>
     api<InsertionAssessment>(`/sales/requests/${encodeURIComponent(id)}/assessment`, {}),
-  pendingRequests: () => api<InsertionRequestRecord[]>('/sales/requests'),
+  pendingRequests: (assignedPlanner?: string) =>
+    api<InsertionRequestRecord[]>(
+      `/sales/requests${assignedPlanner ? `?assigned_planner=${encodeURIComponent(assignedPlanner)}` : ''}`,
+    ),
+  requestDetail: (requestNo: string) =>
+    api<InsertionRequestRecord>(`/sales/requests/${encodeURIComponent(requestNo)}`),
   actOnRequest: (
     id: string,
     action: 'approve' | 'reject' | 'publish',

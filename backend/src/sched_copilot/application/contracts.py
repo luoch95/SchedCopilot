@@ -1,6 +1,6 @@
 """Typed commands and results shared by use cases and their adapters."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
@@ -49,6 +49,8 @@ class WorkbenchSnapshot:
     affected: tuple[str, ...]
     issues: tuple[str, ...]
     history: list[dict]
+    plan_publication: dict = field(default_factory=dict)
+    operation_labels: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,7 @@ class SimulationResult:
     id: str
     version: SnapshotVersion
     candidates: tuple[CandidateComparison, ...]
+    operation_labels: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

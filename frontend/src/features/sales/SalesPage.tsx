@@ -160,7 +160,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
         <div className="sales-section-heading">
           <div>
             <h2 id="sales-plan-heading">当前排产概况</h2>
-            <p>仅展示当前正式计划中的订单交期，不代表插单后的评估结果。</p>
+            <p>仅展示当前执行计划中的订单交期，不代表插单后的评估结果。</p>
           </div>
           <button onClick={refresh} disabled={loading || submitting}>
             刷新概况
@@ -177,7 +177,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
           <>
             <div className="sales-plan-facts">
               <span>
-                正式计划 <strong>V{overview.plan_version}</strong>
+                执行计划 <strong>V{overview.plan_version}</strong>
               </span>
               <span>
                 订单 <strong>{overview.orders.length} 个</strong>
@@ -413,7 +413,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
               </>
             )}
             <p className="sales-muted">
-              提交保存申请后，在下方待审批列表展开“查看需求”，点击“评估插单”。每条申请的结果独立保存。
+              提交保存申请后，在下方列表点击“查看详情”，在抽屉中点击“评估插单”或“查看试排摘要”。每条申请的结果独立保存。
             </p>
           </section>
           <section className="sales-panel" aria-labelledby="sales-status-heading">

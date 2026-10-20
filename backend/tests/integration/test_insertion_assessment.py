@@ -45,6 +45,17 @@ def test_complete_json_saved_and_restored_after_restart_without_publishing(tmp_p
         assert result["summary"]["estimated_completion_at"]
         assert isinstance(result["summary"]["meets_due"], bool)
         assert result["details"]["operations"]
+        inserted = [
+            op
+            for op in result["details"]["operations"]
+            if op["order_id"] == result["details"]["inserted_order_id"]
+        ]
+        assert inserted
+        assert all(
+            op["display_name"] == f"{request['request_no']}-OP{op['sequence']}"
+            and op["order_display_name"] == request["request_no"]
+            for op in inserted
+        )
         assert any(op["order_id"].startswith("URG-") for op in result["details"]["operations"])
         assert all("machine_id" in op and "mold_id" in op for op in result["details"]["operations"])
         assert client.get("/api/workbench").json() == before
@@ -139,3 +150,49 @@ def test_production_resource_change_marks_old_result_stale(tmp_path):
                 (json.dumps(demo_production_inputs()),),
             )
         assert client.get("/api/sales/requests").json()[0]["assessment_stale"] is True
+
+
+def test_legacy_snapshot_labels_do_not_invalidate_existing_approval(tmp_path):
+    import json
+
+    path = tmp_path / "legacy-labels.sqlite3"
+    with TestClient(create_app(path)) as client:
+        request = submit(client)
+        result = client.post(f"/api/sales/requests/{request['request_no']}/assessment").json()
+        for op in result["details"]["operations"]:
+            op.pop("display_name", None)
+            op.pop("order_display_name", None)
+        result.pop("request_no", None)
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "UPDATE insertion_requests SET assessment_json=? WHERE id=?",
+                (json.dumps(result, ensure_ascii=False), request["id"]),
+            )
+        base = f"/api/sales/requests/{request['request_no']}"
+        action = {
+            "action": "approve",
+            "reason": "确认风险",
+            "operator_role": "leader",
+            "assessment_id": result["assessment_id"],
+        }
+        approved = client.post(base + "/actions", json=action)
+        assert approved.status_code == 200, approved.text
+        with sqlite3.connect(path) as conn:
+            evidence = conn.execute("SELECT assessment_json FROM insertion_requests").fetchone()[0]
+    with TestClient(create_app(path)) as restarted:
+        detail = restarted.get(base).json()
+        inserted = next(
+            op
+            for op in detail["assessment"]["details"]["operations"]
+            if op["order_id"] == result["details"]["inserted_order_id"]
+        )
+        assert inserted["display_name"] == f"{request['request_no']}-OP1"
+        assert detail["approval"]["status"] == "approved"
+        published = restarted.post(
+            base + "/actions", json={**action, "action": "publish", "operator_role": "planner"}
+        )
+        assert published.status_code == 200, published.text
+    with sqlite3.connect(path) as conn:
+        assert (
+            conn.execute("SELECT assessment_json FROM insertion_requests").fetchone()[0] == evidence
+        )

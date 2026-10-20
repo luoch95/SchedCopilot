@@ -14,14 +14,19 @@ from ..domain.models import (
 )
 
 
-def schedule_json(schedule: Schedule) -> str:
-    return json.dumps(asdict(schedule), default=str, ensure_ascii=False)
+def schedule_json(schedule: Schedule, labels=None) -> str:
+    data = asdict(schedule)
+    for operation in data["operations"]:
+        operation.update((labels or {}).get(operation["id"], {}))
+    return json.dumps(data, default=str, ensure_ascii=False)
 
 
 def parse_schedule(payload: str) -> Schedule:
     data = json.loads(payload)
     operations = []
     for raw in data["operations"]:
+        raw.pop("display_name", None)
+        raw.pop("order_display_name", None)
         raw["start"] = datetime.fromisoformat(raw["start"])
         raw["status"] = TaskStatus(raw["status"])
         operations.append(Operation(**raw))

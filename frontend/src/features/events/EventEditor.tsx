@@ -26,12 +26,8 @@ export function EventEditor({
   onRecover,
 }: Props) {
   return (
-    <aside className="sidebar">
-      <a className="brand" href="#">
-        <span className="brand-mark">SC</span>
-        <span>排产辅助决策工作台</span>
-      </a>
-      <div className="sidebar-section">
+    <div className="event-editor">
+      <div>
         <h2>设备故障事件</h2>
         <p className="snapshot-note">
           仿真快照 <strong>{stamp(state.snapshot_time)}</strong>
@@ -111,12 +107,6 @@ export function EventEditor({
           </button>
         </fieldset>
       </div>
-      <div className="sidebar-footer">
-        <span className="status-dot" />
-        本地仿真 · 人工确认发布
-        <br />
-        <small>本地仿真 · 人工确认发布</small>
-      </div>
-    </aside>
+    </div>
   );
 }

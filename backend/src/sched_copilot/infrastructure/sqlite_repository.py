@@ -17,6 +17,13 @@ from ..domain.models import (
     digest,
 )
 from ..domain.scheduling import validate_schedule
+from .plan_publication import (
+    insertion_publication,
+    publication_info,
+    raw_version,
+    request_numbers,
+    schedule_labels,
+)
 from .serialization import (
     candidates_json,
     parse_candidates,
@@ -80,6 +87,71 @@ class DecisionStore:
                     "INSERT INTO event_history VALUES (NULL, ?, ?, ?)",
                     (*legacy, datetime.now(timezone.utc).isoformat()),
                 )
+
+        self._restore_publication_metadata()
+
+    def _restore_publication_metadata(self):
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT id,created_at,result,evidence FROM decisions WHERE action='publish'"
+            ).fetchall()
+            numbers = request_numbers(conn)
+            changes = []
+            for decision_id, _created_at, _payload, raw in rows:
+                evidence = json.loads(raw)
+                if "version_summary" in evidence:
+                    continue
+                request_id = evidence.get("insertion_request_id")
+                if request_id:
+                    row = conn.execute(
+                        "SELECT request_no FROM insertion_requests WHERE id=?",
+                        (request_id,),
+                    ).fetchone()
+                    if not row:
+                        continue
+                    evidence.update(
+                        insertion_publication(row[0], evidence["assessment"], "planner_01")
+                    )
+                elif "event" in evidence:
+                    evidence.update(
+                        published_by=None,
+                        version_summary=(
+                            f"因设备 {evidence['event']['machine_id']} 故障调整排产计划。"
+                        ),
+                    )
+                else:
+                    continue
+                changes.append((json.dumps(evidence, ensure_ascii=False), decision_id))
+            payload = conn.execute("SELECT payload FROM current_plan WHERE id=1").fetchone()[0]
+            schedule = parse_schedule(payload)
+            labeled = schedule_json(schedule, schedule_labels(schedule, numbers))
+            needs_labels = json.loads(payload) != json.loads(labeled)
+            if changes or needs_labels:
+                backup_database(Path(self.path))
+                conn.executemany("UPDATE decisions SET evidence=? WHERE id=?", changes)
+                if needs_labels:
+                    conn.execute("UPDATE current_plan SET payload=? WHERE id=1", (labeled,))
+
+    def plan_metadata(self, version):
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT created_at,result,evidence FROM decisions "
+                "WHERE action='publish' ORDER BY id DESC"
+            ).fetchall()
+        for created_at, payload, raw in rows:
+            if raw_version(payload) == version:
+                return publication_info(version, created_at, json.loads(raw))
+        return {
+            "version": version,
+            "published_at": None,
+            "published_by": None,
+            "version_summary": "初始演示计划" if version == 1 else "历史版本，未记录发布信息",
+        }
+
+    def operation_labels(self, schedule):
+        with self._connect() as conn:
+            return schedule_labels(schedule, request_numbers(conn))
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=10)
@@ -272,7 +344,8 @@ class DecisionStore:
             result = candidate.schedule if action == "publish" else baseline
             if action == "publish":
                 conn.execute(
-                    "UPDATE current_plan SET payload=? WHERE id=1", (schedule_json(result),)
+                    "UPDATE current_plan SET payload=? WHERE id=1",
+                    (schedule_json(result, schedule_labels(result, request_numbers(conn))),),
                 )
             conn.execute(
                 "INSERT INTO decisions VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)",
@@ -282,9 +355,14 @@ class DecisionStore:
                     signature,
                     reason.strip(),
                     datetime.now(timezone.utc).isoformat(),
-                    schedule_json(result),
+                    schedule_json(result, schedule_labels(result, request_numbers(conn))),
                     json.dumps(
-                        {"candidate": asdict(candidate), "event": asdict(event)},
+                        {
+                            "candidate": asdict(candidate),
+                            "event": asdict(event),
+                            "published_by": "planner_01",
+                            "version_summary": f"因设备 {event.machine_id} 故障调整排产计划。",
+                        },
                         default=str,
                         ensure_ascii=False,
                     ),

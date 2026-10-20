@@ -67,3 +67,43 @@ table td span {
   background: #fceeee;
   color: #9e3838;
 }
+
+/* Status cells share one alignment and compact, readable tags. */
+th.status-column,
+td.status-column {
+  text-align: center;
+  vertical-align: middle;
+}
+.status-tag,
+table td .status-tag {
+  display: inline-block;
+  margin: 0;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  font-weight: 500;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: normal;
+}
+.status-tag-neutral {
+  background: #edf0f2;
+  color: #525c65;
+}
+.status-tag-blue {
+  background: #e8f2ff;
+  color: #2463a6;
+}
+.status-tag-amber {
+  background: #fff3d6;
+  color: #87600d;
+}
+.status-tag-green {
+  background: #e8f5ee;
+  color: #21664c;
+}
+.status-tag-red {
+  background: #fceeee;
+  color: #9e3838;
+}

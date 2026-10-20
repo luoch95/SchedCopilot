@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { GanttSelectionProvider } from './GanttSelection';
+import { Comparison } from '../../features/comparison';
 import Gantt from './Gantt';
 import { simulation, workbench } from '../../test/fixtures';
 
@@ -59,5 +61,111 @@ describe('Gantt baseline comparison', () => {
     const moved = screen.getByRole('graphics-symbol', { name: /^O1-OP1 M2.*设备转移$/ });
     expect(moved.getAttribute('stroke')).toBe('#7C3AED');
     expect(screen.getAllByRole('graphics-symbol')).toHaveLength(1);
+  });
+});
+
+it('links the same operation across candidate charts in either direction and supports keyboard selection', () => {
+  render(<Comparison state={workbench} simulation={simulation} range={range} workflow={null} />);
+  const bars = screen.getAllByRole('graphics-symbol');
+  expect(bars).toHaveLength(2);
+  fireEvent.click(bars[0]);
+  expect(
+    bars.every((bar) => bar.parentElement?.classList.contains('gantt-operation-selected')),
+  ).toBe(true);
+  fireEvent.keyDown(bars[1], { key: 'Enter' });
+  expect(bars.every((bar) => bar.parentElement?.dataset.selected === 'true')).toBe(true);
+  expect(bars[1].getAttribute('stroke')).toBe('#7C3AED');
+});
+
+it('keeps independent comparison scopes separate and does not select an unrelated operation', () => {
+  const renderChart = (id: string) => (
+    <Gantt
+      schedule={{
+        ...workbench.baseline,
+        operations: [{ ...workbench.baseline.operations[0], id }],
+      }}
+      failure={workbench.event}
+      machines={workbench.machines}
+      range={range}
+    />
+  );
+  render(
+    <>
+      <GanttSelectionProvider>
+        {renderChart('O1-OP1')}
+        {renderChart('O2-OP1')}
+      </GanttSelectionProvider>
+      <GanttSelectionProvider>{renderChart('O1-OP1')}</GanttSelectionProvider>
+    </>,
+  );
+  const bars = screen.getAllByRole('graphics-symbol');
+  fireEvent.click(bars[0]);
+  expect(bars.map((bar) => bar.parentElement?.dataset.selected)).toEqual([
+    'true',
+    'false',
+    'false',
+  ]);
+});
+
+it('allows label pointer selection and leaves text dragging separate from operation clicks', () => {
+  render(
+    <Gantt
+      schedule={workbench.baseline}
+      failure={workbench.event}
+      machines={workbench.machines}
+      range={range}
+    />,
+  );
+  const bar = screen.getByRole('graphics-symbol');
+  const label = bar.parentElement?.querySelector('text');
+  expect(label?.getAttribute('pointer-events')).toBeNull();
+  const selection = vi
+    .spyOn(window, 'getSelection')
+    .mockReturnValue({ isCollapsed: false } as Selection);
+  try {
+    fireEvent.click(label!);
+    expect(bar.parentElement?.dataset.selected).toBe('false');
+    selection.mockReturnValue({ isCollapsed: true } as Selection);
+    fireEvent.click(label!);
+    expect(bar.parentElement?.dataset.selected).toBe('true');
+    fireEvent.mouseLeave(bar.parentElement!);
+    expect(document.querySelector('.gantt-inspector')?.textContent).toContain('O1-OP1');
+  } finally {
+    selection.mockRestore();
+  }
+});
+
+describe('Gantt time axis label spacing', () => {
+  const draw = (start: string, end: string) =>
+    render(
+      <Gantt
+        schedule={workbench.baseline}
+        failure={{ ...workbench.event, started_at: '2026-10-19T22:59:00+08:00' }}
+        machines={workbench.machines}
+        range={[+new Date(start), +new Date(end)]}
+      />,
+    );
+
+  it('reserves the exact end time and hides crowded hourly and event labels', () => {
+    const { container } = draw('2026-10-19T00:00:00+08:00', '2026-10-19T23:08:00+08:00');
+    const labels = [...container.querySelectorAll('.axis-label')];
+    expect(labels.at(-1)?.textContent).toBe('23:08');
+    expect(labels.at(-1)?.getAttribute('text-anchor')).toBe('end');
+    expect(labels.some((label) => label.textContent === '22:00')).toBe(false);
+    expect(labels.some((label) => label.textContent === '22:59')).toBe(false);
+    // Hiding a label must not remove its grid line or failure marker.
+    const endpoint = labels.at(-1)!.parentElement!;
+    expect(endpoint.previousElementSibling?.querySelector('line')).toBeTruthy();
+  });
+
+  it('protects the first endpoint and keeps well-spaced hourly labels', () => {
+    const { container } = draw('2026-10-19T12:58:00+08:00', '2026-10-19T23:08:00+08:00');
+    const labels = [...container.querySelectorAll('.axis-label')];
+    expect(labels[0].textContent).toBe('12:58');
+    expect(labels[0].getAttribute('text-anchor')).toBe('start');
+    expect(labels.some((label) => label.textContent === '13:00')).toBe(false);
+    expect(labels.some((label) => label.textContent === '22:00')).toBe(true);
+    expect(labels.some((label) => label.textContent === '23:00')).toBe(false);
+    expect(labels.at(-1)?.textContent).toBe('23:08');
   });
 });

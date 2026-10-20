@@ -79,6 +79,7 @@ class SalesRequestCreate(BaseModel):
 class SalesRequestView(BaseModel):
     id: str
     request_no: str
+    assigned_planner: str
     status: str
     product_id: str
     quantity: int

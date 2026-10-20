@@ -34,7 +34,7 @@ export function DecisionPanel({
           <p className="eyebrow">HUMAN IN THE LOOP</p>
           <h2>人工确认</h2>
         </div>
-        <span className="tag">当前正式计划 V{state.baseline.version}</span>
+        <span className="tag">当前执行计划 V{state.baseline.version}</span>
       </div>
       <fieldset disabled={!!busy}>
         <div className="decision-fields">
@@ -71,8 +71,8 @@ export function DecisionPanel({
         <div className="inline-actions">
           <p className="hint">
             {action === 'publish'
-              ? `将发布“${candidate?.label}”，正式计划更新为 V${state.baseline.version + 1}。`
-              : '只记录人工决定，正式计划保持不变。'}
+              ? `将发布“${candidate?.label}”，执行计划更新为 V${state.baseline.version + 1}。`
+              : '只记录人工决定，执行计划保持不变。'}
           </p>
           <button
             className="primary"

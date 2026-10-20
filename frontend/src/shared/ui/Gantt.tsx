@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { statusLabel } from '../lib/status';
 import { stamp } from '../lib/time';
 import type { Change, Failure, Machine, Operation, Schedule } from '../api/contracts';
 import { DecisionText } from './DecisionText';
+import { useGanttSelection } from './GanttSelection';
 
 const colors = ['#2E748C', '#489B78', '#A87939', '#7B71A4', '#C17467'];
 const hour = (value: number) => stamp(new Date(value).toISOString()).split(' ')[1];
@@ -21,6 +23,10 @@ export default function Gantt({
   range: [number, number];
   changes?: Change[];
 }) {
+  const sharedSelection = useGanttSelection();
+  const [localSelection, setLocalSelection] = useState<string | null>(null);
+  const selectedId = sharedSelection?.operationId ?? localSelection;
+  const select = sharedSelection?.select ?? setLocalSelection;
   const [hover, setHover] = useState<Operation | null>(null);
   const width = 920,
     left = 65,
@@ -41,11 +47,33 @@ export default function Gantt({
   const firstHour = Math.ceil(range[0] / step) * step;
   const hourlyTicks: number[] = [];
   for (let tick = firstHour; tick < range[1]; tick += step) hourlyTicks.push(tick);
-  const ticks = [...new Set([range[0], range[1], ...hourlyTicks, ...eventTicks])].sort(
-    (a, b) => a - b,
-  );
-  const before = hover && baseline?.operations.find((op) => op.id === hover.id);
-  const change = hover && changes.find((item) => item.工序 === hover.id);
+  const ticks = [
+    ...new Set([
+      range[0],
+      range[1],
+      ...hourlyTicks,
+      ...eventTicks.filter((tick) => tick >= range[0] && tick <= range[1]),
+    ]),
+  ].sort((a, b) => a - b);
+  // Reserve both endpoint labels before fitting intermediate labels into the SVG space.
+  // Keep grid lines (including failure boundaries) even when their labels do not fit.
+  const labelWidth = 42;
+  const labelGap = 14;
+  const visibleLabels = new Set([range[0], range[1]]);
+  let previousLabelRight = x(range[0]) + labelWidth;
+  const lastLabelLeft = x(range[1]) - labelWidth;
+  for (const tick of ticks) {
+    if (tick === range[0] || tick === range[1]) continue;
+    const labelLeft = x(tick) - labelWidth / 2;
+    const labelRight = x(tick) + labelWidth / 2;
+    if (labelLeft >= previousLabelRight + labelGap && labelRight + labelGap <= lastLabelLeft) {
+      visibleLabels.add(tick);
+      previousLabelRight = labelRight;
+    }
+  }
+  const inspected = hover ?? schedule.operations.find((op) => op.id === selectedId) ?? null;
+  const before = inspected && baseline?.operations.find((op) => op.id === inspected.id);
+  const change = inspected && changes.find((item) => item.工序 === inspected.id);
   const faultEnd = failure.recovered_at ? +new Date(failure.recovered_at) : range[1];
   return (
     <div className="gantt">
@@ -61,9 +89,16 @@ export default function Gantt({
                 stroke={eventTicks.includes(tick) ? '#CF8F80' : '#DFE6EB'}
                 strokeDasharray={eventTicks.includes(tick) ? '3 3' : undefined}
               />
-              <text x={x(tick)} y={19} textAnchor="middle" className="axis-label">
-                {hour(tick)}
-              </text>
+              {visibleLabels.has(tick) && (
+                <text
+                  x={x(tick)}
+                  y={19}
+                  textAnchor={tick === range[0] ? 'start' : tick === range[1] ? 'end' : 'middle'}
+                  className="axis-label"
+                >
+                  {hour(tick)}
+                </text>
+              )}
             </g>
           ))}
           {machines.map((machine, index) => (
@@ -121,7 +156,19 @@ export default function Gantt({
             const row = machines.findIndex((item) => item.id === op.machine_id);
             const y = top + row * rowHeight + 20;
             return (
-              <g key={op.id} onMouseEnter={() => setHover(op)} onMouseLeave={() => setHover(null)}>
+              <g
+                key={op.id}
+                className={`gantt-operation${selectedId === op.id ? ' gantt-operation-selected' : ''}`}
+                data-operation-id={op.id}
+                data-selected={selectedId === op.id}
+                onMouseEnter={() => setHover(op)}
+                onMouseLeave={() => setHover(null)}
+                onClick={() => {
+                  // Dragging a label selects text; do not turn copying into another action.
+                  if (window.getSelection()?.isCollapsed === false) return;
+                  select(op.id);
+                }}
+              >
                 <rect
                   x={start}
                   y={y}
@@ -134,21 +181,21 @@ export default function Gantt({
                   strokeWidth={changed ? 4 : 0}
                   tabIndex={0}
                   role="graphics-symbol"
-                  aria-label={`${op.id} ${op.machine_id} ${stamp(op.start)} 至 ${stamp(op.end)}${transfer ? ' 设备转移' : changed ? ' 时间调整' : ''}`}
+                  aria-label={`${op.display_name ?? op.id} ${op.machine_id} ${stamp(op.start)} 至 ${stamp(op.end)}${transfer ? ' 设备转移' : changed ? ' 时间调整' : ''}`}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      select(op.id);
+                    }
+                  }}
                   onFocus={() => setHover(op)}
                   onBlur={() => setHover(null)}
                 >
-                  <title>{`${op.id} · ${op.machine_id}\n${stamp(op.start)} → ${stamp(op.end)}`}</title>
+                  <title>{`${op.display_name ?? op.id} · ${op.machine_id}\n${stamp(op.start)} → ${stamp(op.end)}`}</title>
                 </rect>
                 {end - start > 78 && (
-                  <text
-                    x={(start + end) / 2}
-                    y={y + 19}
-                    textAnchor="middle"
-                    className="bar-label"
-                    pointerEvents="none"
-                  >
-                    {op.id}
+                  <text x={(start + end) / 2} y={y + 19} textAnchor="middle" className="bar-label">
+                    {op.display_name ?? op.id}
                   </text>
                 )}
               </g>
@@ -157,19 +204,16 @@ export default function Gantt({
         </svg>
       </div>
       <div className="gantt-inspector" aria-live="polite">
-        {hover ? (
+        {inspected ? (
           <>
-            <strong>{hover.id}</strong>
+            <strong>{inspected.display_name ?? inspected.id}</strong>
             <span>
-              {hover.machine_id} · {stamp(hover.start)} → {stamp(hover.end)}
+              {inspected.machine_id} · {stamp(inspected.start)} → {stamp(inspected.end)}
             </span>
             <span>
-              {hover.status === 'completed'
-                ? '已完成'
-                : hover.status === 'in_progress'
-                  ? '加工中'
-                  : '待加工'}
-              {before && (before.machine_id !== hover.machine_id || before.start !== hover.start)
+              {statusLabel(inspected.status)}
+              {before &&
+              (before.machine_id !== inspected.machine_id || before.start !== inspected.start)
                 ? ` · 原安排 ${before.machine_id} / ${stamp(before.start)}`
                 : ''}
             </span>
@@ -188,7 +232,7 @@ export default function Gantt({
         {orderIds.map((id, index) => (
           <span key={id}>
             <i style={{ background: colors[index % colors.length] }} />
-            {id}
+            {schedule.operations.find((op) => op.order_id === id)?.order_display_name ?? id}
           </span>
         ))}
       </div>

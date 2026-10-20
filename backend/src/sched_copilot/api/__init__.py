@@ -27,8 +27,9 @@ def create_app(
     configure_logging(settings.log_level)
     app = FastAPI(title="Schedule Copilot API", version="0.2.0")
     app.state.settings = settings
-    app.state.workbench = build_workbench(settings)
+    # Normalize persisted business numbers before restoring formal-plan display metadata.
     app.state.sales, app.state.sales_requests = build_sales(settings)
+    app.state.workbench = build_workbench(settings)
     register_errors(app)
     app.include_router(router)
     if (settings.frontend_dir / "index.html").exists():

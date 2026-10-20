@@ -1,4 +1,6 @@
 export interface Operation {
+  display_name?: string;
+  order_display_name?: string;
   id: string;
   order_id: string;
   machine_id: string;
@@ -35,7 +37,14 @@ export interface Decision {
   reason: string;
   created_at: string;
 }
+export interface PlanPublication {
+  version: number;
+  published_at: string | null;
+  published_by: string | null;
+  version_summary: string;
+}
 export interface Workbench {
+  plan_publication?: PlanPublication;
   baseline: Schedule;
   event: Failure;
   event_revision: number;
@@ -299,6 +308,7 @@ export interface InsertionRequestCreate {
 export interface InsertionRequestRecord {
   id: string;
   request_no: string;
+  assigned_planner: string;
   status: 'pending_approval' | 'approved' | 'rejected' | 'published';
   product_id: string;
   quantity: number;
@@ -321,6 +331,7 @@ export interface InsertionRequestRecord {
 }
 
 export interface InsertionAssessment {
+  request_no?: string;
   assessment_id?: string;
   workflow?: {
     mode: string;
@@ -355,6 +366,8 @@ export interface InsertionAssessment {
     process_steps: { sequence: number; name: string }[];
     operations: {
       operation_id: string;
+      display_name?: string;
+      order_display_name?: string;
       order_id: string;
       sequence: number;
       machine_id: string;

@@ -72,6 +72,25 @@ def test_full_closure_survives_restart_and_supports_later_trials(tmp_path):
         ]
         after = client.get("/api/workbench").json()
         assert after["baseline"]["version"] == before["baseline"]["version"] + 1
+        metadata = after["plan_publication"]
+        assert metadata["version"] == 2
+        assert metadata["published_by"] == "planner_01"
+        assert datetime.fromisoformat(metadata["published_at"])
+        assert metadata["version_summary"] == (
+            f"发布插单申请 {record['request_no']}，涉及 1 个新增工序和 "
+            f"{result['summary']['affected_order_count']} 个原订单调整。"
+        )
+        inserted = next(
+            op for op in after["baseline"]["operations"] if op["order_id"] == f"URG-{record['id']}"
+        )
+        assert inserted["display_name"] == f"{record['request_no']}-OP1"
+        assert inserted["order_display_name"] == record["request_no"]
+        with sqlite3.connect(path) as conn:
+            payload = json.loads(conn.execute("SELECT payload FROM current_plan").fetchone()[0])
+            stored = next(op for op in payload["operations"] if op["id"] == inserted["id"])
+            assert stored["display_name"] == inserted["display_name"]
+            evidence = json.loads(conn.execute("SELECT evidence FROM decisions").fetchone()[0])
+            assert evidence["version_summary"] == metadata["version_summary"]
         assert len(after["orders"]) == len(before["orders"]) + 1
         assert any(o["id"] == f"URG-{record['id']}" for o in after["orders"])
         assert act(client, record, "publish", result).status_code == 200
@@ -97,6 +116,13 @@ def test_full_closure_survives_restart_and_supports_later_trials(tmp_path):
         )
         simulated = client.post("/api/simulations", json=version)
         assert simulated.status_code == 200, simulated.text
+        for candidate in simulated.json()["candidates"]:
+            op = next(
+                op
+                for op in candidate["schedule"]["operations"]
+                if op["order_id"] == f"URG-{record['id']}"
+            )
+            assert op["display_name"] == f"{record['request_no']}-OP1"
         generated = client.post("/api/workflow", json={**version, "intent": "generate_candidates"})
         assert generated.status_code == 200, generated.text
         assert generated.json()["workflow"]["status"] == "completed", generated.text
@@ -226,3 +252,34 @@ def test_other_published_request_requires_new_trial_and_approval(tmp_path):
         assert act(client, second, "approve", renewed).status_code == 200
         response = act(client, second, "publish", renewed)
         assert response.status_code == 200, response.text
+
+
+def test_legacy_publication_backfill_preserves_plan_and_approval(tmp_path):
+    path = tmp_path / "legacy.sqlite3"
+    with TestClient(create_app(path)) as client:
+        record = submit(client)
+        trial = assess(client, record)
+        assert act(client, record, "approve", trial).status_code == 200
+        assert act(client, record, "publish", trial).status_code == 200
+        expected = client.get("/api/workbench").json()
+    with sqlite3.connect(path) as conn:
+        payload = json.loads(conn.execute("SELECT payload FROM current_plan").fetchone()[0])
+        for op in payload["operations"]:
+            op.pop("display_name", None)
+            op.pop("order_display_name", None)
+        conn.execute("UPDATE current_plan SET payload=?", (json.dumps(payload),))
+        evidence = json.loads(conn.execute("SELECT evidence FROM decisions").fetchone()[0])
+        evidence.pop("version_summary")
+        evidence.pop("published_by")
+        conn.execute("UPDATE decisions SET evidence=?", (json.dumps(evidence),))
+    before_backups = set((tmp_path / "backups").glob("*.sqlite3"))
+    with TestClient(create_app(path)) as client:
+        assert client.get("/api/workbench").json() == expected
+        assert (
+            client.get(f"/api/sales/requests/{record['request_no']}").json()["assessment"] == trial
+        )
+    backups = set((tmp_path / "backups").glob("*.sqlite3"))
+    assert len(backups - before_backups) == 1
+    with TestClient(create_app(path)) as client:
+        assert client.get("/api/workbench").json() == expected
+    assert set((tmp_path / "backups").glob("*.sqlite3")) == backups

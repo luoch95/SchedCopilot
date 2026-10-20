@@ -1,20 +1,31 @@
 """SQLAlchemy adapter: atomically persist request, approval and status history."""
 
 import json
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import URL, create_engine, event, select, text
 from sqlalchemy.orm import sessionmaker
 
 from ..domain.errors import RuleViolation
-from .models.requests import ApprovalRecord, Base, InsertionRequest, RequestStatusHistory
+from ..domain.insertion_workflow import label_request_operations
+from .models.requests import (
+    ApprovalRecord,
+    Base,
+    InsertionRequest,
+    RequestNumberSequence,
+    RequestStatusHistory,
+)
+from .plan_publication import insertion_publication, request_labels, schedule_labels
 from .serialization import parse_schedule, schedule_json
 
 
 class InsertionStore:
     def __init__(self, database_path):
+        Path(database_path).parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(
             URL.create("sqlite", database=str(database_path)),
             connect_args={"check_same_thread": False, "timeout": 10},
@@ -26,6 +37,73 @@ class InsertionStore:
 
         Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, expire_on_commit=False)
+        self._migrate_planner_assignment()
+        self._migrate_request_numbers()
+
+    def _migrate_planner_assignment(self):
+        # create_all cannot add columns to existing SQLite tables.
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            columns = connection.exec_driver_sql("PRAGMA table_info(insertion_requests)").all()
+            if "assigned_planner" not in {column[1] for column in columns}:
+                from .sqlite_repository import backup_database
+
+                backup_database(Path(self.engine.url.database))
+                connection.exec_driver_sql(
+                    "ALTER TABLE insertion_requests ADD COLUMN "
+                    "assigned_planner VARCHAR(100) NOT NULL DEFAULT 'planner_01'"
+                )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_insertion_requests_assigned_planner "
+                "ON insertion_requests (assigned_planner)"
+            )
+            connection.commit()
+
+    @staticmethod
+    def _number_day(now):
+        return (
+            now.replace(tzinfo=timezone.utc)
+            .astimezone(timezone(timedelta(hours=8)))
+            .strftime("%Y%m%d")
+        )
+
+    @staticmethod
+    def _next_number(session, day):
+        counter = session.get(RequestNumberSequence, day)
+        if counter is None:
+            counter = RequestNumberSequence(day=day, last_value=0)
+            session.add(counter)
+        counter.last_value += 1
+        session.flush()
+        return f"URG-{day}-{counter.last_value:03d}"
+
+    def _migrate_request_numbers(self):
+        # Serialize migration and submissions across processes/restarts.
+        with self.sessions() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            rows = session.scalars(
+                select(InsertionRequest).order_by(InsertionRequest.created_at, InsertionRequest.id)
+            ).all()
+            for row in rows:
+                match = re.fullmatch(r"URG-(\d{8})-(\d{3,})", row.request_no)
+                if match:
+                    day, value = match.group(1), int(match.group(2))
+                    counter = session.get(RequestNumberSequence, day)
+                    if counter is None:
+                        session.add(RequestNumberSequence(day=day, last_value=value))
+                    else:
+                        counter.last_value = max(counter.last_value, value)
+                    session.flush()
+            legacy = [
+                r for r in rows if r.request_no == f"URG-{r.created_at:%Y%m%d}-{r.id.upper()}"
+            ]
+            if legacy:
+                from .sqlite_repository import backup_database
+
+                backup_database(Path(self.engine.url.database))
+                for row in legacy:
+                    row.request_no = self._next_number(session, self._number_day(row.created_at))
+            session.commit()
 
     def submission(self, key, fingerprint):
         with self.sessions() as session:
@@ -57,7 +135,7 @@ class InsertionStore:
             row = InsertionRequest(
                 **data,
                 id=request_id,
-                request_no=f"URG-{now:%Y%m%d}-{request_id.upper()}",
+                request_no=self._next_number(session, self._number_day(now)),
                 submission_key=key,
                 payload_fingerprint=fingerprint,
                 status="draft",
@@ -98,11 +176,13 @@ class InsertionStore:
     def pending(self):
         return self.records("pending_approval")
 
-    def records(self, status=None):
+    def records(self, status=None, assigned_planner=None):
         with self.sessions() as session:
             query = select(InsertionRequest)
             if status:
                 query = query.where(InsertionRequest.status == status)
+            if assigned_planner is not None:
+                query = query.where(InsertionRequest.assigned_planner == assigned_planner)
             rows = session.scalars(
                 query.order_by(InsertionRequest.created_at.desc(), InsertionRequest.id)
             ).all()
@@ -110,7 +190,12 @@ class InsertionStore:
 
     def get(self, request_id):
         with self.sessions() as session:
-            row = session.get(InsertionRequest, request_id)
+            row = session.scalar(
+                select(InsertionRequest).where(
+                    (InsertionRequest.request_no == request_id)
+                    | (InsertionRequest.id == request_id)
+                )
+            )
             return self._full_view(session, row) if row else None
 
     def save_assessment(self, request_id, result):
@@ -231,9 +316,13 @@ class InsertionStore:
                         raise RuleViolation("试排结果未被批准，请重新审批")
                     if schedule is None or schedule.version != baseline.version + 1:
                         raise RuleViolation("发布计划未通过复核")
+                    numbers = request_labels(
+                        session.execute(text("SELECT id,request_no FROM insertion_requests"))
+                    )
+                    formal_payload = schedule_json(schedule, schedule_labels(schedule, numbers))
                     session.execute(
                         text("UPDATE current_plan SET payload=:payload WHERE id=1"),
-                        {"payload": schedule_json(schedule)},
+                        {"payload": formal_payload},
                     )
                     session.execute(
                         text(
@@ -253,9 +342,13 @@ class InsertionStore:
                             candidate=fingerprint,
                             reason=reason,
                             at=datetime.now(timezone.utc).isoformat(),
-                            result=schedule_json(schedule),
+                            result=formal_payload,
                             evidence=json.dumps(
-                                dict(insertion_request_id=request_id, assessment=result),
+                                dict(
+                                    insertion_request_id=request_id,
+                                    assessment=result,
+                                    **insertion_publication(row.request_no, result, "planner_01"),
+                                ),
                                 ensure_ascii=False,
                             ),
                         ),
@@ -316,6 +409,7 @@ class InsertionStore:
         return dict(
             id=row.id,
             request_no=row.request_no,
+            assigned_planner=row.assigned_planner,
             status=row.status,
             product_id=row.product_id,
             quantity=row.quantity,
@@ -324,6 +418,8 @@ class InsertionStore:
             reason=row.reason,
             plan_version=row.plan_version,
             estimate=json.loads(row.estimate_json),
-            assessment=json.loads(row.assessment_json) if row.assessment_json else None,
+            assessment=label_request_operations(
+                json.loads(row.assessment_json) if row.assessment_json else None, row.request_no
+            ),
             created_at=utc(row.created_at),
         )

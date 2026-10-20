@@ -1,21 +1,40 @@
+import { useEffect, useRef } from 'react';
+import { StatusTag } from '../../shared/ui/StatusTag';
+import { useGanttSelection } from '../../shared/ui/GanttSelection';
 import type { InsertionAssessment } from '../../shared/api/contracts';
-import { stamp } from '../../shared/lib/time';
+import { operationLabels } from './presentation';
+import { localInput, stamp } from '../../shared/lib/time';
 
 export function AssessmentView({
   result,
+  requestNo,
   planner = false,
   stale = false,
   published = false,
 }: {
   result: InsertionAssessment;
+  requestNo?: string;
   planner?: boolean;
   stale?: boolean;
   published?: boolean;
 }) {
   const summary = result.summary;
+  const selection = useGanttSelection();
+  const operationsDetails = useRef<HTMLDetailsElement>(null);
+  const selectedOperationId = selection?.operationId;
+  useEffect(() => {
+    if (
+      planner &&
+      selectedOperationId &&
+      result.details.operations.some((op) => op.operation_id === selectedOperationId) &&
+      operationsDetails.current
+    ) {
+      operationsDetails.current.open = true;
+    }
+  }, [planner, selectedOperationId, result]);
   return (
     <section className="insertion-assessment" aria-label="已保存的试排结果">
-      {stale && <p role="alert">正式计划、事件或生产资源已变化，此试排结果已过期，请重新试排。</p>}
+      {stale && <p role="alert">执行计划、事件或生产资源已变化，此试排结果已过期，请重新试排。</p>}
       <p>
         试排基线 V{result.baseline_version} · {stamp(result.created_at)} ·{' '}
         {published ? '该试排已发布，保留发布前评估快照' : stale ? '已过期' : '已保存，未发布'}
@@ -39,7 +58,8 @@ export function AssessmentView({
         </div>
       </dl>
       <p className="sales-muted">
-        受影响订单指原订单最终完成时间变化；延期加重指延期分钟数增加，不包含插单自身。工序调整但订单完成时间未变的不计入受影响订单。
+        受影响订单个数统计原订单最终完成时间变化；延期加重订单数统计交期延误增加，不包含插单自身。下表仅对新增交期延误大于
+        0 的订单标黄并标记“受影响”，仅完工时间推迟但未新增交期延误的订单不标记。
       </p>
       <details>
         <summary>订单延期变化明细</summary>
@@ -49,16 +69,33 @@ export function AssessmentView({
               <tr>
                 <th>订单</th>
                 <th>原完成时间</th>
-                <th>试排完成时间</th>
-                <th>原延期 / 新延期（分钟）</th>
-                <th>延期变化（分钟）</th>
+                <th>试排预计完工</th>
+                <th>
+                  交期延误(分钟){' '}
+                  <button
+                    type="button"
+                    className="lateness-help"
+                    aria-label="交期延误计算说明"
+                    title="此处计算的是超出客户要求交期的时长，而非单纯的完工时间变化。"
+                  >
+                    ?
+                  </button>
+                  <small>原 / 试排后</small>
+                </th>
+                <th>新增交期延误</th>
               </tr>
             </thead>
             <tbody>
               {summary.order_impacts.map((row) => (
-                <tr key={row.order_id}>
+                <tr
+                  key={row.order_id}
+                  className={row.delay_delta_minutes > 0 ? 'order-impact-changed' : undefined}
+                >
                   <td>
                     {row.order_id} · {row.order_name}
+                    {row.delay_delta_minutes > 0 && (
+                      <span className="order-impact-label">受影响</span>
+                    )}
                   </td>
                   <td>{stamp(row.original_completion_at)}</td>
                   <td>{stamp(row.projected_completion_at)}</td>
@@ -77,19 +114,65 @@ export function AssessmentView({
       </details>
       {result.workflow && (
         <details>
-          <summary>四 Agent 分析记录（规则模式）</summary>
-          {result.workflow.trace.map((step) => (
-            <p key={step.agent}>
-              {step.agent} · {step.status} · {step.mode}
-            </p>
-          ))}
-          {[
-            ...result.workflow.explanation.facts,
-            ...result.workflow.explanation.risks,
-            ...result.workflow.explanation.next_steps,
-          ].map((text) => (
-            <p key={text}>{text}</p>
-          ))}
+          <summary>试排影响明细</summary>
+          <section aria-label="试排影响明细">
+            <div className="insertion-agent-strip">
+              {result.workflow.trace.map((step) => (
+                <div key={step.agent}>
+                  <strong>
+                    {(
+                      {
+                        validation: '影响范围校验',
+                        scheduling: '产能交期试算',
+                        evaluation: '风险代价评估',
+                        explanation: '决策依据生成',
+                      } as Record<string, string>
+                    )[step.agent] ?? '试排处理'}
+                  </strong>
+                  <span className={step.status === 'success' ? 'trial-step-success' : undefined}>
+                    {step.status === 'success' ? (
+                      <>
+                        <span aria-hidden="true">✅</span> 已完成
+                      </>
+                    ) : (
+                      ((
+                        {
+                          warning: '需关注',
+                          failed: '处理失败',
+                          blocked: '暂不可继续',
+                          running: '处理中',
+                          pending: '待处理',
+                        } as Record<string, string>
+                      )[step.status] ?? '状态待确认')
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <ul className="trial-impact-points">
+              <li>预计完工：{localInput(summary.estimated_completion_at).replace('T', ' ')}</li>
+              <li>
+                影响范围：涉及 {summary.affected_order_count} 个原订单，其中{' '}
+                {summary.newly_delayed_order_count} 个交期延误加重。
+              </li>
+              <li>
+                决策提醒：
+                {stale && !published
+                  ? '试排结果已过期，需重新试排并重新审批。'
+                  : !summary.meets_due
+                    ? '插单预计无法满足要求交期，需确认交期及取舍。'
+                    : summary.newly_delayed_order_count > 0
+                      ? '原订单交期延误加重，需领导确认取舍。'
+                      : '原订单未新增交期延误，仍需按流程审批与复核。'}
+              </li>
+              <li>
+                流程声明：
+                {published
+                  ? '该结果已由计划员复核发布，此处保留发布前的试排快照。'
+                  : '当前为试排结果，审批通过后由计划员复核发布，不直接修改执行计划。'}
+              </li>
+            </ul>
+          </section>
         </details>
       )}
       {result.baseline_resource_issues.length > 0 && (
@@ -104,7 +187,7 @@ export function AssessmentView({
         ))}
       </details>
       {planner && (
-        <details>
+        <details ref={operationsDetails}>
           <summary>设备与工序排布明细</summary>
           <div className="table-scroll">
             <table>
@@ -115,14 +198,21 @@ export function AssessmentView({
                   <th>换型开始 / 分钟</th>
                   <th>加工开始</th>
                   <th>加工结束</th>
-                  <th>状态</th>
+                  <th className="status-column">状态</th>
                 </tr>
               </thead>
               <tbody>
                 {result.details.operations.map((op) => (
-                  <tr key={op.operation_id}>
+                  <tr
+                    key={op.operation_id}
+                    data-operation-id={op.operation_id}
+                    aria-selected={selectedOperationId === op.operation_id}
+                    className={
+                      selectedOperationId === op.operation_id ? 'operation-row-selected' : undefined
+                    }
+                  >
                     <td>
-                      {op.operation_id} · 第{op.sequence}道
+                      {operationLabels(result, op, requestNo).display_name} · 第{op.sequence}道
                     </td>
                     <td>
                       {op.machine_id} / {op.mold_id}
@@ -132,14 +222,21 @@ export function AssessmentView({
                     </td>
                     <td>{stamp(op.start)}</td>
                     <td>{stamp(op.end)}</td>
-                    <td>{op.status}</td>
+                    <td className="status-column">
+                      <StatusTag status={op.status} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           {result.baseline_resource_issues.map((issue) => (
-            <p key={issue}>{issue}</p>
+            <p key={issue} className="conflict-notice">
+              <span className="conflict-notice-icon" role="img" aria-label="冲突警告">
+                ⚠️
+              </span>
+              <span>{issue}</span>
+            </p>
           ))}
         </details>
       )}

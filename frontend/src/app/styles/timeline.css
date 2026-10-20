@@ -73,3 +73,45 @@ svg {
   margin: 0;
   color: var(--muted);
 }
+
+/* Keep native SVG text selection and copying available in every chart. */
+.gantt text,
+.gantt-inspector,
+.gantt .order-legend {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.gantt text {
+  cursor: text;
+  pointer-events: auto;
+}
+.gantt-operation {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform 180ms ease,
+    filter 180ms ease;
+}
+.gantt-operation > rect {
+  cursor: pointer;
+}
+.gantt-operation-selected {
+  transform: scale(1.035, 1.12);
+  filter: drop-shadow(0 2px 3px rgb(35 77 103 / 35%));
+}
+.gantt-operation-selected > rect[stroke='transparent'] {
+  stroke: #176886;
+  stroke-width: 3px;
+}
+.gantt-operation > rect:focus-visible {
+  outline: 2px solid #176886;
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gantt-operation {
+    transition: none;
+  }
+  .gantt-operation-selected {
+    transform: none;
+  }
+}

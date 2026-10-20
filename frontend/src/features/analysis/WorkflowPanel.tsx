@@ -417,7 +417,7 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                 {result.trace.map((step, i) => (
                   <li key={i}>
                     {stages.find((stage) => stage.action === step.action)?.label ?? step.action}：
-                    {labels[step.status] ?? step.status}
+                    {labels[step.status] ?? '状态待确认'}
                     {step.error_code && ` · ${executionCodes[step.error_code] ?? '执行异常'}`}
                     {step.execution && (
                       <span>

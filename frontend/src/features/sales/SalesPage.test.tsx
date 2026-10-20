@@ -59,6 +59,7 @@ beforeEach(() => {
           ...body,
           id: 'persisted-request',
           request_no: 'URG-TEST-0001',
+          assigned_planner: 'planner_01',
           status: 'pending_approval',
           plan_version: 1,
           estimate,
@@ -66,7 +67,11 @@ beforeEach(() => {
         };
         savedRequests = [record];
         data = record;
-      } else if (url === '/api/sales/requests') data = savedRequests;
+      } else if (
+        url === '/api/sales/requests' ||
+        url === '/api/sales/requests?assigned_planner=planner_01'
+      )
+        data = savedRequests;
       else if (url === '/api/sales/overview') data = overview;
       else if (url === '/api/sales/processing-estimate') data = estimate;
       else if (url === '/api/workbench') data = workbench;
@@ -168,7 +173,7 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
     fireEvent.click(screen.getByRole('button', { name: '切换角色' }));
     await screen.findByRole('heading', { name: '选择你的工作角色' });
     fireEvent.click(screen.getByRole('button', { name: /进入排产工作台/ }));
-    await screen.findByRole('heading', { name: '故障影响与方案决策' });
+    await screen.findByRole('heading', { name: '排产计划工作台' });
     await screen.findByText('URG-TEST-0001');
     expect(savedRequests).toHaveLength(1);
   });

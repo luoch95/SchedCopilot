@@ -106,12 +106,14 @@ export function useWorkbench() {
     setNotice('');
     try {
       await task();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作未完成，请重试。');
       if (err instanceof ApiError && err.status === 409) {
         clearResults();
         if (err.code === 'snapshot_conflict' || /更新|版本|变化/.test(err.message)) setStale(true);
       }
+      return false;
     } finally {
       inFlight.current = false;
       setBusy('');
@@ -157,6 +159,10 @@ export function useWorkbench() {
       setNotice('已载入后台最新记录，未保存输入已清除。');
     });
 
+  const discardDraft = () => {
+    if (state && !inFlight.current) setDraft(draftFor(state));
+  };
+
   const save = () =>
     run('保存事件', async () => {
       if (!draft || draftInvalid || stale) return;
@@ -169,13 +175,13 @@ export function useWorkbench() {
           source: draft.source.trim(),
         }),
       );
-      setNotice('故障事件已保存。请重新生成候选方案，正式计划未改变。');
+      setNotice('故障事件已保存。请重新生成候选方案，执行计划未改变。');
     });
 
   const recover = () =>
     run('恢复事件', async () => {
       accept(await workbenchApi.recoverEvent(version()));
-      setNotice('已恢复可试算事件。正式计划与历史记录均保留。');
+      setNotice('已恢复可试算事件。执行计划与历史记录均保留。');
     });
 
   const runWorkflow = (intent: WorkflowIntent) =>
@@ -275,7 +281,7 @@ export function useWorkbench() {
               : null,
           );
           if (controller.signal.aborted) {
-            setNotice('已取消本次执行，未生成新方案。正式计划未改变。');
+            setNotice('已取消本次执行，未生成新方案。执行计划未改变。');
           } else throw err;
         } finally {
           if (demonstrate) {
@@ -318,8 +324,8 @@ export function useWorkbench() {
       }
       setNotice(
         action === 'publish'
-          ? `已发布方案，正式计划版本 V${result.plan_version}。`
-          : '已记录暂不发布，正式计划保持不变。',
+          ? `已发布方案，执行计划版本 V${result.plan_version}。`
+          : '已记录暂不发布，执行计划保持不变。',
       );
     });
 
@@ -350,6 +356,7 @@ export function useWorkbench() {
     zoom,
     pan,
     edit,
+    discardDraft,
     reload,
     save,
     recover,

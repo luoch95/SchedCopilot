@@ -73,6 +73,8 @@ class WorkbenchService:
             tuple(op.id for op in affected_operations(baseline, event)),
             failure_issues(baseline, event, self.machines),
             self.repository.history(),
+            self.repository.plan_metadata(baseline.version),
+            self.repository.operation_labels(baseline),
         )
 
     def save_event(self, command: SaveEvent) -> WorkbenchSnapshot:
@@ -125,6 +127,7 @@ class WorkbenchService:
                 )
                 for candidate in candidates
             ),
+            self.repository.operation_labels(baseline),
         )
 
     def decide(self, command: Decide) -> tuple[int, WorkbenchSnapshot]:
@@ -187,6 +190,7 @@ class WorkbenchService:
                     )
                     for c in outcome.candidates
                 ),
+                self.repository.operation_labels(baseline),
             )
         return outcome.payload, simulation
 

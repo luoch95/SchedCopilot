@@ -6,7 +6,11 @@ from hashlib import sha256
 
 from ..domain.errors import RuleViolation
 from ..domain.insertion import trial_insertion
-from ..domain.insertion_workflow import publication_resources, validate_result
+from ..domain.insertion_workflow import (
+    label_request_operations,
+    publication_resources,
+    validate_result,
+)
 from ..domain.models import digest
 from .errors import ResourceNotFound
 from .ports import InsertionRepository
@@ -63,12 +67,20 @@ class SalesRequestService:
             return existing
         if earliest_start_at < snapshot_time:
             raise RuleViolation("最早开工时间不能早于当前演示快照")
+        # Demo line assignment is server-owned and excluded from the input fingerprint.
+        values["assigned_planner"] = "planner_01"
         return self.repository.submit(
             values, submission_key, fingerprint, estimate, plan_version, plan_fingerprint
         )
 
-    def pending(self, snapshot=None, production_snapshot=None, status="pending_approval"):
-        records = self.repository.records(None if status == "all" else status)
+    def pending(
+        self,
+        snapshot=None,
+        production_snapshot=None,
+        status="pending_approval",
+        assigned_planner=None,
+    ):
+        records = self.repository.records(None if status == "all" else status, assigned_planner)
         if snapshot is not None:
             for record in records:
                 result = record.get("assessment")
@@ -100,8 +112,26 @@ class SalesRequestService:
             )
         else:
             result = self._calculate(request, snapshot, production_snapshot)
-        self.repository.save_assessment(request_id, result)
+        result["request_no"] = request["request_no"]
+        self.repository.save_assessment(request["id"], result)
         return result
+
+    def detail(self, request_no, snapshot, production_snapshot=None):
+        record = self.repository.get(request_no)
+        if record is None:
+            raise ResourceNotFound("插单申请不存在")
+        result = record.get("assessment")
+        record["assessment_stale"] = bool(
+            result
+            and record["status"] != "published"
+            and (
+                result["baseline_fingerprint"] != snapshot.baseline.fingerprint
+                or result["event_revision"] != snapshot.event_revision
+                or result.get("production_inputs_fingerprint")
+                != self.production_fingerprint(production_snapshot)
+            )
+        )
+        return record
 
     def _calculate(self, request, snapshot, production_snapshot):
         request_id = request["id"]
@@ -158,7 +188,7 @@ class SalesRequestService:
             tool_version="insertion-rule-v1",
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        return result
+        return label_request_operations(result, request["request_no"])
 
     def act(
         self,
@@ -200,5 +230,5 @@ class SalesRequestService:
             schedule = validate_result(result, snapshot)
             production = publication_resources(result, production_snapshot)
         return self.repository.transition(
-            request_id, action, reason.strip(), assessment_id, schedule, production
+            request["id"], action, reason.strip(), assessment_id, schedule, production
         )

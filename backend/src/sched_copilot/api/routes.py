@@ -141,9 +141,17 @@ def pending_sales_requests(
     request: Request,
     service: Service,
     status: Literal["all", "pending_approval", "approved", "rejected", "published"] = "all",
+    assigned_planner: str | None = None,
 ):
     return request.app.state.sales_requests.pending(
-        service.workbench(), service.repository.production_snapshot(), status
+        service.workbench(), service.repository.production_snapshot(), status, assigned_planner
+    )
+
+
+@router.get("/sales/requests/{request_no}", response_model=SalesRequestView)
+def sales_request_detail(request_no: str, request: Request, service: Service):
+    return request.app.state.sales_requests.detail(
+        request_no, service.workbench(), service.repository.production_snapshot()
     )
 
 

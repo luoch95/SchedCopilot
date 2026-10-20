@@ -36,6 +36,11 @@ def test_publish_persists_and_duplicate_request_is_idempotent(context):
     duplicate = store.decide(candidate, event, demo_machines(), "publish", "交期优先", "p1")
     assert result == duplicate == store.current()
     assert result.version == 2
+    metadata = store.plan_metadata(2)
+    assert metadata["version_summary"] == "因设备 M1 故障调整排产计划。"
+    assert metadata["published_by"] == "planner_01"
+    assert metadata["published_at"]
+    assert store.plan_metadata(1)["version_summary"] == "初始演示计划"
     assert len(store.history()) == 1
 
 
