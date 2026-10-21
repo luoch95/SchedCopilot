@@ -1,5 +1,7 @@
+import { TraceTree, TraceBadge } from '../../shared/ui/TraceTree';
 import { useEffect, useRef } from 'react';
 import { StatusTag } from '../../shared/ui/StatusTag';
+import { KnowledgePanel } from '../../shared/ui/KnowledgePanel';
 import { useGanttSelection } from '../../shared/ui/GanttSelection';
 import type { InsertionAssessment } from '../../shared/api/contracts';
 import { operationLabels } from './presentation';
@@ -112,6 +114,30 @@ export function AssessmentView({
           </table>
         </div>
       </details>
+      {planner && result.workflow?.trace_id && (
+        <details>
+          <summary>
+            执行详情 <TraceBadge traceId={result.workflow.trace_id} />
+          </summary>
+          <TraceTree
+            traceId={result.workflow.trace_id}
+            steps={result.workflow.trace.map((step) => ({
+              ...step,
+              knowledge:
+                step.agent === 'explanation' ? result.workflow?.explanation.knowledge : undefined,
+              label:
+                (
+                  {
+                    validation: '影响范围校验',
+                    scheduling: '产能交期试算',
+                    evaluation: '风险代价评估',
+                    explanation: '决策依据生成',
+                  } as Record<string, string>
+                )[step.agent] ?? '分析环节',
+            }))}
+          />
+        </details>
+      )}
       {result.workflow && (
         <details>
           <summary>试排影响明细</summary>
@@ -193,6 +219,7 @@ export function AssessmentView({
                   : '当前为试排结果，审批通过后由计划员复核发布，不直接修改执行计划。'}
               </li>
             </ul>
+            <KnowledgePanel report={result.workflow.explanation.knowledge} />
           </section>
         </details>
       )}

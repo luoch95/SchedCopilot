@@ -50,6 +50,7 @@ class LiveRun:
     result: object
     prompt_sha256: str
     execution: ModelExecution
+    knowledge: dict | None = None
 
 
 class FocusSelection(BaseModel):
@@ -430,4 +431,6 @@ class LiveAgent:
             corrections=corrections,
             simulated=simulate_failure,
         )
-        return LiveRun(run.request, run.result, run.prompt_sha256, execution)
+        return LiveRun(
+            run.request, run.result, run.prompt_sha256, execution, getattr(run, "knowledge", None)
+        )

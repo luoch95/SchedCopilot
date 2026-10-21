@@ -63,7 +63,17 @@ class Model:
                 ):
                     raise TimeoutError("private-key-and-provider-body")
                 args = {}
-                if name == "submit_focus":
+                if name == "submit_knowledge":
+                    context = json.loads(messages[-1].content)
+                    args = {
+                        "items": [
+                            {
+                                "source_id": context["sources"][0]["chunk_id"],
+                                "fact_ids": list(context["fact_catalog"])[:1],
+                            }
+                        ]
+                    }
+                elif name == "submit_focus":
                     catalog = next(
                         json.loads(message.content)["focus_catalog"]
                         for message in reversed(messages)
@@ -120,7 +130,8 @@ def test_four_roles_use_their_tools_and_preserve_authoritative_results(state):
     actual = live(model).run(state)
     assert actual.state == expected.state
     assert actual.state.workflow_status == "completed"
-    assert len(model.calls) == 8
+    assert len(model.calls) == 9
+    assert actual.trace[-1].knowledge["mode"] == "live"
     for step in actual.trace:
         execution = step.execution
         assert execution.mode == "live", execution
@@ -131,7 +142,7 @@ def test_four_roles_use_their_tools_and_preserve_authoritative_results(state):
         for highlight in execution.highlights:
             assert set(highlight["evidence_refs"]) <= actual.state.evidence_catalog.keys()
     assert state.model_dump_json() == before
-    assert [name for name, _ in model.calls][::2] == [
+    assert [name for name, _ in model.calls if name != "submit_knowledge"][::2] == [
         "run_validation_tool",
         "run_scheduling_tool",
         "run_evaluation_tool",

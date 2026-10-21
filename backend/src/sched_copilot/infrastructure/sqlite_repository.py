@@ -72,6 +72,12 @@ class DecisionStore:
                 CREATE TABLE IF NOT EXISTS simulations (
                     id TEXT PRIMARY KEY, candidates TEXT NOT NULL, event TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS workflow_runs (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trace_id TEXT UNIQUE NOT NULL, workflow_id TEXT UNIQUE NOT NULL,
+                    created_at TEXT NOT NULL, payload TEXT NOT NULL,
+                    state TEXT NOT NULL, simulation_id TEXT
+                );
                 CREATE TABLE IF NOT EXISTS production_inputs (
                     id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL
                 );
@@ -89,6 +95,48 @@ class DecisionStore:
                 )
 
         self._restore_publication_metadata()
+
+    def record_workflow(self, payload: dict, state: dict) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO workflow_runs "
+                "(trace_id,workflow_id,created_at,payload,state) VALUES (?,?,?,?,?)",
+                (
+                    payload["trace_id"],
+                    payload["id"],
+                    datetime.now(timezone.utc).isoformat(),
+                    json.dumps(payload, ensure_ascii=False),
+                    json.dumps(state, ensure_ascii=False),
+                ),
+            )
+
+    def workflow_session(self, workflow_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT state FROM workflow_runs WHERE workflow_id=?", (workflow_id,)
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def attach_workflow_simulation(self, workflow_id: str, simulation_id: str | None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE workflow_runs SET simulation_id=? WHERE workflow_id=?",
+                (simulation_id, workflow_id),
+            )
+
+    def workflow_simulation_id(self, workflow_id: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT simulation_id FROM workflow_runs WHERE workflow_id=?", (workflow_id,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def latest_workflow(self) -> tuple[dict, str | None] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload,simulation_id FROM workflow_runs ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
+        return (json.loads(row[0]), row[1]) if row else None
 
     def _restore_publication_metadata(self):
         with self._connect() as conn:

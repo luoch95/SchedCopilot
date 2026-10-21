@@ -123,3 +123,17 @@ frontend/src/
 infrastructure/insertion_repository.py沿用三表；审批记录comment存储结构化理由及结果绑定，状态历史保留每次状态转换与理由。发布事务同时更新正式计划、生产资源快照和现有决策日志，最后核对版本，失败全部回滚。sqlite_repository.published_orders从已发布申请恢复正式订单；WorkbenchService读取新增订单供概况、后续插单及故障流程使用，不增加业务表。
 
 前端新增sales/LeaderPage，通过公开index供App组合；session支持leader会话及角色卡。PendingRequestsPanel提供按角色审批/发布操作，AssessmentView销售/领导只渲染摘要，计划员渲染全部；发布后调用原工作台reload清除旧候选并加载正式计划。HTTP仍集中workbench/api.ts，契约位于shared/api/contracts.ts。
+
+### 轻量知识检索（RAG-IMPL-01）
+
+`knowledge/*.md` 是随 Python 包发布的模拟资料；`infrastructure/markdown_knowledge.py` 负责只读切段与关键词检索，`tools/knowledge.py` 提供带无匹配/异常回退的检索工具。`bootstrap.build_knowledge_tool` 注入适配器和模型工厂，Agent 与工具层不反向导入基础设施。
+
+`agents/knowledge_explanation.py` 是原解释 Agent 的知识辅助函数，不是第五个 Agent；仅允许模型选择来源编号和关联事实编号。`ExplanationAgent` 的故障与插单入口共用该函数，报告作为附加字段返回，不侵入原严格业务报告。故障经编排 trace 返回；插单随原 assessment_json 保存，无新增表或接口。
+
+前端 `shared/ui/KnowledgePanel.tsx` 共用版本化引用展示；`features/analysis/AnalysisPanel` 与 `features/sales/AssessmentView` 组合该展示组件。组件不发请求；接口契约仍在 `shared/api/contracts.ts`，样式为 `app/styles/knowledge.css`。
+
+### 轻量 Trace（TRACE-IMPL-01）
+
+`orchestration/engine.py` 生成分析 trace_id 并通过注入的会话仓储持久化；`orchestrator.py` 记录阶段 span_id 和耗时。`infrastructure/sqlite_repository.py` 管理 `workflow_runs` 及 JSON 状态恢复，内存仅作有界缓存；`application/workbench.py` 关联候选批次并校验当前快照。`GET /api/workflow/latest` 由路由层委托应用服务，不在 API 或组件里写 SQL。插单编排生成同类标识，沿用原 assessment_json 落库。
+
+`features/workbench/useWorkbench.ts` 经既有 API 适配器恢复记录，防止恢复请求覆盖用户的新操作；`shared/ui/TraceTree.tsx` 负责父子层级、耗时和 Token，供故障与插单复用。样式位于 `app/styles/trace.css`。阶段总耗时包含子项，模型调用为角色汇总计量，不冒充逐调用完整追踪。

@@ -70,7 +70,7 @@ describe('demo role navigation (URG-01)', () => {
   });
   it('opens and restores the leader approval view', async () => {
     const first = render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /进入领导审批/ }));
+    fireEvent.click(screen.getByRole('button', { name: /进入管理者审批/ }));
     expect(screen.getByRole('heading', { name: '紧急插单审批' })).toBeTruthy();
     expect(sessionStorage.getItem(key)).toBe('leader');
     first.unmount();

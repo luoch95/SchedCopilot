@@ -25,20 +25,36 @@ class ExplanationRun:
     request: ExplanationInput
     result: ExplanationResult
     prompt_sha256: str
+    knowledge: dict | None = None
 
 
 class ExplanationAgent:
     """首版使用可追溯模板；工具只接收副本，不拥有写入或发布权限。"""
 
-    def run_insertion(self, result):
+    def run_insertion(self, result, request=None, *, skip_model_code=None):
         from ..tools.insertion import explain_request
 
-        return explain_request(result)
+        explanation = explain_request(result)
+        if self.knowledge_tool and request:
+            facts = {
+                f"B{index + 1}": text
+                for index, text in enumerate([*explanation["facts"], *explanation["risks"]])
+            }
+            # Do not forward user reasons or equipment/process data into sales RAG.
+            question = "插单审批风险：交期是否满足，原订单延期影响与复核发布依据"
+            explanation["knowledge"] = self.knowledge_tool(
+                "insertion", question, facts, skip_code=skip_model_code
+            )
+        return explanation
 
     def __init__(
-        self, tool: Callable[[ExplanationSource], ExplanationData] = explain_results
+        self,
+        tool: Callable[[ExplanationSource], ExplanationData] = explain_results,
+        *,
+        knowledge_tool=None,
     ) -> None:
         self._tool = tool
+        self.knowledge_tool = knowledge_tool
 
     def run(
         self, request: ExplanationInput, *, expected_context: AgentContext | None = None
@@ -137,4 +153,14 @@ class ExplanationAgent:
             result = validate_result(result.model_dump_json(), checked, prompt)
         result = finish_quality(result, quality)
         result = validate_result(result.model_dump_json(), checked, prompt)
-        return ExplanationRun(checked, result, prompt.content_sha256)
+        knowledge = None
+        if self.knowledge_tool and result.data and result.status not in {"failed", "blocked"}:
+            facts = {
+                f"B{index + 1}": item.text
+                for index, item in enumerate([*result.data.facts[:8], *result.data.risks[:4]])
+            }
+            signals = (
+                [failure.machine_id for failure in source.case.failures] if source.case else []
+            )
+            knowledge = self.knowledge_tool("fault", checked.question, facts, signals)
+        return ExplanationRun(checked, result, prompt.content_sha256, knowledge)

@@ -11,6 +11,7 @@ import type {
   SalesOverview,
   ProcessingEstimate,
   WorkflowIntent,
+  WorkflowResponse,
   WorkflowProgressEvent,
   DemoFallbackStatus,
 } from '../../shared/api/contracts';
@@ -45,6 +46,7 @@ export const workbenchApi = {
     api<ProcessingEstimate>('/sales/processing-estimate', { product_id, quantity }),
   demoStatus: () => api<DemoFallbackStatus>('/workflow/demo'),
   load: () => api<Workbench>('/workbench'),
+  latestWorkflow: () => api<WorkflowResponse | null>('/workflow/latest'),
   saveEvent: (request: SaveEventRequest) => api<Workbench>('/event', request, 'PUT'),
   recoverEvent: (version: SnapshotVersion) => api<Workbench>('/event/recover', version),
   workflow: (

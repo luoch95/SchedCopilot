@@ -25,15 +25,48 @@ from .state import WorkflowState
 
 
 class WorkflowEngine:
-    """Sessions expire on restart/eviction; snapshot checks prevent stale reuse."""
+    """Bounded memory cache with optional durable sessions and snapshot checks."""
 
-    def __init__(self, capacity=32, production_provider=None, orchestrator=None, demo_gate=None):
+    def __init__(
+        self,
+        capacity=32,
+        production_provider=None,
+        orchestrator=None,
+        demo_gate=None,
+        session_store=None,
+    ):
         self._sessions = OrderedDict()
         self._lock = RLock()
         self._capacity = capacity
         self.orchestrator = orchestrator or DynamicOrchestrator()
         self.production_provider = production_provider or (lambda: None)
         self.demo_gate = demo_gate
+        self.session_store = session_store
+
+    @staticmethod
+    def _fingerprint(baseline, event, machines, orders, snapshot_time, revision, supplemental):
+        return sha256(
+            json.dumps(
+                {
+                    "baseline": baseline.fingerprint,
+                    "event": digest(event),
+                    "revision": revision,
+                    "machines": [
+                        asdict(m) | {"capabilities": sorted(m.capabilities)} for m in machines
+                    ],
+                    "orders": [asdict(o) for o in orders],
+                    "snapshot_time": snapshot_time,
+                    "production_data": supplemental,
+                },
+                sort_keys=True,
+                default=str,
+            ).encode()
+        ).hexdigest()
+
+    def matches_snapshot(self, payload, baseline, event, machines, orders, snapshot_time, revision):
+        return payload["context"]["input_fingerprint"] == self._fingerprint(
+            baseline, event, machines, orders, snapshot_time, revision, self.production_provider()
+        )
 
     def _claim_demo(self):
         if not self.demo_gate.claim():
@@ -59,23 +92,9 @@ class WorkflowEngine:
         if demo_fallback and not self.demo_gate.status()["available"]:
             raise DemoCooldown("兜底演示冷却中，20 分钟内只能触发一次。可关闭演示后正常生成。")
         supplemental = self.production_provider()
-        fingerprint = sha256(
-            json.dumps(
-                {
-                    "baseline": baseline.fingerprint,
-                    "event": digest(event),
-                    "revision": revision,
-                    "machines": [
-                        asdict(m) | {"capabilities": sorted(m.capabilities)} for m in machines
-                    ],
-                    "orders": [asdict(o) for o in orders],
-                    "snapshot_time": snapshot_time,
-                    "production_data": supplemental,
-                },
-                sort_keys=True,
-                default=str,
-            ).encode()
-        ).hexdigest()
+        fingerprint = self._fingerprint(
+            baseline, event, machines, orders, snapshot_time, revision, supplemental
+        )
         context = AgentContext(
             case_id="workbench",
             snapshot_id=fingerprint,
@@ -86,6 +105,10 @@ class WorkflowEngine:
         if intent in {"re_evaluate", "explain"}:
             with self._lock:
                 saved = self._sessions.get(workflow_id)
+                if saved is None and self.session_store:
+                    stored = self.session_store.workflow_session(workflow_id)
+                    if stored:
+                        saved = WorkflowState.model_validate_json(json.dumps(stored))
                 if saved is None:
                     raise InvalidInput("工作流结果不存在或已过期，请先生成方案或执行校验")
                 state = saved.model_copy(deep=True)
@@ -114,6 +137,9 @@ class WorkflowEngine:
                 intent,
                 supplemental,
             )
+        trace_id = f"TRC-{uuid4().hex.upper()}"
+        if on_progress:
+            on_progress({"type": "trace_started", "trace_id": trace_id})
         run = self.orchestrator.run(
             state,
             **({"on_progress": on_progress} if on_progress else {}),
@@ -129,6 +155,7 @@ class WorkflowEngine:
                 self._sessions.popitem(last=False)
         payload = {
             "id": session_id,
+            "trace_id": trace_id,
             "intent": intent,
             "status": result.workflow_status,
             "failure_code": result.failure_code,
@@ -185,6 +212,8 @@ class WorkflowEngine:
                         causes,
                     )
                 )
+        if self.session_store:
+            self.session_store.record_workflow(payload, result.model_dump(mode="json"))
         return WorkflowOutcome(payload, tuple(candidates))
 
     @staticmethod

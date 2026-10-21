@@ -36,6 +36,7 @@ export function useWorkbench() {
   const inFlight = useRef(false);
   const workflowAbort = useRef<AbortController | null>(null);
   const decisionRequest = useRef({ key: '', id: '' });
+  const recoveryEpoch = useRef(0);
   const initialLoad = useRef<Promise<Workbench> | null>(null);
 
   useEffect(() => {
@@ -67,6 +68,7 @@ export function useWorkbench() {
   }
 
   function clearResults() {
+    recoveryEpoch.current += 1;
     setSimulation(null);
     setWorkflow(null);
     setProgress(null);
@@ -88,7 +90,22 @@ export function useWorkbench() {
     initialLoad.current ??= workbenchApi.load();
     initialLoad.current
       .then((value) => {
-        if (active) accept(value);
+        if (active) {
+          accept(value);
+          const epoch = recoveryEpoch.current;
+          void workbenchApi
+            .latestWorkflow()
+            .then((saved) => {
+              if (!active || inFlight.current || epoch !== recoveryEpoch.current || !saved) return;
+              setWorkflow(saved.workflow);
+              setSimulation(saved.simulation);
+              setSelected(saved.simulation?.candidates[0]?.id ?? '');
+            })
+            .catch(() => {
+              if (active && epoch === recoveryEpoch.current)
+                setNotice('历史分析记录未能载入，可重新生成方案。');
+            });
+        }
       })
       .catch((err) => {
         if (active) setError(err.message);
@@ -100,6 +117,7 @@ export function useWorkbench() {
 
   async function run(label: string, task: () => Promise<void>) {
     if (inFlight.current) return;
+    recoveryEpoch.current += 1;
     inFlight.current = true;
     setBusy(label);
     setError('');
@@ -230,6 +248,8 @@ export function useWorkbench() {
             (event) =>
               setProgress((previous) => {
                 if (!previous) return previous;
+                if (event.type === 'trace_started')
+                  return { ...previous, trace_id: event.trace_id };
                 if (event.type === 'plan') return { ...previous, actions: event.actions };
                 if (event.type === 'stage_started')
                   return { ...previous, active: event.action, quality: null };

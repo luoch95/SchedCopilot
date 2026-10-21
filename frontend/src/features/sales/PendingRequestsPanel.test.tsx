@@ -55,6 +55,51 @@ const result: InsertionAssessment = {
   },
   assumptions: ['固定模拟数据，未发布'],
   baseline_resource_issues: [],
+  workflow: {
+    mode: 'rules',
+    trace: [],
+    explanation: {
+      facts: [],
+      risks: [],
+      limitations: [],
+      next_steps: [],
+      knowledge: {
+        status: 'matched',
+        mode: 'rules',
+        message: '检索到相关模拟演示资料。',
+        sources: [
+          {
+            chunk_id: 'K-URG-001@1.0#1',
+            document_id: 'K-URG-001',
+            title: '紧急插单审批规范',
+            version: '1.0',
+            section: '风险确认',
+            excerpt: '模拟演示资料：原订单延期加重时需领导确认。',
+            filename: 'insertion-approval.md',
+            kind: '模拟演示资料',
+            content_sha256: 'hash',
+          },
+        ],
+        items: [
+          {
+            source_id: 'K-URG-001@1.0#1',
+            text: '建议依据审批规范复核。',
+            fact_ids: ['B1'],
+            related_facts: ['受影响原订单：1'],
+          },
+        ],
+        execution: {
+          calls: 0,
+          model: null,
+          error_code: null,
+          input_tokens: null,
+          output_tokens: null,
+          elapsed_ms: 1,
+          prompt_sha256: 'hash',
+        },
+      },
+    },
+  },
 };
 const request: InsertionRequestRecord = {
   id: 'request-1',
@@ -107,10 +152,12 @@ it('evaluates a saved request and renders macro data only for sales, restoring i
   expect(screen.getByText('O1001 · 原订单')).toBeTruthy();
   expect(screen.queryByText(/M2|MD-URG-A|URG-request-1-OP1/)).toBeNull();
   expect(screen.queryByText('设备与工序排布明细')).toBeNull();
+  expect(screen.getByText('查看原文 · 紧急插单审批规范 · v1.0')).toBeTruthy();
   first.unmount();
   render(<PendingRequestsPanel />);
   await screen.findByText('待审批 · 已试排');
   expect(screen.getByText('满足')).toBeTruthy();
+  expect(screen.getByText('查看原文 · 紧急插单审批规范 · v1.0')).toBeTruthy();
 });
 
 it('planner sees the exact same saved summary plus equipment and operation details', async () => {

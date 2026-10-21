@@ -8,11 +8,11 @@ it('offers three whole-card role buttons in business order with no carousel cont
   const buttons = screen.getAllByRole('button');
   expect(buttons).toHaveLength(3);
   expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
-    '进入领导审批',
+    '进入管理者审批',
     '进入业务员页面',
     '进入排产工作台',
   ]);
-  fireEvent.click(screen.getByText('查看交期与影响摘要，批准或驳回插单申请。'));
+  fireEvent.click(screen.getByText('查看交期与影响摘要，审批或驳回插单申请。'));
   expect(onSelect).toHaveBeenLastCalledWith('leader');
   fireEvent.click(screen.getByText('业务员'));
   expect(onSelect).toHaveBeenLastCalledWith('sales');

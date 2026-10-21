@@ -1,6 +1,7 @@
 import type { WorkflowResult } from '../../shared/api/contracts';
 import { WorkflowNotices, WorkflowStatements } from '../../shared/ui/WorkflowEvidence';
 import { Accordion } from '../../shared/ui/Accordion';
+import { KnowledgePanel } from '../../shared/ui/KnowledgePanel';
 
 interface Props {
   busy: string;
@@ -36,6 +37,7 @@ export function AnalysisPanel({ busy, question, result, onQuestion, onExplain }:
       {report && (
         <WorkflowNotices result={result} notices={[...report.errors, ...report.warnings]} />
       )}
+      <KnowledgePanel report={result.trace.find((step) => step.action === 'explain')?.knowledge} />
       {data ? (
         <>
           <p className="explanation-summary">

@@ -1,3 +1,4 @@
+import { TraceTree, TraceBadge } from '../../shared/ui/TraceTree';
 import { useId, useRef } from 'react';
 import type {
   WorkflowIntent,
@@ -110,6 +111,7 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
   const result: WorkflowResult | null = partial
     ? {
         id: '',
+        trace_id: progress.trace_id,
         intent: progress.intent,
         status: 'failed',
         failure_code: null,
@@ -148,6 +150,7 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
     <section className="workflow-progress" aria-label="四个智能环节执行状态" aria-busy={running}>
       <div className="workflow-caption">
         <h3 id="section-workflow">本次智能分析链路</h3>
+        <TraceBadge traceId={result?.trace_id} />
         <span role="status">
           {running ? (
             <WaitingResult />
@@ -306,7 +309,15 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
       <details className="workflow-details decision-accordion" ref={detailsRef}>
         <summary>
           <h3 id="section-execution">执行详情</h3>
+          <TraceBadge traceId={result?.trace_id} />
         </summary>
+        <TraceTree
+          traceId={result?.trace_id}
+          steps={(result?.trace ?? []).map((step) => ({
+            ...step,
+            label: stages.find((stage) => stage.action === step.action)?.label ?? '流程路由',
+          }))}
+        />
         <p className="hint">查看各环节的问题与处理建议。辅助操作使用已保存的数据。</p>
         <p className="hint">重新校验会清除本次候选；生成方案时会自动校验。</p>
         <div className="inline-actions">

@@ -192,7 +192,40 @@ class WorkbenchService:
                 ),
                 self.repository.operation_labels(baseline),
             )
+        simulation_id = simulation.id if simulation else None
+        if not simulation_id and workflow_id and intent in {"explain", "re_evaluate"}:
+            simulation_id = self.repository.workflow_simulation_id(workflow_id)
+        self.repository.attach_workflow_simulation(outcome.payload["id"], simulation_id)
         return outcome.payload, simulation
+
+    def latest_workflow(self) -> tuple[dict, SimulationResult | None] | None:
+        saved = self.repository.latest_workflow()
+        if saved is None:
+            return None
+        payload, simulation_id = saved
+        baseline, event, revision = self.repository.snapshot()
+        if not self.workflow_runner.matches_snapshot(
+            payload, baseline, event, self.machines, self.orders, self.snapshot_time, revision
+        ):
+            return None
+        simulation = None
+        saved_simulation = self.repository.simulation(simulation_id) if simulation_id else None
+        if saved_simulation:
+            candidates, saved_event = saved_simulation
+            simulation = SimulationResult(
+                simulation_id,
+                SnapshotVersion(revision, baseline.fingerprint),
+                tuple(
+                    CandidateComparison(
+                        c,
+                        operation_changes(baseline, c, saved_event),
+                        order_impacts(baseline, c, self.orders),
+                    )
+                    for c in candidates
+                ),
+                self.repository.operation_labels(baseline),
+            )
+        return payload, simulation
 
     def analyze(self, command: Analyze) -> dict:
         baseline, event, _ = self.checked_snapshot(command.version)

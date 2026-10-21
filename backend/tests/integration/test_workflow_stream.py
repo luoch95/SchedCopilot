@@ -40,11 +40,14 @@ def test_stream_retains_original_results_and_does_not_publish(client):
     body = request_body(client)
     before = client.get("/api/workbench").json()
     events = stream(client, body)
-    assert events[0] == {"type": "plan", "actions": ["validate", "schedule", "evaluate", "explain"]}
-    assert [e["action"] for e in events if e["type"] == "stage_started"] == events[0]["actions"]
+    assert events[0]["type"] == "trace_started"
+    assert events[0]["trace_id"].startswith("TRC-")
+    assert events[1] == {"type": "plan", "actions": ["validate", "schedule", "evaluate", "explain"]}
+    assert [e["action"] for e in events if e["type"] == "stage_started"] == events[1]["actions"]
     result = events[-1]
     assert result["type"] == "result"
     assert result["data"]["workflow"]["status"] == "completed"
+    assert result["data"]["workflow"]["trace_id"] == events[0]["trace_id"]
     assert len(result["data"]["simulation"]["candidates"]) == 2
     assert client.get("/api/workbench").json() == before
     # Existing non-streaming clients retain their JSON response contract.
@@ -65,7 +68,8 @@ def test_stream_validation_only_plans_one_agent(client):
     body = request_body(client)
     body["intent"] = "validate"
     events = stream(client, body)
-    assert events[0] == {"type": "plan", "actions": ["validate"]}
+    assert events[0]["type"] == "trace_started"
+    assert events[1] == {"type": "plan", "actions": ["validate"]}
     assert [e["action"] for e in events if e["type"] == "stage_started"] == ["validate"]
 
 

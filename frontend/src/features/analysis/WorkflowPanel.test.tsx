@@ -45,6 +45,7 @@ describe('workflow execution notices', () => {
   it('does not claim a rule result is usable when the underlying Agent failed', () => {
     const result: WorkflowResult = {
       id: 'failed',
+      trace_id: 'TRC-FAILED-TEST',
       intent: 'generate_candidates',
       status: 'failed',
       failure_code: null,
@@ -71,6 +72,7 @@ describe('workflow execution notices', () => {
       ],
     };
     render(<WorkflowPanel running={false} disabled={false} result={result} onRun={vi.fn()} />);
+    expect(screen.getAllByText('TRC-FAILED-TEST')).toHaveLength(3);
     const notice = screen.getByLabelText('模型辅助执行情况');
     expect(notice.textContent).toContain('方案评估：模型辅助未完成');
     expect(notice.textContent).toContain('业务工具执行失败');

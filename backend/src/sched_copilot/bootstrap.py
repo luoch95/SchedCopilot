@@ -2,7 +2,7 @@
 
 import os
 from datetime import timedelta
-from functools import lru_cache
+from functools import lru_cache, partial
 
 from .agents.evaluation_agent import EvaluationAgent
 from .agents.explanation_agent import ExplanationAgent
@@ -33,6 +33,7 @@ def build_workbench(settings: Settings) -> WorkbenchService:
         run_analysis,
         WorkflowEngine(
             production_provider=store.production_snapshot,
+            session_store=store,
             orchestrator=build_orchestrator(settings),
             demo_gate=FallbackDemoGate(settings.database_path),
         ),
@@ -68,14 +69,15 @@ def build_model_factory(settings: Settings):
 
 
 def build_orchestrator(settings: Settings, model_factory=None) -> DynamicOrchestrator:
+    knowledge_tool = build_knowledge_tool(settings, model_factory)
     if not model_enabled(settings):
-        return DynamicOrchestrator()
+        return DynamicOrchestrator(explanation=ExplanationAgent(knowledge_tool=knowledge_tool))
     create_model = build_model_factory(settings)
     unavailable = None if settings.llm_configured or model_factory else "MODEL_NOT_CONFIGURED"
     agents = {
         name: LiveAgent(
             name,
-            agent(),
+            agent(knowledge_tool=knowledge_tool) if name == "explanation" else agent(),
             model_factory or create_model,
             os.getenv("LLM_MODEL") or None,
             unavailable_code=unavailable,
@@ -88,6 +90,23 @@ def build_orchestrator(settings: Settings, model_factory=None) -> DynamicOrchest
         )
     }
     return DynamicOrchestrator(**agents)
+
+
+def build_knowledge_tool(settings: Settings, model_factory=None):
+    from .agents.knowledge_explanation import knowledge_explanation
+    from .infrastructure.markdown_knowledge import MarkdownKnowledgeStore
+
+    return partial(
+        knowledge_explanation,
+        MarkdownKnowledgeStore().search,
+        model_factory=(model_factory or build_model_factory(settings))
+        if model_enabled(settings)
+        else None,
+        model_name=os.getenv("LLM_MODEL") or None,
+        unavailable_code=None
+        if settings.llm_configured or model_factory
+        else "MODEL_NOT_CONFIGURED",
+    )
 
 
 def build_sales(settings: Settings, model_factory=None):
@@ -114,6 +133,7 @@ def build_sales(settings: Settings, model_factory=None):
                 ),
             )
             if model_enabled(settings)
-            else None
+            else None,
+            knowledge_tool=build_knowledge_tool(settings, model_factory),
         ),
     )

@@ -29,6 +29,24 @@ class Model:
         self.calls.append(context)
         if self.fault == "timeout":
             raise TimeoutError("SECRET_PROVIDER_BODY")
+        if self.tool["name"] == "submit_knowledge":
+            return AIMessage(
+                content="SECRET_UNTRUSTED_PROSE",
+                tool_calls=[
+                    {
+                        "id": "rag-1",
+                        "name": "submit_knowledge",
+                        "args": {
+                            "items": [
+                                {
+                                    "source_id": context["sources"][0]["chunk_id"],
+                                    "fact_ids": list(context["fact_catalog"])[:1],
+                                }
+                            ]
+                        },
+                    }
+                ],
+            )
         ids = list(context["focus_catalog"])[-2:]
         args = {"focus_ids": ids}
         name = "submit_focus"
@@ -92,15 +110,24 @@ def test_four_real_model_boundaries_preserve_schedule_and_persist(tmp_path):
         service._calculate = counted
         url = f"/api/sales/requests/{request['request_no']}/assessment"
         result = client.post(url).json()
+        assert result["workflow"]["trace_id"].startswith("TRC-")
+        assert all(step["elapsed_ms"] >= 0 for step in result["workflow"]["trace"])
+        assert len({step["span_id"] for step in result["workflow"]["trace"]}) == 4
         assert len(calculations) == 1
-        assert [call["role"] for call in model.calls] == [
+        assert [call["role"] for call in model.calls if "role" in call] == [
             "validation",
             "scheduling",
             "evaluation",
             "explanation",
         ]
         assert result["workflow"]["mode"] == "live"
-        for step, call in zip(result["workflow"]["trace"], model.calls, strict=True):
+        assert len(model.calls) == 5
+        knowledge = result["workflow"]["explanation"]["knowledge"]
+        assert knowledge["mode"] == "live"
+        assert knowledge["items"][0]["related_facts"]
+        assert "machine_id" not in json.dumps(model.calls)
+        role_calls = [call for call in model.calls if "role" in call]
+        for step, call in zip(result["workflow"]["trace"], role_calls, strict=True):
             execution = step["execution"]
             assert execution["calls"] == 1
             assert execution["input_tokens"] == 10
@@ -109,8 +136,9 @@ def test_four_real_model_boundaries_preserve_schedule_and_persist(tmp_path):
             assert "machine_id" not in json.dumps(call)
         assert client.get("/api/workbench").json() == before
         service.workflow_runner.model_assistant = None
+        service.workflow_runner.explanation.knowledge_tool = None
         rules = client.post(url).json()
-        assert len(model.calls) == 4
+        assert len(model.calls) == 5
         for key in ("summary", "details", "assumptions"):
             assert result[key] == rules[key]
         # Restore the model-assisted snapshot to verify persistence across restart.

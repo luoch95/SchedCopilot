@@ -142,6 +142,37 @@ export interface WorkflowStatement {
   text: string;
   evidence_refs: string[];
 }
+export interface KnowledgeReport {
+  status: 'matched' | 'no_match' | 'unavailable';
+  mode: 'rules' | 'live' | 'fallback';
+  message: string;
+  sources: {
+    chunk_id: string;
+    document_id: string;
+    title: string;
+    version: string;
+    section: string;
+    excerpt: string;
+    filename: string;
+    kind: string;
+    content_sha256: string;
+  }[];
+  items: {
+    source_id: string;
+    text: string;
+    fact_ids: string[];
+    related_facts: string[];
+  }[];
+  execution: {
+    calls: number;
+    model: string | null;
+    error_code: string | null;
+    input_tokens: number | null;
+    output_tokens: number | null;
+    elapsed_ms: number;
+    prompt_sha256: string;
+  };
+}
 export interface QualityIssue {
   code: string;
   message: string;
@@ -182,16 +213,20 @@ export interface WorkflowReport {
   } | null;
 }
 export interface WorkflowResult {
+  trace_id?: string;
   demo?: DemoFallbackStatus;
   id: string;
   intent: WorkflowIntent;
   status: 'completed' | 'blocked' | 'failed';
   failure_code: string | null;
   trace: {
+    span_id?: string;
+    elapsed_ms?: number | null;
     action: string;
     status: string;
     result_ref: string | null;
     error_code: string | null;
+    knowledge?: KnowledgeReport | null;
     execution?: {
       mode: 'live' | 'fallback';
       model: string | null;
@@ -226,6 +261,7 @@ export interface DemoFallbackStatus {
 
 export type WorkflowAction = 'validate' | 'schedule' | 'evaluate' | 'explain';
 export type WorkflowProgressEvent =
+  | { type: 'trace_started'; trace_id: string }
   | { type: 'plan'; actions: WorkflowAction[] }
   | { type: 'stage_started'; action: WorkflowAction }
   | {
@@ -249,6 +285,7 @@ export type WorkflowProgressEvent =
       step: WorkflowResult['trace'][number];
     };
 export interface WorkflowProgress {
+  trace_id?: string;
   quality?: {
     action: WorkflowAction;
     phase: 'executing' | 'checking' | 'repairing' | 'checked';
@@ -334,8 +371,11 @@ export interface InsertionAssessment {
   request_no?: string;
   assessment_id?: string;
   workflow?: {
+    trace_id?: string;
     mode: string;
     trace: {
+      span_id?: string;
+      elapsed_ms?: number;
       agent: string;
       status: string;
       mode: string;
@@ -343,12 +383,20 @@ export interface InsertionAssessment {
         mode: string;
         model: string | null;
         calls: number;
+        input_tokens?: number | null;
+        output_tokens?: number | null;
         elapsed_ms: number;
         error_code: string | null;
         highlights: { text: string; evidence_refs: string[] }[];
       };
     }[];
-    explanation: { facts: string[]; risks: string[]; limitations: string[]; next_steps: string[] };
+    explanation: {
+      facts: string[];
+      risks: string[];
+      limitations: string[];
+      next_steps: string[];
+      knowledge?: KnowledgeReport | null;
+    };
   };
   request_id: string;
   baseline_version: number;

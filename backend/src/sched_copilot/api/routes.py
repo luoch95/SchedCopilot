@@ -110,6 +110,15 @@ def workflow(request: WorkflowRequest, service: Service, http_request: Request):
     return {"workflow": result, "simulation": simulation_view(simulation) if simulation else None}
 
 
+@router.get("/workflow/latest")
+def latest_workflow(service: Service):
+    saved = service.latest_workflow()
+    if saved is None:
+        return None
+    result, simulation = saved
+    return {"workflow": result, "simulation": simulation_view(simulation) if simulation else None}
+
+
 @router.get("/workflow/demo")
 def fallback_demo_status(service: Service):
     return service.workflow_runner.demo_gate.status()

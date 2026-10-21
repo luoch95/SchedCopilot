@@ -4,6 +4,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+from time import monotonic
+from uuid import uuid4
 
 from ..agents.contracts.common import Evidence
 from ..agents.evaluation_agent import EvaluationAgent
@@ -25,6 +27,9 @@ class WorkflowTrace:
     result_ref: str | None
     error_code: str | None = None
     execution: ModelExecution | None = None
+    knowledge: dict | None = None
+    span_id: str | None = None
+    elapsed_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +107,8 @@ class DynamicOrchestrator:
                 # rejection is a request conflict, not a broken business Agent.
                 fallback_demo()
             steps += 1
+            started = monotonic()
+            span_id = f"SPN-{uuid4().hex}"
             try:
                 self._sync_requests(current)
                 name = self._agent(action)
@@ -145,6 +152,9 @@ class DynamicOrchestrator:
                         ref,
                         error_code,
                         getattr(run, "execution", None),
+                        getattr(run, "knowledge", None),
+                        span_id,
+                        round((monotonic() - started) * 1000),
                     )
                 )
                 if on_progress:
@@ -160,7 +170,16 @@ class DynamicOrchestrator:
             except Exception as exc:
                 logger.warning("Workflow Agent failed: %s", type(exc).__name__)
                 current.workflow_status, current.failure_code = "failed", "WORKFLOW_AGENT_FAILED"
-                trace.append(WorkflowTrace(action.value, "failed", None, current.failure_code))
+                trace.append(
+                    WorkflowTrace(
+                        action.value,
+                        "failed",
+                        None,
+                        current.failure_code,
+                        span_id=span_id,
+                        elapsed_ms=round((monotonic() - started) * 1000),
+                    )
+                )
                 if on_progress:
                     on_progress(
                         {

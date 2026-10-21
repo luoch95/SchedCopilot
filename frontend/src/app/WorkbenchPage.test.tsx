@@ -13,6 +13,7 @@ const workflowFixture: WorkflowResponse = {
   simulation,
   workflow: {
     id: 'workflow-1',
+    trace_id: 'TRC-TEST-RESTORE',
     intent: 'generate_candidates',
     status: 'completed',
     failure_code: null,
@@ -103,6 +104,7 @@ beforeEach(() => {
       const body = options?.body ? JSON.parse(String(options.body)) : undefined;
       calls.push({ path: url, body });
       let data: unknown = url === '/api/sales/requests' ? [] : workbench;
+      if (url === '/api/workflow/latest') data = null;
       if (url === '/api/workflow') {
         data = workflowFixture;
         if (body.intent === 're_evaluate')

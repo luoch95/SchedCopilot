@@ -9,10 +9,10 @@ const roles: {
 }[] = [
   {
     id: 'leader',
-    category: '插单审批',
-    name: '领导',
-    description: '查看交期与影响摘要，批准或驳回插单申请。',
-    action: '进入领导审批',
+    category: '审批决策',
+    name: '管理者',
+    description: '查看交期与影响摘要，审批或驳回插单申请。',
+    action: '进入管理者审批',
   },
   {
     id: 'sales',
