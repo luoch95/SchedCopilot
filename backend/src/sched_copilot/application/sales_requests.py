@@ -188,7 +188,7 @@ class SalesRequestService:
             tool_version="insertion-rule-v1",
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        return label_request_operations(result, request["request_no"])
+        return label_request_operations(result, request["request_no"], snapshot.operation_labels)
 
     def act(
         self,

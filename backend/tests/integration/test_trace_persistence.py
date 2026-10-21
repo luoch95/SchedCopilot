@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from dataclasses import replace
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 
@@ -35,6 +36,7 @@ def test_trace_restores_after_restart_and_retains_candidates_for_followup(tmp_pa
         result = response.json()
         trace_id = result["workflow"]["trace_id"]
         assert trace_id.startswith("TRC-")
+        assert datetime.fromisoformat(result["workflow"]["created_at"]).tzinfo is not None
         steps = result["workflow"]["trace"]
         assert len({step["span_id"] for step in steps}) == len(steps) == 4
         assert all(step["elapsed_ms"] >= 0 for step in steps)
@@ -83,6 +85,24 @@ def test_new_trace_per_run_and_resource_change_prevents_restore(tmp_path):
         runner = client.app.state.workbench.workflow_runner
         runner.production_provider = lambda: {"changed": True}
         assert client.get("/api/workflow/latest").json() is None
+
+
+def test_legacy_trace_restores_its_persisted_analysis_time(tmp_path):
+    path = tmp_path / "legacy-trace.sqlite3"
+    with TestClient(create_app(settings=settings_for(path))) as client:
+        result = client.post(
+            "/api/workflow", json={**version(client), "intent": "validate"}
+        ).json()
+        payload = result["workflow"]
+        payload.pop("created_at")
+        recorded_at = "2026-10-19T06:30:00+00:00"
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "UPDATE workflow_runs SET payload=?,created_at=? WHERE trace_id=?",
+                (json.dumps(payload), recorded_at, payload["trace_id"]),
+            )
+        restored = client.get("/api/workflow/latest").json()["workflow"]
+        assert restored == {**payload, "created_at": recorded_at}
 
 
 def test_blocked_trace_is_persistent_without_publishable_candidates(tmp_path):

@@ -4,16 +4,18 @@ export function SessionBar({
   role,
   onSwitch,
   disabled = false,
+  compact = false,
 }: {
   role: DemoRole;
   onSwitch: () => void;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   return (
-    <div className="session-bar" aria-label="当前演示角色">
+    <div className="session-bar" aria-label={role === 'leader' ? '当前视角' : '当前演示角色'}>
       <span>
-        演示角色 ·{' '}
-        <strong>{{ sales: '业务员', planner: '排产计划员', leader: '领导' }[role]}</strong>
+        {role === 'leader' ? '当前视角 · ' : compact ? '演示角色：' : '演示角色 · '}
+        <strong>{{ sales: '业务员', planner: '排产计划员', leader: '生产总监' }[role]}</strong>
       </span>
       <button
         onClick={onSwitch}

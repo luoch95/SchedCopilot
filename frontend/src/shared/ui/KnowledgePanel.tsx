@@ -1,6 +1,8 @@
 import type { KnowledgeReport } from '../api/contracts';
+import { useBusinessText } from '../lib/BusinessLabelProvider';
 
 export function KnowledgePanel({ report }: { report?: KnowledgeReport | null }) {
+  const format = useBusinessText();
   if (!report) return null;
   return (
     <section className="knowledge-panel" aria-label="知识依据">
@@ -18,13 +20,13 @@ export function KnowledgePanel({ report }: { report?: KnowledgeReport | null }) 
               if (!source) return null;
               return (
                 <li key={item.source_id}>
-                  <p>{item.text}</p>
+                  <p>{format(item.text)}</p>
                   {item.related_facts.length > 0 && (
                     <div className="knowledge-facts">
                       <strong>关联本次结果</strong>
                       <ul>
                         {item.related_facts.map((fact) => (
-                          <li key={fact}>{fact}</li>
+                          <li key={fact}>{format(fact)}</li>
                         ))}
                       </ul>
                     </div>

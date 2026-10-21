@@ -30,7 +30,15 @@ def test_sales_overview_is_an_order_only_projection_and_does_not_mutate_plan(cli
     assert data["plan_fingerprint"] == before["baseline"]["fingerprint"]
     assert len(data["orders"]) == len(before["orders"])
     for row in data["orders"]:
-        assert set(row) == {"id", "name", "due", "planned_completion", "lateness_minutes"}
+        assert set(row) == {
+            "id",
+            "display_name",
+            "name",
+            "due",
+            "planned_completion",
+            "lateness_minutes",
+        }
+        assert row["display_name"] == row["id"]
         ends = [
             datetime.fromisoformat(op["end"])
             for op in before["baseline"]["operations"]

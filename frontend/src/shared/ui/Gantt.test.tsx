@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { GanttSelectionProvider } from './GanttSelection';
 import { Comparison } from '../../features/comparison';
@@ -9,6 +9,58 @@ const range: [number, number] = [
   +new Date('2026-10-19T13:00:00+08:00'),
   +new Date('2026-10-19T18:00:00+08:00'),
 ];
+
+it('recalculates chart coordinates and label spacing on container and window resize, then cleans up', () => {
+  let measuredWidth = 1200;
+  let notifyResize: () => void = () => {};
+  const observe = vi.fn();
+  const disconnect = vi.fn();
+  const measurement = vi
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(() => ({ width: measuredWidth }) as DOMRect);
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        notifyResize = callback;
+      }
+      observe = observe;
+      disconnect = disconnect;
+    },
+  );
+  const removeListener = vi.spyOn(window, 'removeEventListener');
+  try {
+    const { unmount } = render(
+      <Gantt
+        schedule={workbench.baseline}
+        failure={workbench.event}
+        machines={workbench.machines}
+        range={range}
+      />,
+    );
+    const svg = screen.getByRole('img', { name: '设备工序甘特图' });
+    const height = 46 + workbench.machines.length * 66 + 34;
+    expect(svg.getAttribute('viewBox')).toBe(`0 0 1200 ${height}`);
+    const wideLabels = svg.querySelectorAll('.axis-label').length;
+    measuredWidth = 320;
+    act(() => notifyResize());
+    expect(svg.getAttribute('viewBox')).toBe(`0 0 320 ${height}`);
+    expect(svg.querySelectorAll('.axis-label').length).toBeLessThan(wideLabels);
+    expect(svg.querySelector('.axis-label')?.textContent).toBe('13:00');
+    expect([...svg.querySelectorAll('.axis-label')].at(-1)?.textContent).toBe('18:00');
+    measuredWidth = 760;
+    fireEvent(window, new Event('resize'));
+    expect(svg.getAttribute('viewBox')).toBe(`0 0 760 ${height}`);
+    expect(observe).toHaveBeenCalled();
+    unmount();
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(removeListener).toHaveBeenCalledWith('resize', expect.any(Function));
+  } finally {
+    measurement.mockRestore();
+    removeListener.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
 
 describe('Gantt baseline comparison', () => {
   it('shows candidate timing and its reason without drawing old-position boxes', () => {

@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { SessionBar } from '../session';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { DemoAccessBar, SessionBar } from '../session';
+import { WriteButton } from '../../shared/ui/WriteButton';
+import { useDemoAccess } from '../../shared/lib/demoAccess';
 import { workbenchApi } from '../workbench';
 import type {
   InsertionRequestRecord,
@@ -9,6 +11,7 @@ import type {
 import { AssessmentView } from './AssessmentView';
 import { PendingRequestsPanel } from './PendingRequestsPanel';
 import { localInput, stamp } from '../../shared/lib/time';
+import { orderLabel } from '../../shared/lib/orderLabels';
 import { validateDraft, type SalesDraft, type DraftErrors } from './model';
 
 const emptyDraft: SalesDraft = {
@@ -23,6 +26,7 @@ const minutes = (seconds: number) =>
   (seconds / 60).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 
 export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
+  const { readOnly } = useDemoAccess();
   const [overview, setOverview] = useState<SalesOverview | null>(null);
   const [loadVersion, setLoadVersion] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -40,6 +44,35 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   const [selectedAssessment, setSelectedAssessment] = useState<InsertionRequestRecord | null>(null);
   const submissionKey = useRef<string | null>(null);
   const submittingRef = useRef(false);
+  const selectedId = useRef<string | null>(null);
+  const draftEdited = useRef(false);
+
+  const selectAssessment = useCallback(
+    (record: InsertionRequestRecord | null, automatic = false) => {
+      // A list refresh must not replace an in-progress draft or a just-submitted form.
+      if (automatic && (draftEdited.current || selectedId.current === record?.id)) return;
+      draftEdited.current = false;
+      selectedId.current = record?.id ?? null;
+      setSelectedAssessment(record);
+      if (!record) return;
+      requestId.current += 1;
+      submissionKey.current = null;
+      setDraft({
+        productId: record.product_id,
+        quantity: String(record.quantity),
+        earliestStart: localInput(record.earliest_start_at),
+        due: localInput(record.requested_due_at),
+        reason: record.reason,
+      });
+      setEstimate(null);
+      setChecking(false);
+      setErrors({});
+      setEstimateError('');
+      setSubmitError('');
+      setSubmitted('');
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -68,6 +101,8 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   }, [loadVersion]);
 
   function edit(key: keyof SalesDraft, value: string) {
+    draftEdited.current = true;
+    setSelectedAssessment(null);
     requestId.current += 1;
     submissionKey.current = null;
     setSubmitted('');
@@ -85,7 +120,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   }
   async function checkDraft(event: FormEvent) {
     event.preventDefault();
-    if (!overview || checking) return;
+    if (readOnly || !overview || checking) return;
     const found = validateDraft(
       draft,
       overview.products.map((item) => item.id),
@@ -95,6 +130,8 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     setEstimate(null);
     setEstimateError('');
     if (Object.keys(found).length) return;
+    setSelectedAssessment(null);
+    draftEdited.current = true;
     const current = ++requestId.current;
     setChecking(true);
     try {
@@ -107,7 +144,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     }
   }
   async function submit() {
-    if (!overview || !estimate || submittingRef.current || submitted) return;
+    if (readOnly || !overview || !estimate || submittingRef.current || submitted) return;
     const found = validateDraft(
       draft,
       overview.products.map((item) => item.id),
@@ -149,12 +186,12 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     <main className="sales-workspace">
       <header className="page-header">
         <div>
-          <p className="eyebrow">订单需求 · 演示工作空间</p>
-          <h1>紧急插单</h1>
-          <p>先填写需求，再了解交期与订单影响。</p>
+          <WorkbenchTitle title="紧急插单" english="Urgent Order Insertion" />
+          <p>填写需求，评估交期与订单影响。</p>
         </div>
         <SessionBar role="sales" onSwitch={onSwitchRole} />
       </header>
+      <DemoAccessBar />
       <p className="sales-reference">{referenceNotice}</p>
       <section className="sales-panel" aria-labelledby="sales-plan-heading">
         <div className="sales-section-heading">
@@ -204,7 +241,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
                     {overview.orders.map((order) => (
                       <tr key={order.id}>
                         <td>
-                          {order.id} · {order.name}
+                          {orderLabel(order.display_name ?? order.id)} · {orderLabel(order.name)}
                         </td>
                         <td>{stamp(order.due)}</td>
                         <td>
@@ -238,7 +275,9 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
             填写后可检查输入并预估加工时长。提交后可在下方查看已保存的待审批申请。
           </p>
           <form onSubmit={checkDraft} noValidate>
-            <fieldset disabled={!overview || loading || !!loadError || checking || submitting}>
+            <fieldset
+              disabled={readOnly || !overview || loading || !!loadError || checking || submitting}
+            >
               <label>
                 模拟产品
                 <select
@@ -381,6 +420,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
                 <p>申请：{selectedAssessment.request_no}</p>
                 <AssessmentView
                   result={selectedAssessment.assessment}
+                  requestNo={selectedAssessment.request_no}
                   stale={selectedAssessment.assessment_stale}
                   published={selectedAssessment.status === 'published'}
                 />
@@ -419,23 +459,21 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
           <section className="sales-panel" aria-labelledby="sales-status-heading">
             <h2 id="sales-status-heading">申请状态</h2>
             <p className="sales-muted">
-              提交后保存为待审批；试排完成后由领导决定，批准后由排产计划员复核发布。下方保留所有申请状态与历史。
+              提交后保存为待审批；试排完成后由管理者决定，批准后由排产计划员复核发布。下方保留所有申请状态与历史。
             </p>
-            <button
+            <WriteButton
               onClick={submit}
               disabled={!estimate || submitting || !!submitted || loading || !!loadError}
             >
-              {submitting ? '正在提交…' : '提交领导审批'}
-            </button>
+              {submitting ? '正在提交…' : '提交管理者审批'}
+            </WriteButton>
             {submitError && <p role="alert">{submitError}</p>}
             {submitted && <p role="status">申请 {submitted} 已保存，待审批。</p>}
-            <PendingRequestsPanel
-              refreshVersion={requestsVersion}
-              onSelection={setSelectedAssessment}
-            />
+            <PendingRequestsPanel refreshVersion={requestsVersion} onSelection={selectAssessment} />
           </section>
         </aside>
       </div>
     </main>
   );
 }
+import { WorkbenchTitle } from '../../shared/ui/WorkbenchTitle';

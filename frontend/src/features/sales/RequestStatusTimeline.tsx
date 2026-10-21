@@ -5,7 +5,7 @@ import { localInput } from '../../shared/lib/time';
 const roles: Record<string, string> = {
   sales: '业务员 (Sales)',
   planner: '排产计划员 (Planner)',
-  leader: '领导 (Leader)',
+  leader: '管理者 (Leader)',
   system: '系统',
 };
 function action(entry: NonNullable<InsertionRequestRecord['status_history']>[number]) {

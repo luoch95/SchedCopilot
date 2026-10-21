@@ -3,6 +3,7 @@
 import json
 from collections import OrderedDict
 from dataclasses import asdict
+from datetime import datetime, timezone
 from hashlib import sha256
 from threading import RLock
 from uuid import uuid4
@@ -156,6 +157,7 @@ class WorkflowEngine:
         payload = {
             "id": session_id,
             "trace_id": trace_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "intent": intent,
             "status": result.workflow_status,
             "failure_code": result.failure_code,

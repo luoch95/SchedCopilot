@@ -1,6 +1,15 @@
+.planner-console {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+}
 .planner-console .workspace {
-  max-width: 1680px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  padding-inline: 24px;
 }
 .planner-console .pending-requests {
   background: white;
@@ -223,6 +232,10 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+.plan-execution-date {
+  font-size: 12px;
+  white-space: nowrap;
+}
 .plan-version {
   position: relative;
   display: inline-flex;
@@ -295,7 +308,7 @@
 }
 
 .leader-workspace {
-  max-width: 1680px;
+  max-width: none;
 }
 .leader-workspace .page-header {
   align-items: flex-start;

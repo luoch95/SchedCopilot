@@ -74,7 +74,7 @@ const result: InsertionAssessment = {
             title: '紧急插单审批规范',
             version: '1.0',
             section: '风险确认',
-            excerpt: '模拟演示资料：原订单延期加重时需领导确认。',
+            excerpt: '模拟演示资料：原订单延期加重时需管理者确认。',
             filename: 'insertion-approval.md',
             kind: '模拟演示资料',
             content_sha256: 'hash',
@@ -532,9 +532,9 @@ it('renders Chinese timeline actions, full local dates and comments for the comp
   expect(timeline.textContent).toContain(
     '2026/10/20 09:44 — 业务员 (Sales) 提交了申请，状态变更为【待审批】',
   );
-  expect(timeline.textContent).toContain('领导 (Leader) 批准了插单申请');
+  expect(timeline.textContent).toContain('管理者 (Leader) 批准了插单申请');
   expect(timeline.textContent).toContain('系统 发起了重新审批');
-  expect(timeline.textContent).toContain('领导 (Leader) 驳回了插单申请');
+  expect(timeline.textContent).toContain('管理者 (Leader) 驳回了插单申请');
   expect(timeline.textContent).toContain('排产计划员 (Planner) 复核并发布了排产计划');
   expect(timeline.textContent).toContain('备注：客户补货');
   expect(timeline.textContent).not.toMatch(/draft|pending_approval|->|→/);

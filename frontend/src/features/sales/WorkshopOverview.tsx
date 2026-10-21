@@ -5,7 +5,7 @@ function AffectedLine({ line, detail }: { line: string; detail: string }) {
   const [open, setOpen] = useState(false);
   return (
     <span
-      className="workshop-line"
+      className={`workshop-line${line === 'M3产线' ? ' workshop-line-danger' : ''}`}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
@@ -56,7 +56,10 @@ export function WorkshopOverview() {
           <span className="workshop-status workshop-status-blue">利用率 80%</span>
         </article>
         <article className="workshop-metric">
-          <h3>插单与故障预警</h3>
+          <h3>紧急插单</h3>
+          <div className="workshop-value">
+            1<small> 项待关注</small>
+          </div>
           <div className="workshop-alert-row">
             <span>紧急插单</span>
             <AffectedLine

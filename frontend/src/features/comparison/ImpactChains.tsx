@@ -1,5 +1,6 @@
 import type { Candidate } from '../../shared/api/contracts';
 import { DecisionText } from '../../shared/ui/DecisionText';
+import { businessText } from '../../shared/lib/businessLabels';
 
 const IMPACT_TYPES = ['直接影响', '连锁影响', '策略调整'];
 
@@ -22,8 +23,11 @@ export function ImpactChains({ candidates }: { candidates: Candidate[] }) {
             <h4>{item.label}</h4>
             {item.changes.map((change) => (
               <div className="chain-item" key={change.工序}>
-                <strong>{change.工序}</strong>
-                <div className="impact-type-options" aria-label={`影响类型：${change.工序}`}>
+                <strong>{businessText(change.工序, item.schedule.operations)}</strong>
+                <div
+                  className="impact-type-options"
+                  aria-label={`影响类型：${businessText(change.工序, item.schedule.operations)}`}
+                >
                   {IMPACT_TYPES.map((type) => (
                     <span
                       className={`impact-type-badge ${type === change.类型 ? 'active' : 'dim'}`}
@@ -34,10 +38,10 @@ export function ImpactChains({ candidates }: { candidates: Candidate[] }) {
                     </span>
                   ))}
                 </div>
-                <p>{change.影响链}</p>
+                <p>{businessText(change.影响链, item.schedule.operations)}</p>
                 <small>
                   依据：
-                  <DecisionText text={change.依据} />
+                  <DecisionText text={businessText(change.依据, item.schedule.operations)} />
                 </small>
               </div>
             ))}

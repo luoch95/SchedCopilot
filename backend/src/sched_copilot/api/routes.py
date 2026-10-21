@@ -2,10 +2,11 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 
 from ..application.contracts import Analyze, Decide, SaveEvent
 from ..application.workbench import WorkbenchService
+from .demo_access import COOKIE, SESSION_SECONDS, LoginRequest, is_admin, new_session
 from .presenters import simulation_view, workbench_view
 from .schemas import (
     AnalysisRequest,
@@ -21,6 +22,44 @@ from .schemas import (
 from .workflow_stream import workflow_stream
 
 router = APIRouter(prefix="/api")
+
+
+@router.get("/demo/session")
+def demo_session(request: Request):
+    return {
+        "admin": is_admin(request),
+        "read_only": request.app.state.settings.demo_mode and not is_admin(request),
+    }
+
+
+@router.post("/demo/login")
+def demo_login(payload: LoginRequest, request: Request, response: Response):
+    token = new_session(request, payload.password)
+    response.set_cookie(
+        COOKIE,
+        token,
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+        max_age=SESSION_SECONDS,
+        path="/api",
+    )
+    return {"admin": True, "read_only": False}
+
+
+@router.post("/demo/logout")
+def demo_logout(request: Request, response: Response):
+    request.app.state.demo_sessions.pop(request.cookies.get(COOKIE, ""), None)
+    response.delete_cookie(COOKIE, path="/api")
+    return {"admin": False, "read_only": request.app.state.settings.demo_mode}
+
+
+@router.post("/demo/reset")
+def demo_reset(request: Request):
+    from ..demo_preview import reset_demo
+
+    reset_demo(request.app.state.settings)
+    return {"reset": True}
 
 
 def workbench_service(request: Request) -> WorkbenchService:

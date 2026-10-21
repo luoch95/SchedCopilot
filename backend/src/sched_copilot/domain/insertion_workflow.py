@@ -116,13 +116,14 @@ def publication_resources(result, previous):
     }
 
 
-def label_request_operations(result, request_no):
+def label_request_operations(result, request_no, labels=None):
     """Attach business labels without changing scheduling IDs or approval evidence."""
     if result is None:
         return None
     result["request_no"] = request_no
     inserted_id = result["details"]["inserted_order_id"]
     for operation in result["details"]["operations"]:
+        operation.update((labels or {}).get(operation["operation_id"], {}))
         if operation["order_id"] == inserted_id:
             operation["display_name"] = f"{request_no}-OP{operation['sequence']}"
             operation["order_display_name"] = request_no

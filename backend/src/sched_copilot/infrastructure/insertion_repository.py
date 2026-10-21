@@ -376,6 +376,17 @@ class InsertionStore:
 
     def _full_view(self, session, row):
         view = self._view(row)
+        result = view["assessment"]
+        if result:
+            numbers = request_labels(
+                session.execute(select(InsertionRequest.id, InsertionRequest.request_no))
+            )
+            for op in result["details"]["operations"]:
+                number = numbers.get(op["order_id"])
+                if number:
+                    op.update(
+                        display_name=f"{number}-OP{op['sequence']}", order_display_name=number
+                    )
         approval = session.scalar(select(ApprovalRecord).where(ApprovalRecord.request_id == row.id))
         view["approval"] = (
             dict(

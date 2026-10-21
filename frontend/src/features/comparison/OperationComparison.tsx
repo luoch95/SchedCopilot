@@ -2,6 +2,7 @@ import { stamp } from '../../shared/lib/time';
 import type { Candidate, Operation, Workbench } from '../../shared/api/contracts';
 import { DecisionText } from '../../shared/ui/DecisionText';
 import { Accordion } from '../../shared/ui/Accordion';
+import { businessText } from '../../shared/lib/businessLabels';
 const slot = (op: Operation) => `${op.machine_id} · ${stamp(op.start)} → ${stamp(op.end)}`;
 const differs = (values: (string | number)[]) => new Set(values).size > 1;
 export function OperationComparison({
@@ -39,7 +40,7 @@ export function OperationComparison({
               return (
                 <tr key={op.id}>
                   <th>
-                    {op.id}
+                    {op.display_name ?? op.id}
                     <small>{slot(op)}</small>
                   </th>
                   {values.map((value, index) => (
@@ -63,10 +64,11 @@ export function OperationComparison({
                         {candidates[index].changes.find((change) => change.工序 === op.id) && (
                           <small>
                             <DecisionText
-                              text={
+                              text={businessText(
                                 candidates[index].changes.find((change) => change.工序 === op.id)
-                                  ?.依据 ?? ''
-                              }
+                                  ?.依据 ?? '',
+                                candidates[index].schedule.operations,
+                              )}
                             />
                           </small>
                         )}

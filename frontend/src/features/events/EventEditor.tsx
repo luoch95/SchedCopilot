@@ -1,6 +1,8 @@
 import { localInput, stamp } from '../../shared/lib/time';
 import type { Workbench } from '../../shared/api/contracts';
 import type { EventDraft } from './model';
+import { WriteButton } from '../../shared/ui/WriteButton';
+import { useDemoAccess } from '../../shared/lib/demoAccess';
 
 interface Props {
   state: Workbench;
@@ -25,6 +27,7 @@ export function EventEditor({
   onReload,
   onRecover,
 }: Props) {
+  const { readOnly } = useDemoAccess();
   return (
     <div className="event-editor">
       <div>
@@ -38,6 +41,7 @@ export function EventEditor({
           <label>
             故障设备
             <select
+              disabled={readOnly}
               value={draft.machine_id}
               onChange={(e) => onEdit({ machine_id: e.target.value })}
             >
@@ -52,19 +56,21 @@ export function EventEditor({
             故障开始时间
             <input
               type="datetime-local"
+              disabled={readOnly}
               value={draft.started_at}
               onChange={(e) => onEdit({ started_at: e.target.value })}
             />
           </label>
-          <button
+          <WriteButton
             className="text-button"
             onClick={() => onEdit({ started_at: localInput(state.snapshot_time) })}
           >
             使用13:00快照时间
-          </button>
+          </WriteButton>
           <label className="check-label">
             <input
               type="checkbox"
+              disabled={readOnly}
               checked={draft.unknown}
               onChange={(e) => onEdit({ unknown: e.target.checked })}
             />
@@ -75,6 +81,7 @@ export function EventEditor({
               预计恢复时间
               <input
                 type="datetime-local"
+                disabled={readOnly}
                 value={draft.recovered_at}
                 onChange={(e) => onEdit({ recovered_at: e.target.value })}
               />
@@ -87,6 +94,7 @@ export function EventEditor({
             事件来源
             <input
               maxLength={200}
+              disabled={readOnly}
               value={draft.source}
               onChange={(e) => onEdit({ source: e.target.value })}
               placeholder="例如：维修班组人工估计"
@@ -96,15 +104,19 @@ export function EventEditor({
           {draftInvalid && (
             <p className="inline-error">请填写开始时间、事件来源，并确保恢复时间晚于开始时间。</p>
           )}
-          <button className="primary full-width" disabled={draftInvalid || stale} onClick={onSave}>
+          <WriteButton
+            className="primary full-width"
+            disabled={draftInvalid || stale}
+            onClick={onSave}
+          >
             保存故障事件
-          </button>
+          </WriteButton>
           <button className="full-width" onClick={onReload}>
             重新载入已保存事件
           </button>
-          <button className="full-width" disabled={stale} onClick={onRecover}>
+          <WriteButton className="full-width" disabled={stale} onClick={onRecover}>
             恢复上次可试算事件
-          </button>
+          </WriteButton>
         </fieldset>
       </div>
     </div>

@@ -6,20 +6,37 @@ import { useGanttSelection } from '../../shared/ui/GanttSelection';
 import type { InsertionAssessment } from '../../shared/api/contracts';
 import { operationLabels } from './presentation';
 import { localInput, stamp } from '../../shared/lib/time';
+import { BusinessLabelProvider, useBusinessText } from '../../shared/lib/BusinessLabelProvider';
 
-export function AssessmentView({
-  result,
-  requestNo,
-  planner = false,
-  stale = false,
-  published = false,
-}: {
+interface AssessmentProps {
   result: InsertionAssessment;
   requestNo?: string;
   planner?: boolean;
   stale?: boolean;
   published?: boolean;
-}) {
+}
+
+export function AssessmentView(props: AssessmentProps) {
+  const operations = props.result.details.operations.map((op) => ({
+    ...op,
+    id: op.operation_id,
+    ...operationLabels(props.result, op, props.requestNo),
+  }));
+  return (
+    <BusinessLabelProvider operations={operations}>
+      <AssessmentContent {...props} />
+    </BusinessLabelProvider>
+  );
+}
+
+function AssessmentContent({
+  result,
+  requestNo,
+  planner = false,
+  stale = false,
+  published = false,
+}: AssessmentProps) {
+  const format = useBusinessText();
   const summary = result.summary;
   const selection = useGanttSelection();
   const operationsDetails = useRef<HTMLDetailsElement>(null);
@@ -94,7 +111,9 @@ export function AssessmentView({
                   className={row.delay_delta_minutes > 0 ? 'order-impact-changed' : undefined}
                 >
                   <td>
-                    {row.order_id} · {row.order_name}
+                    {result.details.operations.find((op) => op.order_id === row.order_id)
+                      ?.order_display_name ?? row.order_id}{' '}
+                    · {row.order_name}
                     {row.delay_delta_minutes > 0 && (
                       <span className="order-impact-label">受影响</span>
                     )}
@@ -187,7 +206,7 @@ export function AssessmentView({
                       {step.execution.highlights.length > 0 && (
                         <ul className="trial-impact-points">
                           {step.execution.highlights.map((item) => (
-                            <li key={item.text}>{item.text}</li>
+                            <li key={item.text}>{format(item.text)}</li>
                           ))}
                         </ul>
                       )}
@@ -209,7 +228,7 @@ export function AssessmentView({
                   : !summary.meets_due
                     ? '插单预计无法满足要求交期，需确认交期及取舍。'
                     : summary.newly_delayed_order_count > 0
-                      ? '原订单交期延误加重，需领导确认取舍。'
+                      ? '原订单交期延误加重，需管理者确认取舍。'
                       : '原订单未新增交期延误，仍需按流程审批与复核。'}
               </li>
               <li>
@@ -231,7 +250,7 @@ export function AssessmentView({
       <details>
         <summary>试排口径与限制</summary>
         {result.assumptions.map((text) => (
-          <p key={text}>{text}</p>
+          <p key={text}>{format(text)}</p>
         ))}
       </details>
       {planner && (
@@ -283,7 +302,7 @@ export function AssessmentView({
               <span className="conflict-notice-icon" role="img" aria-label="冲突警告">
                 ⚠️
               </span>
-              <span>{issue}</span>
+              <span>{format(issue)}</span>
             </p>
           ))}
         </details>

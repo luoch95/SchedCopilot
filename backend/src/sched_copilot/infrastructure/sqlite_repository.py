@@ -45,6 +45,16 @@ def backup_database(path: Path) -> Path:
     return backup
 
 
+def replace_database(source_path: Path, target_path: Path) -> None:
+    source = sqlite3.connect(source_path)
+    target = sqlite3.connect(target_path)
+    try:
+        source.backup(target)
+    finally:
+        source.close()
+        target.close()
+
+
 class DecisionStore:
     def __init__(self, path: str | Path, baseline: Schedule):
         self.path = str(path)
@@ -134,9 +144,14 @@ class DecisionStore:
     def latest_workflow(self) -> tuple[dict, str | None] | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT payload,simulation_id FROM workflow_runs ORDER BY sequence DESC LIMIT 1"
+                "SELECT payload,simulation_id,created_at FROM workflow_runs "
+                "ORDER BY sequence DESC LIMIT 1"
             ).fetchone()
-        return (json.loads(row[0]), row[1]) if row else None
+        if not row:
+            return None
+        payload = json.loads(row[0])
+        payload.setdefault("created_at", row[2])
+        return payload, row[1]
 
     def _restore_publication_metadata(self):
         with self._connect() as conn:
@@ -242,6 +257,16 @@ class DecisionStore:
             )
             for i, product, qty, due in rows
         )
+
+    def event_history(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT revision,payload,recorded_at FROM event_history ORDER BY revision DESC"
+            ).fetchall()
+        return [
+            {**json.loads(payload), "revision": revision, "created_at": created_at}
+            for revision, payload, created_at in rows
+        ]
 
     def active_event(self) -> tuple[MachineFailure, int] | None:
         with self._connect() as conn:

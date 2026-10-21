@@ -1,10 +1,20 @@
 .chart-scroll {
+  width: 100%;
+  min-width: 0;
   overflow-x: auto;
+}
+.gantt {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 .gantt .chart-scroll > svg {
   display: block;
   width: 100%;
-  min-width: 490px;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  max-height: 350px;
 }
 .axis-label {
   fill: #768d9c;

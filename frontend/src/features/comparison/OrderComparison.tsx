@@ -32,7 +32,7 @@ export function OrderComparison({
               return (
                 <tr key={order.id}>
                   <th>
-                    {order.id} · {order.name}
+                    {order.display_name ?? order.id} · {order.name}
                     <small>交期 {stamp(order.due)}</small>
                     <small>原完工 {stamp(impacts[0].原完工)}</small>
                   </th>

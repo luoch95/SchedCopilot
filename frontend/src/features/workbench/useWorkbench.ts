@@ -10,9 +10,11 @@ import type {
 } from '../../shared/api/contracts';
 import { draftFingerprint, draftFor, type EventDraft } from '../events';
 import { workbenchApi } from './api';
+import { useDemoAccess } from '../../shared/lib/demoAccess';
 
 /** Own the edit → simulate → compare → human decision lifecycle in one place. */
 export function useWorkbench() {
+  const { readOnly } = useDemoAccess();
   const [state, setState] = useState<Workbench | null>(null);
   const [draft, setDraft] = useState<EventDraft | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
@@ -116,6 +118,7 @@ export function useWorkbench() {
   }, []);
 
   async function run(label: string, task: () => Promise<void>) {
+    if (readOnly && label !== '重新载入') return false;
     if (inFlight.current) return;
     recoveryEpoch.current += 1;
     inFlight.current = true;
@@ -165,7 +168,7 @@ export function useWorkbench() {
   const candidate = currentSimulation?.candidates.find((item) => item.id === selected);
 
   function edit(value: Partial<EventDraft>) {
-    if (!draft) return;
+    if (readOnly || !draft) return;
     setDraft({ ...draft, ...value });
     clearResults();
     setNotice('');

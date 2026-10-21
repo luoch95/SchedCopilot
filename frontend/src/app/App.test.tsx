@@ -2,12 +2,14 @@ import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from './App';
+import { DemoAccessBar } from '../features/session';
 
 // Existing workbench behavior is covered by WorkbenchPage.test.tsx.
 vi.mock('./WorkbenchPage', () => ({
   default: ({ onSwitchRole }: { onSwitchRole: () => void }) => (
     <main>
       <h1>排产工作台</h1>
+      <DemoAccessBar />
       <button onClick={onSwitchRole}>切换角色</button>
     </main>
   ),
@@ -16,12 +18,14 @@ vi.mock('../features/sales', () => ({
   LeaderPage: ({ onSwitchRole }: { onSwitchRole: () => void }) => (
     <main>
       <h1>紧急插单审批</h1>
+      <DemoAccessBar />
       <button onClick={onSwitchRole}>切换角色</button>
     </main>
   ),
   SalesPage: ({ onSwitchRole }: { onSwitchRole: () => void }) => (
     <main>
       <h1>紧急插单</h1>
+      <DemoAccessBar />
       <button onClick={onSwitchRole}>切换角色</button>
     </main>
   ),
@@ -34,12 +38,44 @@ beforeEach(() => {
 });
 
 describe('demo role navigation (URG-01)', () => {
+  it.each([/进入排产工作台/, /进入业务员页面/, /进入管理者审批/])(
+    'allows hiding and restoring the shared hint in %s',
+    (entry) => {
+      render(<App />);
+      expect(screen.queryByRole('button', { name: '隐藏提示' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '显示提示' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: entry }));
+      fireEvent.click(screen.getByRole('button', { name: '隐藏提示' }));
+      expect(screen.queryByRole('status')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '显示提示' }));
+      expect(screen.getByRole('status').textContent).toBe('当前为只读模式');
+    },
+  );
   it('starts at role selection without loading backend data', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     render(<App />);
     expect(screen.getByRole('heading', { name: '选择你的工作角色' })).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: '解锁' })).toBeNull();
+  });
+  it('keeps permission UI inside the workspace and removes it when returning to role selection', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /进入排产工作台/ }));
+    await screen.findByRole('status');
+    expect(screen.getAllByRole('button', { name: '解锁' }).at(-1)!).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/无法读取权限/)).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: '解锁' }).at(-1)!);
+    expect(screen.getByLabelText('演示密码')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '切换角色' }));
+    await screen.findByRole('heading', { name: '选择你的工作角色' });
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: '解锁' })).toBeNull();
+    expect(screen.queryByLabelText('演示密码')).toBeNull();
   });
   it('persists sales across remount and clears it when switching', async () => {
     const first = render(<App />);

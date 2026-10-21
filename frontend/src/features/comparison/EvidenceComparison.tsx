@@ -1,6 +1,7 @@
 import type { Candidate, WorkflowResult } from '../../shared/api/contracts';
 import { WorkflowDebugDetails } from '../../shared/ui/WorkflowEvidence';
 import { DecisionText } from '../../shared/ui/DecisionText';
+import { businessText } from '../../shared/lib/businessLabels';
 
 export function EvidenceComparison({
   candidates,
@@ -61,7 +62,7 @@ export function EvidenceComparison({
                 <h5>输入与假设</h5>
                 <ul>
                   {item.assumptions.map((text, i) => (
-                    <li key={i}>{text}</li>
+                    <li key={i}>{businessText(text, item.schedule.operations)}</li>
                   ))}
                 </ul>
                 {!item.assumptions.length && <p>当前候选未提供假设说明。</p>}
@@ -69,7 +70,8 @@ export function EvidenceComparison({
                 <ul>
                   {item.changes.map((change) => (
                     <li key={change.工序}>
-                      <strong>{change.工序}</strong>：<DecisionText text={change.依据} />
+                      <strong>{businessText(change.工序, item.schedule.operations)}</strong>：
+                      <DecisionText text={businessText(change.依据, item.schedule.operations)} />
                     </li>
                   ))}
                 </ul>

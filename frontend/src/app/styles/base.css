@@ -9,12 +9,24 @@
   --accent: #126477;
   --border: #dce5eb;
   --muted: #697f8d;
+  --workspace-gutter: 24px;
+}
+@media (max-width: 1000px) {
+  :root {
+    --workspace-gutter: 16px;
+  }
 }
 * {
   box-sizing: border-box;
 }
 body {
   margin: 0;
+}
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
 }
 button,
 input,

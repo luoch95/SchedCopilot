@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { workbenchApi } from '../workbench';
+import type { ReactNode } from 'react';
 import type { InsertionRequestRecord } from '../../shared/api/contracts';
 import { AssessmentView } from './AssessmentView';
 import { RequestStatusTimeline } from './RequestStatusTimeline';
@@ -7,6 +8,9 @@ import { stamp } from '../../shared/lib/time';
 import { Modal } from '../../shared/ui/Modal';
 import { StatusTag } from '../../shared/ui/StatusTag';
 import { statusLabel } from '../../shared/lib/status';
+import { WriteButton } from '../../shared/ui/WriteButton';
+import { useDemoAccess } from '../../shared/lib/demoAccess';
+import { inDateRange, newestFirst, type DateRange } from '../../shared/lib/dateRange';
 
 export function PendingRequestsPanel({
   refreshVersion = 0,
@@ -20,19 +24,24 @@ export function PendingRequestsPanel({
   assignedPlanner,
   onRecord,
   onBusyChange,
+  dateRange,
+  headerActions,
 }: {
   refreshVersion?: number;
   planner?: boolean;
   leader?: boolean;
   disabled?: boolean;
   onPublished?: () => void;
-  onSelection?: (record: InsertionRequestRecord | null) => void;
+  onSelection?: (record: InsertionRequestRecord | null, automatic?: boolean) => void;
   onOpen?: (record: InsertionRequestRecord) => void;
   requestId?: string;
   assignedPlanner?: string;
   onRecord?: (record: InsertionRequestRecord | null) => void;
   onBusyChange?: (busy: boolean) => void;
+  dateRange?: DateRange;
+  headerActions?: ReactNode;
 }) {
+  const { readOnly } = useDemoAccess();
   const [records, setRecords] = useState<InsertionRequestRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -76,12 +85,12 @@ export function PendingRequestsPanel({
             : items;
         setRecords(visible);
         onRecord?.(visible[0] ?? null);
-        onSelection?.(items.find((item) => item.assessment) ?? null);
+        onSelection?.(items.find((item) => item.assessment) ?? null, true);
       })
       .catch(() => {
         if (version === active.current) {
           setError('插单申请读取失败，请重试。');
-          onSelection?.(null);
+          onSelection?.(null, true);
         }
       })
       .finally(() => {
@@ -92,7 +101,7 @@ export function PendingRequestsPanel({
     };
   }, [refreshVersion, reload, onSelection, onOpen, requestId, onRecord, assignedPlanner, leader]);
   async function assess(item: InsertionRequestRecord) {
-    if (locked.current || disabled) return;
+    if (readOnly || locked.current || disabled) return;
     locked.current = true;
     const version = active.current;
     setAssessing(item.id);
@@ -122,7 +131,7 @@ export function PendingRequestsPanel({
     }
   }
   async function act(item: InsertionRequestRecord, action: 'approve' | 'reject' | 'publish') {
-    if (locked.current || disabled) return;
+    if (readOnly || locked.current || disabled) return;
     const reason = reasons[item.id]?.trim();
     if (!reason) {
       setAssessmentError('请填写审批或复核理由。');
@@ -176,6 +185,17 @@ export function PendingRequestsPanel({
     return (
       <div className="request-detail-content">
         <h4>申请需求</h4>
+        <p className="workflow-current-step">
+          当前步骤：
+          {item.assessment_stale && !['published', 'rejected'].includes(item.status)
+            ? '试排已过期（需重新试排并重新审批）'
+            : {
+                pending_approval: '管理者审批（待管理者审批，尚未发布）',
+                approved: '管理者审批（已批准，待排产员发布）',
+                rejected: '管理者审批（已驳回，流程结束）',
+                published: '排产员发布（已发布，流程完成）',
+              }[item.status]}
+        </p>
         {requestId && (
           <p>
             当前状态：
@@ -194,9 +214,9 @@ export function PendingRequestsPanel({
         <p>指派排产员：{item.assigned_planner}</p>
         <p>提交时间：{stamp(item.created_at)}</p>
         {!leader && !['published', 'rejected'].includes(item.status) && (
-          <button disabled={!!assessing || disabled} onClick={() => assess(item)}>
+          <WriteButton disabled={!!assessing || disabled} onClick={() => assess(item)}>
             {assessing === item.id ? '正在试排…' : item.assessment ? '重新试排' : '评估插单'}
-          </button>
+          </WriteButton>
         )}
         {((leader && item.status === 'pending_approval') ||
           (planner && item.status === 'approved')) && (
@@ -205,6 +225,7 @@ export function PendingRequestsPanel({
               审批或复核理由
               <textarea
                 aria-label={`审批或复核理由 ${item.request_no}`}
+                disabled={readOnly}
                 value={reasons[item.id] ?? ''}
                 onChange={(event) =>
                   setReasons((previous) => ({
@@ -216,7 +237,7 @@ export function PendingRequestsPanel({
             </label>
             {leader ? (
               <>
-                <button
+                <WriteButton
                   disabled={
                     !!assessing ||
                     disabled ||
@@ -226,13 +247,13 @@ export function PendingRequestsPanel({
                   onClick={() => act(item, 'approve')}
                 >
                   批准插单
-                </button>
-                <button disabled={!!assessing || disabled} onClick={() => act(item, 'reject')}>
+                </WriteButton>
+                <WriteButton disabled={!!assessing || disabled} onClick={() => act(item, 'reject')}>
                   驳回申请
-                </button>
+                </WriteButton>
               </>
             ) : (
-              <button
+              <WriteButton
                 disabled={
                   !!assessing ||
                   disabled ||
@@ -242,7 +263,7 @@ export function PendingRequestsPanel({
                 onClick={() => act(item, 'publish')}
               >
                 复核并发布插单
-              </button>
+              </WriteButton>
             )}
             {item.assessment_stale && <p>试排已过期，须重新试排并重新审批。</p>}
           </div>
@@ -281,18 +302,26 @@ export function PendingRequestsPanel({
       </div>
     );
   }
+  const visibleRecords = requestId
+    ? records
+    : records
+        .filter((item) => inDateRange(item.created_at, dateRange))
+        .sort((a, b) => newestFirst(a.created_at, b.created_at));
   return (
     <section
-      className={`pending-requests${!loading && !error && !records.length && onOpen ? ' pending-requests-empty' : ''}`}
+      className={`pending-requests${!loading && !error && !visibleRecords.length && onOpen ? ' pending-requests-empty' : ''}`}
       aria-label="插单申请与状态跟踪"
     >
       <div className="sales-section-heading">
         <h3>{onOpen ? '待审批插单申请' : '插单申请与状态跟踪'}</h3>
-        <button disabled={loading || !!assessing} onClick={() => setReload((value) => value + 1)}>
-          刷新申请
-        </button>
+        <div className="dashboard-card-actions">
+          {headerActions}
+          <button disabled={loading || !!assessing} onClick={() => setReload((value) => value + 1)}>
+            刷新申请
+          </button>
+        </div>
       </div>
-      {!(leader && onOpen && !loading && !error && !records.length) && (
+      {!(leader && onOpen && !loading && !error && !visibleRecords.length) && (
         <p className="sales-muted">
           {assignedPlanner
             ? `当前展示指派给 ${assignedPlanner} 的申请；待审批不代表已通过交期评估或已发布排产。`
@@ -304,13 +333,15 @@ export function PendingRequestsPanel({
         <p role="status">正在读取申请…</p>
       ) : error ? (
         <p role="alert">{error}</p>
-      ) : records.length === 0 ? (
+      ) : visibleRecords.length === 0 ? (
         <p className="sales-muted">
-          {leader && onOpen
-            ? '暂无待审批工单'
-            : onOpen
-              ? '暂无待审批或待发布的插单申请。'
-              : '暂无插单申请。'}
+          {dateRange && (dateRange.start || dateRange.end)
+            ? '所选时间范围内暂无插单申请。'
+            : leader && onOpen
+              ? '暂无待审批工单'
+              : onOpen
+                ? '暂无待审批或待发布的插单申请。'
+                : '暂无插单申请。'}
         </p>
       ) : requestId ? (
         <article>{renderDetails(records[0])}</article>
@@ -336,7 +367,7 @@ export function PendingRequestsPanel({
               </tr>
             </thead>
             <tbody>
-              {records.map((item) => (
+              {visibleRecords.map((item) => (
                 <tr
                   key={item.id}
                   className={onOpen ? 'request-row' : undefined}

@@ -1,5 +1,6 @@
 import { TraceTree, TraceBadge } from '../../shared/ui/TraceTree';
 import { useId, useRef } from 'react';
+import { useBusinessText } from '../../shared/lib/BusinessLabelProvider';
 import type {
   WorkflowIntent,
   WorkflowResult,
@@ -104,6 +105,7 @@ function stageSummary(name: string, report?: WorkflowReport) {
 }
 
 export function WorkflowPanel({ running, disabled, result: finalResult, progress, onRun }: Props) {
+  const format = useBusinessText();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const detailRefs = useRef<Record<string, HTMLElement | null>>({});
   const detailId = useId();
@@ -149,8 +151,10 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
   return (
     <section className="workflow-progress" aria-label="四个智能环节执行状态" aria-busy={running}>
       <div className="workflow-caption">
-        <h3 id="section-workflow">本次智能分析链路</h3>
-        <TraceBadge traceId={result?.trace_id} />
+        <div className="workflow-title">
+          <h3 id="section-workflow">本次智能分析链路</h3>
+          <TraceBadge traceId={result?.trace_id} />
+        </div>
         <span role="status">
           {running ? (
             <WaitingResult />
@@ -309,10 +313,8 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
       <details className="workflow-details decision-accordion" ref={detailsRef}>
         <summary>
           <h3 id="section-execution">执行详情</h3>
-          <TraceBadge traceId={result?.trace_id} />
         </summary>
         <TraceTree
-          traceId={result?.trace_id}
           steps={(result?.trace ?? []).map((step) => ({
             ...step,
             label: stages.find((stage) => stage.action === step.action)?.label ?? '流程路由',
@@ -321,15 +323,15 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
         <p className="hint">查看各环节的问题与处理建议。辅助操作使用已保存的数据。</p>
         <p className="hint">重新校验会清除本次候选；生成方案时会自动校验。</p>
         <div className="inline-actions">
-          <button disabled={disabled} onClick={() => onRun('validate')}>
+          <WriteButton disabled={disabled} onClick={() => onRun('validate')}>
             仅校验数据
-          </button>
-          <button
+          </WriteButton>
+          <WriteButton
             disabled={disabled || !result?.results.scheduling?.data}
             onClick={() => onRun('re_evaluate')}
           >
             重新评估已有方案
-          </button>
+          </WriteButton>
         </div>
         {result && (
           <div className="workflow-detail-list">
@@ -369,15 +371,15 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                       <ol>
                         {report.quality.history.map((item) => (
                           <li key={item.round}>
-                            第 {item.round} 轮：{item.repair && `${item.repair}；`}
+                            第 {item.round} 轮：{item.repair && `${format(item.repair)}；`}
                             {item.issues.length
-                              ? item.issues.map((issue) => issue.message).join('；')
+                              ? item.issues.map((issue) => format(issue.message)).join('；')
                               : '检查通过'}
                           </li>
                         ))}
                       </ol>
                       {report.quality.stop_reason && (
-                        <p className="hint">停止原因：{report.quality.stop_reason}</p>
+                        <p className="hint">停止原因：{format(report.quality.stop_reason)}</p>
                       )}
                     </section>
                   )}
@@ -458,3 +460,4 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
     </section>
   );
 }
+import { WriteButton } from '../../shared/ui/WriteButton';

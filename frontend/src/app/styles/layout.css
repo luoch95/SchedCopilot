@@ -140,3 +140,54 @@
 .loading p {
   margin: 20px 0;
 }
+.workbench-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.workbench-logo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #102c40 0%, #173b50 40%, #22899d 100%);
+  color: #fff;
+  font-family: Arial, sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+}
+.workbench-title-bilingual {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.2;
+}
+.workbench-title-bilingual small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+.workbench-logo > span {
+  position: absolute;
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1;
+}
+.workbench-monogram-s {
+  top: 4px;
+  left: 6px;
+  z-index: 1;
+}
+.workbench-monogram-c {
+  top: 11px;
+  left: 15px;
+  color: #d9edff;
+  text-shadow: -1px -1px 0 #173b50;
+}

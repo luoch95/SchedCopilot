@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SalesPage } from './SalesPage';
-import type { InsertionRequestRecord, SalesOverview } from '../../shared/api/contracts';
+import type {
+  InsertionAssessment,
+  InsertionRequestRecord,
+  SalesOverview,
+} from '../../shared/api/contracts';
 import App from '../../app/App';
 import { workbench } from '../../test/fixtures';
 
@@ -43,6 +47,41 @@ const estimate = {
 };
 let calls: { url: string; body?: unknown }[];
 let savedRequests: InsertionRequestRecord[];
+const presetAssessment: InsertionAssessment = {
+  request_id: 'preset',
+  baseline_version: 1,
+  baseline_fingerprint: 'plan-1',
+  event_revision: 1,
+  tool_version: 'rules',
+  created_at: '2026-10-19T13:00:00+08:00',
+  summary: {
+    estimated_completion_at: '2026-10-19T16:00:00+08:00',
+    meets_due: true,
+    affected_order_count: 0,
+    newly_delayed_order_count: 0,
+    order_impacts: [],
+  },
+  details: { inserted_order_id: 'URG-preset', process_steps: [], operations: [] },
+  assumptions: [],
+  baseline_resource_issues: [],
+};
+function preset(): InsertionRequestRecord {
+  return {
+    id: 'preset',
+    request_no: 'URG-20261020-001',
+    product_id: 'P-DEMO-001',
+    quantity: 1001,
+    earliest_start_at: '2026-10-19T05:00:00Z',
+    requested_due_at: '2026-10-20T08:00:00Z',
+    reason: '预置紧急补货',
+    assigned_planner: 'planner_01',
+    status: 'pending_approval',
+    plan_version: 1,
+    estimate,
+    assessment: presetAssessment,
+    created_at: '2026-10-19T13:00:00+08:00',
+  };
+}
 beforeEach(() => {
   calls = [];
   savedRequests = [];
@@ -72,6 +111,7 @@ beforeEach(() => {
         url === '/api/sales/requests?assigned_planner=planner_01'
       )
         data = savedRequests;
+      else if (url === '/api/demo/session') data = { admin: true, read_only: false };
       else if (url === '/api/sales/overview') data = overview;
       else if (url === '/api/sales/processing-estimate') data = estimate;
       else if (url === '/api/workbench') data = workbench;
@@ -103,6 +143,109 @@ function fill() {
 }
 
 describe('sales page framework (URG-02 / DISC-02)', () => {
+  it('restores the preset form in guest mode, then unlocks, estimates and submits it', async () => {
+    savedRequests = [preset()];
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /进入业务员页面/ }));
+    await screen.findByText('申请：URG-20261020-001');
+    expect((screen.getByLabelText('模拟产品') as HTMLSelectElement).value).toBe('P-DEMO-001');
+    expect((screen.getByLabelText('数量（件）') as HTMLInputElement).value).toBe('1001');
+    expect((screen.getByLabelText('最早开工时间（北京时间）') as HTMLInputElement).value).toBe(
+      '2026-10-19T13:00',
+    );
+    expect((screen.getByLabelText('要求交期（北京时间）') as HTMLInputElement).value).toBe(
+      '2026-10-20T16:00',
+    );
+    expect((screen.getByLabelText('紧急原因') as HTMLTextAreaElement).value).toBe('预置紧急补货');
+    expect(screen.getByLabelText('模拟产品').closest('fieldset')?.disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole('button', { name: '解锁' }).at(-1)!);
+    fireEvent.change(screen.getByLabelText('演示密码'), { target: { value: 'admin123' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '解锁' }).at(-1)!);
+    await screen.findByText('✓ 已解锁操作权限');
+    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
+    await screen.findByRole('heading', { name: '加工时长预估' });
+    fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
+    await screen.findByText('申请 URG-TEST-0001 已保存，待审批。');
+    expect((screen.getByLabelText('紧急原因') as HTMLTextAreaElement).value).toBe('预置紧急补货');
+  });
+
+  it('clears the historical summary when editing a restored request', async () => {
+    savedRequests = [preset()];
+    await openPage();
+    await screen.findByText('申请：URG-20261020-001');
+    fireEvent.change(screen.getByLabelText('数量（件）'), { target: { value: '200' } });
+    expect(screen.queryByText('申请：URG-20261020-001')).toBeNull();
+    expect(screen.getAllByText('待评估')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: '刷新概况' }));
+    await screen.findByText('本地仿真排产计划');
+    expect((screen.getByLabelText('数量（件）') as HTMLInputElement).value).toBe('200');
+    fireEvent.click(screen.getByRole('button', { name: '刷新申请' }));
+    await screen.findByText('URG-20261020-001');
+    expect((screen.getByLabelText('数量（件）') as HTMLInputElement).value).toBe('200');
+  });
+
+  it('shows the published request number instead of its internal order ID', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, options) =>
+      url === '/api/sales/overview'
+        ? Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...overview,
+                orders: [
+                  {
+                    ...overview.orders[0],
+                    id: 'URG-b2144663-1234-4321-8765-abcdef012345',
+                    display_name: 'URG-20261020-001',
+                  },
+                ],
+              }),
+            ),
+          )
+        : original(url, options),
+    );
+    await openPage();
+    expect(screen.getByText('URG-20261020-001 · 原订单')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('b2144663');
+  });
+  it('resolves a legacy overview UUID from request_no, including UUIDs in order names', async () => {
+    const id = 'b2144663-8800-4db4-9bcb-647e6594b8bb';
+    savedRequests = [{ ...preset(), id, status: 'published' }];
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, options) =>
+      url === '/api/sales/overview'
+        ? Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...overview,
+                orders: [{ ...overview.orders[0], id: `URG-${id}`, name: `插单 URG-${id}` }],
+              }),
+            ),
+          )
+        : original(url, options),
+    );
+    await openPage();
+    expect(screen.getByText('URG-20261020-001 · 插单 URG-20261020-001')).toBeTruthy();
+    expect(document.body.textContent).not.toContain(id);
+  });
+  it('never falls back to UUID when request metadata is unavailable', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, options) =>
+      url === '/api/sales/overview'
+        ? Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...overview,
+                orders: [{ ...overview.orders[0], id: 'URG-b2144663-8800-4db4-9bcb-647e6594b8bb' }],
+              }),
+            ),
+          )
+        : original(url, options),
+    );
+    await openPage();
+    expect(screen.getByText('单号待同步 · 原订单')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('b2144663');
+  });
   it('loads only the sales projection, shows no fake impacts or allocation, and keeps evaluation disabled', async () => {
     await openPage();
     fireEvent.click(screen.getByText('查看当前订单交期'));
@@ -113,7 +256,7 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
     ).toBeTruthy();
     expect(screen.getAllByText('待评估')).toHaveLength(3);
     expect(
-      (screen.getByRole('button', { name: '提交领导审批' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: '提交管理者审批' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(screen.queryByText(/M1|M2|MD-A/)).toBeNull();
     expect(calls.map((call) => call.url).sort()).toEqual([
@@ -148,7 +291,7 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
     fill();
     fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
     await screen.findByRole('heading', { name: '加工时长预估' });
-    fireEvent.click(screen.getByRole('button', { name: '提交领导审批' }));
+    fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText(/申请 URG-/);
     const request = calls.find((call) => call.url === '/api/sales/requests' && call.body);
     expect(request?.body).toMatchObject({
@@ -161,10 +304,13 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
     const first = render(<App />);
     fireEvent.click(screen.getByRole('button', { name: /进入业务员页面/ }));
     await screen.findByText('本地仿真排产计划');
+    fireEvent.click(screen.getAllByRole('button', { name: '解锁' }).at(-1)!);
+    fireEvent.change(screen.getByLabelText('演示密码'), { target: { value: 'admin123' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '解锁' }).at(-1)!);
     fill();
     fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
     await screen.findByRole('heading', { name: '加工时长预估' });
-    fireEvent.click(screen.getByRole('button', { name: '提交领导审批' }));
+    fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText('URG-TEST-0001');
     first.unmount();
     render(<App />);
@@ -189,11 +335,11 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
       key = JSON.parse(String(options?.body)).submission_key;
       throw new TypeError('network error');
     });
-    fireEvent.click(screen.getByRole('button', { name: '提交领导审批' }));
+    fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText(/提交失败，请重试/);
     expect(screen.queryByText('URG-TEST-0001')).toBeNull();
     vi.mocked(fetch).mockImplementation(original);
-    fireEvent.click(screen.getByRole('button', { name: '提交领导审批' }));
+    fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText('URG-TEST-0001');
     expect(
       calls.find((call) => call.url === '/api/sales/requests' && call.body)?.body,

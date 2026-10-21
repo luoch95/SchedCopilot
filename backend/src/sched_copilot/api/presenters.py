@@ -22,6 +22,13 @@ def workbench_view(snapshot: WorkbenchSnapshot) -> dict:
     labels = view.pop("operation_labels")
     for operation in view["baseline"]["operations"]:
         operation.update(labels.get(operation["id"], {}))
+    names = {
+        op["order_id"]: op["order_display_name"]
+        for op in view["baseline"]["operations"]
+        if "order_display_name" in op
+    }
+    for order in view["orders"]:
+        order["display_name"] = names.get(order["id"], order["id"])
     return view
 
 

@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { statusLabel } from '../lib/status';
+import { useEffect, useRef } from 'react';
 import { stamp } from '../lib/time';
 import type { Change, Failure, Machine, Operation, Schedule } from '../api/contracts';
 import { DecisionText } from './DecisionText';
 import { useGanttSelection } from './GanttSelection';
 
 const colors = ['#2E748C', '#489B78', '#A87939', '#7B71A4', '#C17467'];
+const comparisonColors = {
+  red: ['#B83F45', '#A94D59', '#C65D46', '#963F57', '#B45F64'],
+  green: ['#24744F', '#388360', '#437A45', '#21685D', '#52864E'],
+};
 const hour = (value: number) => stamp(new Date(value).toISOString()).split(' ')[1];
 
 export default function Gantt({
@@ -15,6 +20,7 @@ export default function Gantt({
   machines,
   range,
   changes = [],
+  tone,
 }: {
   schedule: Schedule;
   baseline?: Schedule;
@@ -22,14 +28,33 @@ export default function Gantt({
   machines: Machine[];
   range: [number, number];
   changes?: Change[];
+  tone?: 'red' | 'green';
 }) {
+  const palette = tone ? comparisonColors[tone] : colors;
   const sharedSelection = useGanttSelection();
   const [localSelection, setLocalSelection] = useState<string | null>(null);
   const selectedId = sharedSelection?.operationId ?? localSelection;
   const select = sharedSelection?.select ?? setLocalSelection;
   const [hover, setHover] = useState<Operation | null>(null);
-  const width = 920,
-    left = 65,
+  const chartRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(920);
+  useEffect(() => {
+    const container = chartRef.current;
+    if (!container) return;
+    const updateWidth = () => {
+      const measured = container.getBoundingClientRect().width;
+      if (measured > 0) setWidth(Math.max(120, measured));
+    };
+    updateWidth();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateWidth);
+    observer?.observe(container);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, []);
+  const left = 65,
     right = 18,
     rowHeight = 66,
     top = 46;
@@ -77,8 +102,14 @@ export default function Gantt({
   const faultEnd = failure.recovered_at ? +new Date(failure.recovered_at) : range[1];
   return (
     <div className="gantt">
-      <div className="chart-scroll">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="设备工序甘特图">
+      <div className="chart-scroll" ref={chartRef}>
+        <svg
+          width="100%"
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label="设备工序甘特图"
+        >
           {ticks.map((tick) => (
             <g key={tick}>
               <line
@@ -175,7 +206,7 @@ export default function Gantt({
                   width={end - start}
                   height={29}
                   rx={4}
-                  fill={colors[orderIds.indexOf(op.order_id) % colors.length]}
+                  fill={palette[orderIds.indexOf(op.order_id) % palette.length]}
                   fillOpacity={op.status === 'completed' ? 0.42 : 1}
                   stroke={transfer ? '#7C3AED' : changed ? '#B45309' : 'transparent'}
                   strokeWidth={changed ? 4 : 0}
@@ -225,13 +256,13 @@ export default function Gantt({
       {change && (
         <p className="hint">
           调整依据：
-          <DecisionText text={change.依据} />
+          <DecisionText text={businessText(change.依据, schedule.operations)} />
         </p>
       )}
       <div className="order-legend">
         {orderIds.map((id, index) => (
           <span key={id}>
-            <i style={{ background: colors[index % colors.length] }} />
+            <i style={{ background: palette[index % palette.length] }} />
             {schedule.operations.find((op) => op.order_id === id)?.order_display_name ?? id}
           </span>
         ))}
@@ -239,3 +270,4 @@ export default function Gantt({
     </div>
   );
 }
+import { businessText } from '../lib/businessLabels';

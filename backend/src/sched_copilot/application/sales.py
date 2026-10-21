@@ -14,6 +14,11 @@ class SalesService:
 
     def overview(self, snapshot: WorkbenchSnapshot) -> dict:
         completions = {}
+        names = {
+            op.order_id: snapshot.operation_labels[op.id]["order_display_name"]
+            for op in snapshot.baseline.operations
+            if op.id in snapshot.operation_labels
+        }
         for operation in snapshot.baseline.operations:
             previous = completions.get(operation.order_id)
             if previous is None or operation.end > previous:
@@ -28,6 +33,7 @@ class SalesService:
             "orders": [
                 {
                     "id": order.id,
+                    "display_name": names.get(order.id, order.id),
                     "name": order.name,
                     "due": order.due,
                     "planned_completion": completions.get(order.id),

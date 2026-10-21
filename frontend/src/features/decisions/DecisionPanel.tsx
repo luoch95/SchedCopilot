@@ -1,4 +1,6 @@
 import type { Candidate, Simulation, Workbench } from '../../shared/api/contracts';
+import { WriteButton } from '../../shared/ui/WriteButton';
+import { useDemoAccess } from '../../shared/lib/demoAccess';
 interface Props {
   state: Workbench;
   currentSimulation: Simulation;
@@ -27,6 +29,7 @@ export function DecisionPanel({
   onAction,
   onDecide,
 }: Props) {
+  const { readOnly } = useDemoAccess();
   return (
     <section id="fault-confirm" tabIndex={-1} className="section decision-section">
       <div className="section-heading">
@@ -53,7 +56,7 @@ export function DecisionPanel({
           </label>
           <label>
             处理方式
-            <select value={action} onChange={(e) => onAction(e.target.value)}>
+            <select disabled={readOnly} value={action} onChange={(e) => onAction(e.target.value)}>
               <option value="reject">暂不发布</option>
               <option value="publish">确认发布</option>
             </select>
@@ -63,6 +66,7 @@ export function DecisionPanel({
           确认理由（必填）
           <textarea
             maxLength={2000}
+            disabled={readOnly}
             value={reason}
             onChange={(e) => onReason(e.target.value)}
             placeholder="说明选择理由以及接受的代价"
@@ -77,7 +81,7 @@ export function DecisionPanel({
               ? `将发布“${candidate?.label}”，执行计划更新为 V${state.baseline.version + 1}。`
               : '只记录人工决定，执行计划保持不变。'}
           </p>
-          <button
+          <WriteButton
             className="primary"
             disabled={
               !reason.trim() ||
@@ -87,7 +91,7 @@ export function DecisionPanel({
             onClick={onDecide}
           >
             {action === 'publish' ? '确认并发布所选方案' : '记录暂不发布'}
-          </button>
+          </WriteButton>
         </div>
       </fieldset>
     </section>

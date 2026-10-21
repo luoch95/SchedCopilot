@@ -85,6 +85,13 @@ def test_full_closure_survives_restart_and_supports_later_trials(tmp_path):
         )
         assert inserted["display_name"] == f"{record['request_no']}-OP1"
         assert inserted["order_display_name"] == record["request_no"]
+        order = next(o for o in after["orders"] if o["id"] == inserted["order_id"])
+        assert order["display_name"] == record["request_no"]
+        overview = client.get("/api/sales/overview").json()
+        assert (
+            next(o for o in overview["orders"] if o["id"] == inserted["order_id"])["display_name"]
+            == record["request_no"]
+        )
         with sqlite3.connect(path) as conn:
             payload = json.loads(conn.execute("SELECT payload FROM current_plan").fetchone()[0])
             stored = next(op for op in payload["operations"] if op["id"] == inserted["id"])
@@ -103,6 +110,13 @@ def test_full_closure_survives_restart_and_supports_later_trials(tmp_path):
         assert saved["assessment"] == result
         second = submit(client, "second", "P-DEMO-003")
         second_result = assess(client, second)
+        previous_op = next(
+            o
+            for o in second_result["details"]["operations"]
+            if o["order_id"] == inserted["order_id"]
+        )
+        assert previous_op["order_display_name"] == record["request_no"]
+        assert previous_op["display_name"] == f"{record['request_no']}-OP1"
         assert len(second_result["summary"]["order_impacts"]) == len(after["orders"])
         assert act(client, second, "approve", second_result).status_code == 200
         response = act(client, second, "publish", second_result)

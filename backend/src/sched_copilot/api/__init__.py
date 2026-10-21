@@ -2,14 +2,16 @@
 
 from dataclasses import replace
 from pathlib import Path
+from threading import Lock
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..bootstrap import build_sales, build_workbench
 from ..config import Settings
 from ..observability import configure_logging
+from .demo_access import require_write_access
 from .errors import register_errors
 from .routes import router
 
@@ -25,8 +27,16 @@ def create_app(
     if frontend_dir is not None:
         settings = replace(settings, frontend_dir=frontend_dir)
     configure_logging(settings.log_level)
-    app = FastAPI(title="Schedule Copilot API", version="0.2.0")
+    app = FastAPI(
+        title="Schedule Copilot API", version="0.2.0", dependencies=[Depends(require_write_access)]
+    )
     app.state.settings = settings
+    app.state.demo_sessions = {}
+    app.state.demo_write_lock = Lock()
+    if settings.demo_mode:
+        from ..demo_preview import reset_demo
+
+        reset_demo(settings)
     # Normalize persisted business numbers before restoring formal-plan display metadata.
     app.state.sales, app.state.sales_requests = build_sales(settings)
     app.state.workbench = build_workbench(settings)

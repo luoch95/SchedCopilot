@@ -27,6 +27,23 @@ export function CurrentPlan({
 }: Props) {
   const originalById = new Map(state.baseline.operations.map((op) => [op.id, op]));
   const affected = state.affected.map((id) => originalById.get(id)!);
+  const planTimes = state.baseline.operations
+    .flatMap((operation) => [Date.parse(operation.start), Date.parse(operation.end)])
+    .filter(Number.isFinite);
+  const formatDate = (time: number) =>
+    new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(time);
+  const firstDate = planTimes.length ? formatDate(Math.min(...planTimes)) : null;
+  const lastDate = planTimes.length ? formatDate(Math.max(...planTimes)) : null;
+  const executionDate = firstDate
+    ? firstDate === lastDate
+      ? firstDate
+      : `${firstDate} — ${lastDate}`
+    : '暂无排产';
   return (
     <>
       {!compact && (
@@ -57,7 +74,10 @@ export function CurrentPlan({
         </div>
       )}
 
-      <section className="section">
+      <section
+        className={`section${compact ? ' current-plan-card' : ''}`}
+        aria-label="当前执行计划"
+      >
         <div className="section-heading">
           <div>
             {compact ? <h2>当前执行计划</h2> : <h3 id="section-current-plan">当前执行计划</h3>}
@@ -67,7 +87,8 @@ export function CurrentPlan({
                   version={state.baseline.version}
                   publication={state.plan_publication}
                 />
-                <span>
+                <span className="plan-execution-date">执行日期：{executionDate}</span>
+                <span className="plan-fault-context">
                   已保存故障 {state.event.machine_id} · {stamp(state.event.started_at)} →{' '}
                   {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复时间未知'}
                 </span>
@@ -103,16 +124,22 @@ export function CurrentPlan({
             </label>
           </div>
         </div>
-        <Gantt
-          schedule={state.baseline}
-          failure={state.event}
-          machines={state.machines}
-          range={range}
-        />
-        <p className="hint">
-          浅色条为已完成工序，红色阴影及虚线区域为已保存的故障窗口。
-          此图保留已发布安排，生成候选不会自动修改执行计划。
-        </p>
+        <div
+          className={compact ? 'current-plan-body' : undefined}
+          tabIndex={compact ? 0 : undefined}
+          aria-label={compact ? '执行计划图表内容' : undefined}
+        >
+          <Gantt
+            schedule={state.baseline}
+            failure={state.event}
+            machines={state.machines}
+            range={range}
+          />
+          <p className="hint">
+            浅色条为已完成工序，红色阴影及虚线区域为已保存的故障窗口。
+            此图保留已发布安排，生成候选不会自动修改执行计划。
+          </p>
+        </div>
         {!compact && (
           <>
             <h3 id="section-impact" className="block-title">

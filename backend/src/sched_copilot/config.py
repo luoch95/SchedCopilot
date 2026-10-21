@@ -32,6 +32,8 @@ class Settings:
     workflow_model_mode: str = "rules"
     llm_timeout_seconds: float = 30
     llm_api_type: str = "chat_completions"
+    demo_mode: bool = False
+    demo_admin_password: str = "admin123"
 
     def __post_init__(self):
         if self.workflow_model_mode not in {"rules", "auto", "live"}:
@@ -49,11 +51,22 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         _load_local_env()
+        demo_mode = os.getenv("SCHED_DEMO_MODE", "1") == "1"
         return cls(
-            Path(os.getenv("SCHED_DB_PATH") or REPOSITORY_ROOT / ".data/injection_molding.sqlite3"),
+            Path(
+                os.getenv("SCHED_DB_PATH")
+                or REPOSITORY_ROOT
+                / (
+                    ".data/readonly_demo.sqlite3"
+                    if demo_mode
+                    else ".data/injection_molding.sqlite3"
+                )
+            ),
             Path(os.getenv("SCHED_FRONTEND_DIR") or REPOSITORY_ROOT / "frontend/dist"),
             os.getenv("SCHED_LOG_LEVEL", "INFO").upper(),
             os.getenv("SCHED_WORKFLOW_MODEL_MODE", "auto"),
             float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
             os.getenv("LLM_API_TYPE", "chat_completions"),
+            demo_mode,
+            os.getenv("SCHED_DEMO_ADMIN_PASSWORD", "admin123"),
         )

@@ -105,6 +105,11 @@ function navigationState(role: DemoRole | null) {
   return next;
 }
 
+export function resetPlannerNavigation() {
+  const role = readRole();
+  window.history.replaceState(navigationState(role), '', roleUrl(role));
+}
+
 /** A tab-scoped demo identity; browser history owns the current work view. */
 export function useDemoSession() {
   const [role, setRole] = useState<DemoRole | null>(readRole);

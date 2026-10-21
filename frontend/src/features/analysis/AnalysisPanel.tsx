@@ -2,6 +2,7 @@ import type { WorkflowResult } from '../../shared/api/contracts';
 import { WorkflowNotices, WorkflowStatements } from '../../shared/ui/WorkflowEvidence';
 import { Accordion } from '../../shared/ui/Accordion';
 import { KnowledgePanel } from '../../shared/ui/KnowledgePanel';
+import { useBusinessText } from '../../shared/lib/BusinessLabelProvider';
 
 interface Props {
   busy: string;
@@ -9,9 +10,18 @@ interface Props {
   result: WorkflowResult;
   onQuestion: (value: string) => void;
   onExplain: () => void;
+  showSummary?: boolean;
 }
 
-export function AnalysisPanel({ busy, question, result, onQuestion, onExplain }: Props) {
+export function AnalysisPanel({
+  busy,
+  question,
+  result,
+  onQuestion,
+  onExplain,
+  showSummary = true,
+}: Props) {
+  const format = useBusinessText();
   const report = result.results.explanation;
   const data = report?.data;
   const execution = result.trace.find((step) => step.action === 'explain')?.execution;
@@ -40,9 +50,11 @@ export function AnalysisPanel({ busy, question, result, onQuestion, onExplain }:
       <KnowledgePanel report={result.trace.find((step) => step.action === 'explain')?.knowledge} />
       {data ? (
         <>
-          <p className="explanation-summary">
-            <strong>{data.summary}</strong>
-          </p>
+          {showSummary && (
+            <p className="explanation-summary">
+              <strong>{format(data.summary ?? '')}</strong>
+            </p>
+          )}
           <h3 id="section-facts" className="block-title">
             事实、假设与风险
           </h3>
@@ -66,7 +78,7 @@ export function AnalysisPanel({ busy, question, result, onQuestion, onExplain }:
                 <ul>
                   {data.next_steps.map((step, i) => (
                     <li key={i}>
-                      <strong>{step.action}</strong>
+                      <strong>{format(step.action)}</strong>
                       {step.requires_human_confirmation && '（需人工确认）'}
                     </li>
                   ))}
@@ -88,7 +100,7 @@ export function AnalysisPanel({ busy, question, result, onQuestion, onExplain }:
                 <h3>限制</h3>
                 <ul>
                   {data.limitations.map((text, i) => (
-                    <li key={i}>{text}</li>
+                    <li key={i}>{format(text)}</li>
                   ))}
                 </ul>
               </div>
@@ -113,11 +125,12 @@ export function AnalysisPanel({ busy, question, result, onQuestion, onExplain }:
               onChange={(e) => onQuestion(e.target.value)}
             />
           </label>
-          <button disabled={!question.trim()} onClick={onExplain}>
+          <WriteButton disabled={!question.trim()} onClick={onExplain}>
             重新解释
-          </button>
+          </WriteButton>
         </fieldset>
       </details>
     </section>
   );
 }
+import { WriteButton } from '../../shared/ui/WriteButton';

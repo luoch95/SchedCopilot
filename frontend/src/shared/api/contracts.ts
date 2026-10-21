@@ -26,6 +26,7 @@ export interface Machine {
   capabilities: string[];
 }
 export interface Order {
+  display_name?: string;
   id: string;
   name: string;
   due: string;
@@ -44,6 +45,7 @@ export interface PlanPublication {
   version_summary: string;
 }
 export interface Workbench {
+  event_history?: (Failure & { revision: number; created_at: string })[];
   plan_publication?: PlanPublication;
   baseline: Schedule;
   event: Failure;
@@ -214,6 +216,7 @@ export interface WorkflowReport {
 }
 export interface WorkflowResult {
   trace_id?: string;
+  created_at?: string;
   demo?: DemoFallbackStatus;
   id: string;
   intent: WorkflowIntent;
@@ -316,6 +319,7 @@ export interface SalesOverview {
   product_source: string;
   products: SalesProduct[];
   orders: {
+    display_name?: string;
     id: string;
     name: string;
     due: string;

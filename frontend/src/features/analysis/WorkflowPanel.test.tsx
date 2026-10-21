@@ -72,7 +72,7 @@ describe('workflow execution notices', () => {
       ],
     };
     render(<WorkflowPanel running={false} disabled={false} result={result} onRun={vi.fn()} />);
-    expect(screen.getAllByText('TRC-FAILED-TEST')).toHaveLength(3);
+    expect(screen.getAllByText('TRC-FAILED-TEST')).toHaveLength(1);
     const notice = screen.getByLabelText('模型辅助执行情况');
     expect(notice.textContent).toContain('方案评估：模型辅助未完成');
     expect(notice.textContent).toContain('业务工具执行失败');

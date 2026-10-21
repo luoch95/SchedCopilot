@@ -1,5 +1,7 @@
 import type { Workbench } from '../../shared/api/contracts';
 import { explainIssue } from './model';
+import { WriteButton } from '../../shared/ui/WriteButton';
+import { useDemoAccess } from '../../shared/lib/demoAccess';
 export function SimulationActions({
   state,
   busy,
@@ -23,6 +25,7 @@ export function SimulationActions({
   demoLoading: boolean;
   onDemoChange: (enabled: boolean) => void;
 }) {
+  const { readOnly } = useDemoAccess();
   return (
     <section className="simulation-actions">
       <div>
@@ -30,7 +33,7 @@ export function SimulationActions({
         <p>对比“原计划对照（原设备顺延）”与“允许合格设备转移”，不会修改执行计划。</p>
       </div>
       <div className="simulation-action-buttons">
-        <button
+        <WriteButton
           className={`primary${running ? ' is-running' : ''}`}
           disabled={blocked || !!busy || demoLoading}
           onClick={onGenerate}
@@ -48,7 +51,7 @@ export function SimulationActions({
               生成候选方案 <span aria-hidden="true">→</span>
             </>
           )}
-        </button>
+        </WriteButton>
         {running && (
           <button className="cancel-workflow" onClick={onCancel} aria-label="取消">
             取消
@@ -61,7 +64,7 @@ export function SimulationActions({
           <input
             type="checkbox"
             checked={demoEnabled}
-            disabled={!!busy || demoLoading || demoRemaining > 0}
+            disabled={readOnly || !!busy || demoLoading || demoRemaining > 0}
             onChange={(event) => onDemoChange(event.target.checked)}
           />
           下一次生成模拟排产环节模型辅助失败（仅一次）
@@ -78,7 +81,7 @@ export function SimulationActions({
         <div className="blockers" role="alert">
           <strong>当前事件与执行记录冲突</strong>
           {state.issues.map((issue) => (
-            <p key={issue}>{explainIssue(state, issue)}</p>
+            <p key={issue}>{businessText(explainIssue(state, issue), state.baseline.operations)}</p>
           ))}
           <p>本案例固定在13:00；更改故障时间不会自动推进或回退工序状态。</p>
         </div>
@@ -91,3 +94,4 @@ export function SimulationActions({
     </section>
   );
 }
+import { businessText } from '../../shared/lib/businessLabels';

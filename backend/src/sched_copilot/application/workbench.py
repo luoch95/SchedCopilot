@@ -75,6 +75,7 @@ class WorkbenchService:
             self.repository.history(),
             self.repository.plan_metadata(baseline.version),
             self.repository.operation_labels(baseline),
+            self.repository.event_history(),
         )
 
     def save_event(self, command: SaveEvent) -> WorkbenchSnapshot:

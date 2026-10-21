@@ -8,7 +8,11 @@ export async function api<T>(path: string, body?: unknown, method = 'POST'): Pro
       `/api${path}`,
       body === undefined
         ? { method: 'GET' }
-        : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+        : {
+            method,
+            headers: { 'Content-Type': 'application/json', 'X-Demo-Write': '1' },
+            body: JSON.stringify(body),
+          },
     );
   } catch {
     throw new ApiError('无法连接后端。请确认 FastAPI 已在 8000 端口启动。', 0);
@@ -35,7 +39,11 @@ export async function workflowStream(
   try {
     response = await fetch('/api/workflow', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/x-ndjson',
+        'X-Demo-Write': '1',
+      },
       body: JSON.stringify(body),
       signal,
     });

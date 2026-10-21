@@ -1,4 +1,5 @@
 import { api, workflowStream } from '../../shared/api/http';
+import { orderLabel } from '../../shared/lib/orderLabels';
 import type {
   InsertionAssessment,
   InsertionRequestCreate,
@@ -41,7 +42,26 @@ export const workbenchApi = {
     }),
   submitRequest: (request: InsertionRequestCreate) =>
     api<InsertionRequestRecord>('/sales/requests', request),
-  salesOverview: () => api<SalesOverview>('/sales/overview'),
+  salesOverview: async () => {
+    const overview = await api<SalesOverview>('/sales/overview');
+    const needsNumbers = overview.orders.some(
+      (order) =>
+        orderLabel(order.display_name ?? order.id) !== (order.display_name ?? order.id) ||
+        orderLabel(order.name) !== order.name,
+    );
+    // Older running backends omit display_name. Resolve from persisted request_no as well.
+    const requests = needsNumbers
+      ? await api<InsertionRequestRecord[]>('/sales/requests').catch(() => [])
+      : [];
+    return {
+      ...overview,
+      orders: overview.orders.map((order) => ({
+        ...order,
+        display_name: orderLabel(order.display_name ?? order.id, requests),
+        name: orderLabel(order.name, requests),
+      })),
+    };
+  },
   processingEstimate: (product_id: string, quantity: number) =>
     api<ProcessingEstimate>('/sales/processing-estimate', { product_id, quantity }),
   demoStatus: () => api<DemoFallbackStatus>('/workflow/demo'),
