@@ -6,7 +6,8 @@ from contextvars import ContextVar
 from time import monotonic
 from typing import TypeVar
 
-from .contracts.common import QualityIssue, QualityReport, QualityRound
+from ..domain.errors import RuleViolation
+from .contracts.common import Notice, QualityIssue, QualityReport, QualityRound
 from .result_validation import AgentContractError
 
 T = TypeVar("T")
@@ -34,6 +35,44 @@ class QualityFailure(ValueError):
     def __init__(self, report: QualityReport):
         self.report = report
         super().__init__("Agent output did not pass quality checks")
+
+
+def failure_status(exc):
+    if (
+        isinstance(exc, QualityFailure)
+        and exc.report.issues
+        and all(
+            issue.code == "BUSINESS_RULE_VIOLATION" or issue.repairable
+            for issue in exc.report.issues
+        )
+    ):
+        return "blocked"
+    return "failed"
+
+
+def failure_notice(exc, role: str, code: str) -> Notice:
+    """Expose checked business/quality findings, never arbitrary exception bodies."""
+    labels = {
+        "validation": "数据校验",
+        "scheduling": "排产",
+        "evaluation": "方案评估",
+        "explanation": "结果解释",
+    }
+    details = ""
+    if isinstance(exc, QualityFailure):
+        details = "；".join(dict.fromkeys(issue.message for issue in exc.report.issues))
+    return Notice(
+        code=code,
+        message=f"本次{labels[role]}未交付可用结果。"
+        + (details or "工具执行发生系统异常，具体业务原因尚未确认。"),
+        repair_hint=(
+            "请根据上述具体原因处理后重新执行；后续依赖环节尚未完成。"
+            if failure_status(exc) == "blocked"
+            else "请联系维护人员根据本次执行记录排查；本次未获得可用结果，"
+            "无法据此判断生产条件是否满足。"
+        ),
+        evidence_refs=[],
+    )
 
 
 def checked_execute(
@@ -92,10 +131,14 @@ def checked_execute(
                 history=history,
             )
             raise
+        except RuleViolation as exc:
+            issue = QualityIssue(code="BUSINESS_RULE_VIOLATION", message=str(exc), repairable=False)
+            history.append(QualityRound(round=number, issues=[issue], repair=repair_name))
+            fail("业务条件不满足", [issue])
         except Exception:
             issue = QualityIssue(
                 code="QUALITY_TOOL_EXCEPTION",
-                message="工具执行异常，本次不自动重试。",
+                message="工具执行发生系统异常，具体业务原因尚未确认，本次不自动重试。",
                 repairable=False,
             )
             history.append(QualityRound(round=number, issues=[issue], repair=repair_name))

@@ -197,8 +197,43 @@
 }
 .decision-fields {
   display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.decision-fields > label {
+  min-width: 0;
+}
+.decision-fields select {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.decision-section fieldset {
+  display: grid;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+.decision-section fieldset label {
+  margin-bottom: 0;
+}
+.decision-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.decision-actions .decision-publish {
+  background: #173b50;
+  border-color: #173b50;
+  color: #fff;
+}
+.decision-actions .decision-publish:hover:not(:disabled) {
+  background: #23485f;
 }
 
 /* Agent stages belong to the single candidate-generation action. */

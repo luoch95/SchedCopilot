@@ -11,6 +11,7 @@ interface Props {
   onQuestion: (value: string) => void;
   onExplain: () => void;
   showSummary?: boolean;
+  readOnly?: boolean;
 }
 
 export function AnalysisPanel({
@@ -20,6 +21,7 @@ export function AnalysisPanel({
   onQuestion,
   onExplain,
   showSummary = true,
+  readOnly = false,
 }: Props) {
   const format = useBusinessText();
   const report = result.results.explanation;
@@ -32,7 +34,11 @@ export function AnalysisPanel({
           <p className="eyebrow">COPILOT ASSIST</p>
           <h2 id="section-analysis">辅助分析</h2>
         </div>
-        <span className="tag">本次结果解释 · 人工决定是否发布</span>
+        <span className="tag">
+          {result.results.evaluation?.data?.assessment
+            ? '本次评估结论 · 人工审批'
+            : '本次结果解释 · 人工决定是否发布'}
+        </span>
       </div>
       <p className="hint">
         {execution?.mode === 'live'
@@ -114,22 +120,24 @@ export function AnalysisPanel({
             : '暂无可用解释。可查看执行详情中的问题，或基于已有结果重新解释。'}
         </p>
       )}
-      <details className="explanation-question">
-        <summary>针对已有结果提问</summary>
-        <fieldset disabled={!!busy}>
-          <label>
-            解释问题
-            <textarea
-              value={question}
-              maxLength={2000}
-              onChange={(e) => onQuestion(e.target.value)}
-            />
-          </label>
-          <WriteButton disabled={!question.trim()} onClick={onExplain}>
-            重新解释
-          </WriteButton>
-        </fieldset>
-      </details>
+      {!readOnly && (
+        <details className="explanation-question">
+          <summary>针对已有结果提问</summary>
+          <fieldset disabled={!!busy}>
+            <label>
+              解释问题
+              <textarea
+                value={question}
+                maxLength={2000}
+                onChange={(e) => onQuestion(e.target.value)}
+              />
+            </label>
+            <WriteButton disabled={!question.trim()} onClick={onExplain}>
+              重新解释
+            </WriteButton>
+          </fieldset>
+        </details>
+      )}
     </section>
   );
 }

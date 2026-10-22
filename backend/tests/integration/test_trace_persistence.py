@@ -90,9 +90,7 @@ def test_new_trace_per_run_and_resource_change_prevents_restore(tmp_path):
 def test_legacy_trace_restores_its_persisted_analysis_time(tmp_path):
     path = tmp_path / "legacy-trace.sqlite3"
     with TestClient(create_app(settings=settings_for(path))) as client:
-        result = client.post(
-            "/api/workflow", json={**version(client), "intent": "validate"}
-        ).json()
+        result = client.post("/api/workflow", json={**version(client), "intent": "validate"}).json()
         payload = result["workflow"]
         payload.pop("created_at")
         recorded_at = "2026-10-19T06:30:00+00:00"

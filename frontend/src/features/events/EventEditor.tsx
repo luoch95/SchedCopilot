@@ -4,6 +4,20 @@ import type { EventDraft } from './model';
 import { WriteButton } from '../../shared/ui/WriteButton';
 import { useDemoAccess } from '../../shared/lib/demoAccess';
 
+function datePart(value: string) {
+  return value.slice(0, 10);
+}
+
+function timePart(value: string) {
+  return value.slice(11, 16);
+}
+
+function updateDateTime(value: string, part: 'date' | 'time', next: string) {
+  const date = part === 'date' ? next : datePart(value);
+  const time = part === 'time' ? next : timePart(value);
+  return `${date}T${time}`;
+}
+
 interface Props {
   state: Workbench;
   draft: EventDraft;
@@ -12,21 +26,9 @@ interface Props {
   draftInvalid: boolean;
   onEdit: (value: Partial<EventDraft>) => void;
   onSave: () => void;
-  onReload: () => void;
-  onRecover: () => void;
 }
 
-export function EventEditor({
-  state,
-  draft,
-  busy,
-  stale,
-  draftInvalid,
-  onEdit,
-  onSave,
-  onReload,
-  onRecover,
-}: Props) {
+export function EventEditor({ state, draft, busy, stale, draftInvalid, onEdit, onSave }: Props) {
   const { readOnly } = useDemoAccess();
   return (
     <div className="event-editor">
@@ -52,15 +54,30 @@ export function EventEditor({
               ))}
             </select>
           </label>
-          <label>
-            故障开始时间
-            <input
-              type="datetime-local"
-              disabled={readOnly}
-              value={draft.started_at}
-              onChange={(e) => onEdit({ started_at: e.target.value })}
-            />
-          </label>
+          <div className="event-datetime" role="group" aria-label="故障开始时间">
+            <label>
+              故障日期
+              <input
+                type="date"
+                disabled={readOnly}
+                value={datePart(draft.started_at)}
+                onChange={(e) =>
+                  onEdit({ started_at: updateDateTime(draft.started_at, 'date', e.target.value) })
+                }
+              />
+            </label>
+            <label>
+              开始时间
+              <input
+                type="time"
+                disabled={readOnly}
+                value={timePart(draft.started_at)}
+                onChange={(e) =>
+                  onEdit({ started_at: updateDateTime(draft.started_at, 'time', e.target.value) })
+                }
+              />
+            </label>
+          </div>
           <WriteButton
             className="text-button"
             onClick={() => onEdit({ started_at: localInput(state.snapshot_time) })}
@@ -77,15 +94,34 @@ export function EventEditor({
             恢复时间未知
           </label>
           {!draft.unknown && (
-            <label>
-              预计恢复时间
-              <input
-                type="datetime-local"
-                disabled={readOnly}
-                value={draft.recovered_at}
-                onChange={(e) => onEdit({ recovered_at: e.target.value })}
-              />
-            </label>
+            <div className="event-datetime" role="group" aria-label="预计恢复时间">
+              <label>
+                恢复日期
+                <input
+                  type="date"
+                  disabled={readOnly}
+                  value={datePart(draft.recovered_at)}
+                  onChange={(e) =>
+                    onEdit({
+                      recovered_at: updateDateTime(draft.recovered_at, 'date', e.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                恢复时间
+                <input
+                  type="time"
+                  disabled={readOnly}
+                  value={timePart(draft.recovered_at)}
+                  onChange={(e) =>
+                    onEdit({
+                      recovered_at: updateDateTime(draft.recovered_at, 'time', e.target.value),
+                    })
+                  }
+                />
+              </label>
+            </div>
           )}
           {draft.unknown && (
             <p className="hint">暂时只展示潜在风险；补充恢复时间后才能生成正式候选。</p>
@@ -110,12 +146,6 @@ export function EventEditor({
             onClick={onSave}
           >
             保存故障事件
-          </WriteButton>
-          <button className="full-width" onClick={onReload}>
-            重新载入已保存事件
-          </button>
-          <WriteButton className="full-width" disabled={stale} onClick={onRecover}>
-            恢复上次可试算事件
           </WriteButton>
         </fieldset>
       </div>

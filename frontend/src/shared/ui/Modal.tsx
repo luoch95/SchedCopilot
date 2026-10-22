@@ -9,6 +9,7 @@ export function Modal({
   drawer = false,
   drawerWidth,
   busy = false,
+  scrollPosition,
 }: {
   title: string;
   children: ReactNode;
@@ -17,8 +18,10 @@ export function Modal({
   drawer?: boolean;
   drawerWidth?: string;
   busy?: boolean;
+  scrollPosition?: { current: number };
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -28,12 +31,15 @@ export function Modal({
     const overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     dialog.showModal();
+    const body = bodyRef.current!;
+    if (scrollPosition) body.scrollTop = scrollPosition.current;
     return () => {
+      if (scrollPosition) scrollPosition.current = body.scrollTop;
       dialog.close();
       document.body.style.overflow = overflow;
       previous?.focus();
     };
-  }, []);
+  }, [scrollPosition]);
   return (
     <dialog
       ref={ref}
@@ -53,7 +59,9 @@ export function Modal({
           {fullScreen ? '返回工作台' : '关闭'}
         </button>
       </header>
-      <div className="console-modal-body">{children}</div>
+      <div ref={bodyRef} className="console-modal-body">
+        {children}
+      </div>
     </dialog>
   );
 }

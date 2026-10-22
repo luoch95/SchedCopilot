@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 from test_api import token
+from test_fault_reviews import approve_fault
 
 from sched_copilot.api import create_app
 
@@ -63,6 +64,7 @@ def test_full_workflow_is_publishable_and_auditable(client):
         assert result.json()["simulation"] is None
     simulation = data["simulation"]
     candidate = simulation["candidates"][1]
+    approve_fault(client, simulation["id"], candidate["id"])
     published = client.post(
         "/api/decisions",
         json={
@@ -84,6 +86,61 @@ def test_full_workflow_is_publishable_and_auditable(client):
     assert stale.status_code == 409
 
 
+def test_published_fault_preserves_analysis_and_original_impact_after_reload(client):
+    import json
+
+    before = client.get("/api/workbench").json()
+    data = client.post(
+        "/api/workflow", json={**token(before), "intent": "generate_candidates"}
+    ).json()
+    candidate = data["simulation"]["candidates"][1]
+    approve_fault(client, data["simulation"]["id"], candidate["id"])
+    response = client.post(
+        "/api/decisions",
+        json={
+            "simulation_id": data["simulation"]["id"],
+            "candidate_id": candidate["id"],
+            "action": "publish",
+            "reason": "确认调整",
+            "request_id": "fault-provenance",
+        },
+    )
+    assert response.status_code == 200, response.text
+    state = response.json()["workbench"]
+    assert state["affected"] == []
+    publication = state["plan_publication"]
+    assert publication["version"] == state["baseline"]["version"]
+    analysis = publication["fault_analysis"]
+    assert analysis["event_revision"] == state["event_revision"]
+    assert analysis["affected"] == before["affected"]
+    assert analysis["workflow"]["trace_id"] == data["workflow"]["trace_id"]
+    assert len(analysis["workflow"]["trace"]) == 4
+    assert client.get("/api/workbench").json()["plan_publication"] == publication
+    # Existing V4 decisions must work without a database migration/reset.
+    repository = client.app.state.workbench.repository
+    with repository._connect() as conn:
+        raw = conn.execute(
+            "SELECT evidence FROM decisions WHERE request_id='fault-provenance'"
+        ).fetchone()[0]
+        evidence = json.loads(raw)
+        evidence.pop("affected")
+        conn.execute(
+            "UPDATE decisions SET evidence=? WHERE request_id='fault-provenance'",
+            (json.dumps(evidence),),
+        )
+    assert client.get("/api/workbench").json()["plan_publication"] == publication
+    updated = client.put(
+        "/api/event",
+        json={
+            **token(state),
+            **{k: state["event"][k] for k in ("machine_id", "started_at", "recovered_at")},
+            "source": "new fault revision",
+        },
+    ).json()
+    assert updated["event_revision"] != analysis["event_revision"]
+    assert client.get(f"/api/events/{analysis['event_revision']}/analysis").json() == analysis
+
+
 def test_unknown_recovery_explains_block_and_creates_no_candidates(client):
     before = client.get("/api/workbench").json()
     unknown = client.put(
@@ -102,6 +159,52 @@ def test_unknown_recovery_explains_block_and_creates_no_candidates(client):
     assert data["workflow"]["results"]["explanation"]["data"]
     assert data["simulation"] is None
     assert not client.get("/api/workbench").json()["history"]
+
+
+def test_historical_analysis_survives_new_fault_and_restart_without_publication(client):
+    before = client.get("/api/workbench").json()
+    data = client.post(
+        "/api/workflow", json={**token(before), "intent": "generate_candidates"}
+    ).json()
+    assert data["workflow"]["status"] == "completed"
+    updated = client.put(
+        "/api/event",
+        json={
+            **token(before),
+            "machine_id": "M2",
+            "started_at": before["event"]["started_at"],
+            "recovered_at": before["event"]["recovered_at"],
+            "source": "new fault",
+        },
+    ).json()
+    path = f"/api/events/{before['event_revision']}/analysis"
+    response = client.get(path)
+    assert response.status_code == 200, response.text
+    archive = response.json()
+    assert archive["event_revision"] == before["event_revision"]
+    assert archive["baseline"] == before["baseline"]
+    assert archive["affected"] == before["affected"]
+    assert archive["workflow"]["trace_id"] == data["workflow"]["trace_id"]
+    assert len(archive["workflow"]["trace"]) == 4
+    assert archive["workflow"]["results"] == data["workflow"]["results"]
+    saved = archive["simulation"]
+    assert saved["id"] == data["simulation"]["id"]
+    assert saved["baseline_fingerprint"] == before["baseline"]["fingerprint"]
+    for original, restored in zip(
+        data["simulation"]["candidates"], saved["candidates"], strict=True
+    ):
+        # The validation snapshot stores order IDs rather than product display names.
+        assert {k: v for k, v in restored.items() if k != "order_impacts"} == {
+            k: v for k, v in original.items() if k != "order_impacts"
+        }
+        assert [
+            {k: v for k, v in item.items() if k != "名称"} for item in restored["order_impacts"]
+        ] == [{k: v for k, v in item.items() if k != "名称"} for item in original["order_impacts"]]
+    assert client.get(f"/api/events/{updated['event_revision']}/analysis").json() is None
+    assert client.get("/api/events/99999/analysis").json() is None
+    assert client.get("/api/workbench").json() == updated
+    with TestClient(create_app(client.app.state.workbench.repository.path)) as restarted:
+        assert restarted.get(path).json() == archive
 
 
 def test_validate_only_and_session_requirements(client):

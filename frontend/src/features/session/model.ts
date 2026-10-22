@@ -13,6 +13,9 @@ type PlannerRoute = {
   view: 'dashboard' | 'fault';
   eventOpen: boolean;
   request: RequestLink | null;
+  analysisOpen?: boolean;
+  fromAnalysis?: boolean;
+  approvalOpen?: boolean;
 };
 const plannerHome: PlannerRoute = { view: 'dashboard', eventOpen: false, request: null };
 
@@ -23,6 +26,8 @@ function roleUrl(role: DemoRole | null) {
 function plannerUrl(route: PlannerRoute) {
   const page = route.view === 'fault' ? '#/planner/fault-decision' : '#/planner';
   if (route.request) return `${page}/requests/${encodeURIComponent(route.request.request_no)}`;
+  if (route.approvalOpen) return `${page}/approval-result`;
+  if (route.analysisOpen) return `${page}/assessment-details`;
   return route.eventOpen ? `${page}/equipment-fault` : page;
 }
 
@@ -63,10 +68,17 @@ export function usePlannerNavigation() {
 
   return {
     ...route,
-    openFault: () => push({ ...plannerHome, view: 'fault' }),
+    analysisOpen: route.analysisOpen ?? false,
+    openAnalysis: () => push({ ...route, analysisOpen: true }),
+    openFault: () => push({ ...plannerHome, view: 'fault', fromAnalysis: !!route.analysisOpen }),
+    openApproval: () => push({ ...plannerHome, view: 'fault', approvalOpen: true }),
     openEvent: () => push({ ...route, eventOpen: true }),
     openRequest,
     back: () => window.history.back(),
+    home: () => {
+      const { depth } = plannerEntry();
+      if (depth > 0) window.history.go(-depth);
+    },
   };
 }
 

@@ -14,10 +14,12 @@ from ..agents.contracts.results import (
     EvaluationData,
     EvaluationTradeoff,
     SchedulingData,
+    SchedulingResult,
 )
 from ..domain.evaluation import compare_plans
 from ..domain.models import MachineFailure
 from ..domain.production_conditions import production_condition_labels
+from .assessment import assess_business_result
 from .case_mapping import to_validation_case
 from .scheduling import SchedulingToolOutput, verify_tool_output
 from .scheduling_context import prepare_scheduling
@@ -48,6 +50,13 @@ class EvaluationSource:
 
 
 @dataclass(frozen=True)
+class AssessmentSource:
+    request: EvaluationInput
+    result: SchedulingResult
+    result_ref: str
+
+
+@dataclass(frozen=True)
 class EvaluationToolOutput:
     data: EvaluationData
     evidence_catalog: dict[str, Evidence]
@@ -55,9 +64,19 @@ class EvaluationToolOutput:
     warnings: tuple[Notice, ...]
 
 
-def prepare_evaluation(request: EvaluationInput) -> EvaluationSource:
+def prepare_evaluation(request: EvaluationInput) -> EvaluationSource | AssessmentSource:
     """必须能解析批次和候选来源，不能把任意计划冒充有效候选。"""
     refs = [request.current_plan_ref]
+    if request.analysis_result_ref:
+        ref = request.analysis_result_ref
+        evidence = request.evidence_catalog[ref]
+        if evidence.kind != "scheduling_result" or request.candidate_refs:
+            raise ValueError("Invalid assessment source")
+        result = SchedulingResult.model_validate(evidence.content)
+        if result.context != request.context:
+            raise ValueError("Stale assessment source")
+        assess_business_result(result, ref)
+        return AssessmentSource(request, result, ref)
     if not request.candidate_refs:
         raise EvaluationBlocked("CANDIDATES_REQUIRED", "没有待评价候选。", refs)
     if request.evaluation_criteria_ref is not None:
@@ -155,8 +174,28 @@ def prepare_evaluation(request: EvaluationInput) -> EvaluationSource:
     return EvaluationSource(request, case, batch, manifest_ref)
 
 
-def evaluate_candidates(source: EvaluationSource) -> EvaluationToolOutput:
+def evaluate_candidates(source: EvaluationSource | AssessmentSource) -> EvaluationToolOutput:
     """重新计算指标，不信任请求中可能携带的旧 evaluation_tool_result。"""
+    if isinstance(source, AssessmentSource):
+        request = source.request
+        data = EvaluationData(
+            candidate_batch_id=request.candidate_batch_id,
+            criteria_ref=request.evaluation_criteria_ref,
+            evaluations=[],
+            tradeoffs=[],
+            assessment=assess_business_result(source.result, source.result_ref),
+        )
+        ref = "evaluation:assessment:" + hashlib.sha256(data.model_dump_json().encode()).hexdigest()
+        evidence = Evidence(
+            context=request.context, kind="evaluation_report", content=data.model_dump(mode="json")
+        )
+        warning = Notice(
+            code="NO_FEASIBLE_CANDIDATE",
+            message=data.assessment.summary,
+            repair_hint="请审核具体受限条件与处理建议，审批本次评估结论。",
+            evidence_refs=[source.result_ref],
+        )
+        return EvaluationToolOutput(data, {ref: evidence}, (ref,), (warning,))
     request, case = source.request, source.case
     baseline = to_validation_case(case)
     payload = {
@@ -342,7 +381,9 @@ def evaluate_candidates(source: EvaluationSource) -> EvaluationToolOutput:
     return EvaluationToolOutput(data, catalog, (rules_ref, report_ref), tuple(warnings))
 
 
-def verify_evaluation_output(source: EvaluationSource, output: EvaluationToolOutput) -> None:
+def verify_evaluation_output(
+    source: EvaluationSource | AssessmentSource, output: EvaluationToolOutput
+) -> None:
     """独立重算并比对指标、差异、风险及证据，拒绝工具伪造数字。"""
     if output != evaluate_candidates(source):
         raise ValueError("评估工具结果与确定性指标不一致")

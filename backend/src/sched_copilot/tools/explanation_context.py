@@ -136,7 +136,7 @@ def prepare_explanation(request: ExplanationInput) -> ExplanationSource:
                 manifest_refs.update(
                     ref for ref in item.evidence_refs if catalog[ref].kind == "candidate_batch"
                 )
-        if batch or (evaluation and evaluation.data):
+        if batch or (evaluation and evaluation.data and not evaluation.data.assessment):
             if len(manifest_refs) != 1:
                 raise ValueError("缺少唯一候选批次证据")
             manifest = SchedulingData.model_validate(catalog[next(iter(manifest_refs))].content)
@@ -216,7 +216,7 @@ def prepare_explanation(request: ExplanationInput) -> ExplanationSource:
             and (batch or (evaluation and evaluation.data))
         ):
             raise ValueError("阻断校验与可用候选同时存在")
-        if evaluation and evaluation.data:
+        if evaluation and evaluation.data and not evaluation.data.assessment:
             data = evaluation.data
             ids = [e.candidate_id for e in data.evaluations]
             if (

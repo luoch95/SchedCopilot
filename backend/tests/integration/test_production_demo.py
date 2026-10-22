@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from test_fault_reviews import approve_fault
 
 from sched_copilot.api import create_app
 from sched_copilot.scenarios.production_demo import demo_production_inputs
@@ -54,6 +55,7 @@ def test_seeded_workflow_calculates_setup_and_utilization(seeded):
                 (load["processing_minutes"] + load["setup_minutes"]) / load["available_minutes"]
             )
     simulated = result["simulation"]
+    approve_fault(seeded, simulated["id"], simulated["candidates"][1]["id"])
     published = seeded.post(
         "/api/decisions",
         json={

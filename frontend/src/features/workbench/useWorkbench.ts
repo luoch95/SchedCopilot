@@ -101,7 +101,11 @@ export function useWorkbench() {
               if (!active || inFlight.current || epoch !== recoveryEpoch.current || !saved) return;
               setWorkflow(saved.workflow);
               setSimulation(saved.simulation);
-              setSelected(saved.simulation?.candidates[0]?.id ?? '');
+              setSelected(
+                value.fault_review && value.fault_review.simulation_id === saved.simulation?.id
+                  ? value.fault_review.candidate_id
+                  : (saved.simulation?.candidates[0]?.id ?? ''),
+              );
             })
             .catch(() => {
               if (active && epoch === recoveryEpoch.current)
@@ -152,9 +156,11 @@ export function useWorkbench() {
   const dirty = !!state && !!draft && draftFingerprint(draft) !== draftFingerprint(draftFor(state));
   const draftInvalid =
     !draft ||
-    !draft.started_at ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(draft.started_at) ||
     !draft.source.trim() ||
-    (!draft.unknown && (!draft.recovered_at || draft.recovered_at <= draft.started_at));
+    (!draft.unknown &&
+      (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(draft.recovered_at) ||
+        draft.recovered_at <= draft.started_at));
   const blocked = !state || dirty || stale || !!state.issues.length || !state.event.recovered_at;
   const currentSimulation =
     simulation &&
@@ -176,7 +182,18 @@ export function useWorkbench() {
 
   const reload = () =>
     run('重新载入', async () => {
-      accept(await workbenchApi.load());
+      const value = await workbenchApi.load();
+      accept(value);
+      const saved = await workbenchApi.latestWorkflow();
+      if (saved) {
+        setWorkflow(saved.workflow);
+        setSimulation(saved.simulation);
+        setSelected(
+          value.fault_review && value.fault_review.simulation_id === saved.simulation?.id
+            ? value.fault_review.candidate_id
+            : (saved.simulation?.candidates[0]?.id ?? ''),
+        );
+      }
       setNotice('已载入后台最新记录，未保存输入已清除。');
     });
 
@@ -326,6 +343,38 @@ export function useWorkbench() {
   const generate = () => runWorkflow('generate_candidates');
   const cancelWorkflow = () => workflowAbort.current?.abort();
 
+  const submitReview = () =>
+    run('提交管理者审批', async () => {
+      if (workflow?.status === 'completed' && workflow.results.evaluation?.data?.assessment) {
+        if (blocked || !reason.trim()) return;
+        const key = JSON.stringify(['assessment', workflow.id, reason.trim()]);
+        if (decisionRequest.current.key !== key)
+          decisionRequest.current = { key, id: crypto.randomUUID() };
+        setState(
+          await workbenchApi.submitAssessmentReview(
+            workflow.id,
+            reason.trim(),
+            decisionRequest.current.id,
+          ),
+        );
+        setNotice('评估结论已提交管理者审批；审批通过后不产生排产变更。');
+        return;
+      }
+      if (!currentSimulation || !candidate || blocked || !reason.trim()) return;
+      const key = JSON.stringify(['review', currentSimulation.id, selected, reason.trim()]);
+      if (decisionRequest.current.key !== key)
+        decisionRequest.current = { key, id: crypto.randomUUID() };
+      setState(
+        await workbenchApi.submitFaultReview(
+          currentSimulation.id,
+          selected,
+          reason.trim(),
+          decisionRequest.current.id,
+        ),
+      );
+      setNotice('已提交管理者审批，审批通过后可发布；修改方案需重新审批。');
+    });
+
   const decide = () =>
     run('提交人工决定', async () => {
       if (!currentSimulation || !candidate || blocked || !reason.trim()) return;
@@ -390,6 +439,7 @@ export function useWorkbench() {
     toggleDemo,
     cancelWorkflow,
     decide,
+    submitReview,
     setSelected,
     setReason,
     setAction,

@@ -10,7 +10,14 @@ from ..tools.validation import ValidationToolOutput, validate_data
 from .contracts.common import AgentContext, Notice
 from .contracts.inputs import SchedulingCase, ValidationInput
 from .contracts.results import ValidationResult
-from .quality import QualityFailure, checked_execute, finish_quality, verify_evidence
+from .quality import (
+    QualityFailure,
+    checked_execute,
+    failure_notice,
+    failure_status,
+    finish_quality,
+    verify_evidence,
+)
 from .result_validation import AgentContractError, validate_request, validate_result
 
 logger = logging.getLogger(__name__)
@@ -149,18 +156,11 @@ class ValidationAgent:
                 prompt_version=prompt.role_metadata.prompt_version,
                 requirements_version=prompt.role_metadata.requirements_version,
                 context=checked.context,
-                status="failed",
+                status=failure_status(exc),
                 data=None,
                 evidence_refs=[],
                 warnings=[],
-                errors=[
-                    Notice(
-                        code="VALIDATION_TOOL_FAILED",
-                        message="数据校验工具执行失败或结果无效。",
-                        repair_hint="检查工具运行记录并重试，当前结果不能用于生成候选。",
-                        evidence_refs=[],
-                    )
-                ],
+                errors=[failure_notice(exc, "validation", "VALIDATION_TOOL_FAILED")],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         result = finish_quality(result, quality)

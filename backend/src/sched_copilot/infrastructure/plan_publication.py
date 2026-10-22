@@ -54,3 +54,55 @@ def request_numbers(connection):
 
 def raw_version(payload):
     return json.loads(payload)["version"]
+
+
+def plan_timeline(connection, version):
+    rows = connection.execute(
+        "SELECT created_at,result,evidence,reason FROM decisions WHERE action='publish' ORDER BY id"
+    ).fetchall()
+    entries = {}
+    previous = None
+    numbers = request_numbers(connection)
+    for created_at, payload, raw, reason in rows:
+        schedule = json.loads(payload)
+        evidence = json.loads(raw)
+        current = schedule["version"]
+        details = [reason] if reason else []
+        if previous and previous["version"] == current - 1:
+            old = {op["id"]: op for op in previous["operations"]}
+            for op in schedule["operations"]:
+                before = old.get(op["id"])
+                order = numbers.get(op["order_id"], op["order_id"])
+                name = f"{order}-OP{op['sequence']}"
+                if before is None:
+                    details.append(f"新增工序 {name}，安排至 {op['machine_id']}。")
+                elif any(
+                    before.get(key) != op.get(key)
+                    for key in ("machine_id", "start", "duration_minutes")
+                ):
+                    details.append(
+                        f"{name}：{before['machine_id']} / {before['start']} → "
+                        f"{op['machine_id']} / {op['start']}，"
+                        f"加工时长 {op['duration_minutes']} 分钟。"
+                    )
+            removed = set(old) - {op["id"] for op in schedule["operations"]}
+            if removed:
+                details.append(f"移除 {len(removed)} 道工序。")
+        entries[current] = {
+            **publication_info(current, created_at, evidence),
+            "details": details or [evidence.get("version_summary", "未记录详细变更说明")],
+        }
+        previous = schedule
+    return [
+        entries.get(
+            number,
+            {
+                "version": number,
+                "published_at": None,
+                "published_by": None,
+                "version_summary": "初始演示计划" if number == 1 else "历史版本，未记录发布信息",
+                "details": ["此版本未保留详细变更记录。"],
+            },
+        )
+        for number in range(version, 0, -1)
+    ]

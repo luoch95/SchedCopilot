@@ -263,7 +263,7 @@ it('opens with only the actionable request list and formal plan, and keeps fault
     '状态',
   ]);
   expect(screen.queryByLabelText('故障设备')).toBeNull();
-  expect(screen.getByRole('button', { name: '分析影响并生成候选方案' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '开始 AI 分析并生成方案' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '故障影响与方案决策' })).toBeNull();
   expect(screen.getAllByRole('img', { name: '设备工序甘特图' })).toHaveLength(1);
   expect(screen.getByText('分析窗口：10/19 13:00 — 10/19 17:00')).toBeTruthy();
@@ -311,9 +311,8 @@ it('shows the saved analysis time and Trace for the same fault revision as the c
   await screen.findByRole('button', { name: '查看 AI 分析详情' });
   const fault = screen.getByRole('region', { name: '已登记设备故障' });
   expect(within(fault).queryByText('TRC-SAVED-FAULT')).toBeNull();
-  expect(
-    within(fault).getByText(/当前步骤：AI评估方案已成，待排产员发布/),
-  ).toBeTruthy();
+  expect(within(fault).getByLabelText('AI 分析方案：已完成')).toBeTruthy();
+  expect(within(fault).getByLabelText('管理者审批：待提交')).toBeTruthy();
   expect(
     screen.getByRole('heading', { name: '排产计划工作台' }).closest('header')?.textContent,
   ).not.toContain('当前步骤');
@@ -330,9 +329,10 @@ it('shows the saved analysis time and Trace for the same fault revision as the c
   for (const stage of ['数据校验', '排产执行', '方案评估', '结果解释']) {
     expect(within(dialog).getByText(stage)).toBeTruthy();
   }
-  expect(location.hash).toBe(hash);
+  expect(location.hash).toBe('#/planner/assessment-details');
   fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
-  expect(screen.queryByRole('dialog')).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(location.hash).toBe(hash);
   expect(screen.queryByRole('heading', { name: '本次智能分析链路' })).toBeNull();
 });
 
@@ -465,7 +465,7 @@ it('saves fault edits in the dialog, closes it on success and refreshes the faul
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(screen.getByRole('button', { name: '查看执行计划 V1 发布信息' })).toBeTruthy();
   expect(screen.getByText(/已保存故障 M2/)).toBeTruthy();
-  expect(screen.getByRole('img').querySelector('rect[fill="#F6DAD5"]')).toBeTruthy();
+  expect(within(screen.getByRole('img')).getByRole('group', { name: 'M2 停机留痕' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
   expect(location.hash).toBe('#/planner');
   const banner = screen.getByRole('region', { name: '已登记设备故障' });
@@ -585,7 +585,7 @@ async function analyzeFault() {
     fireEvent.change(screen.getByLabelText('演示密码'), { target: { value: 'admin123' } });
     fireEvent.click(screen.getAllByRole('button', { name: '解锁' }).at(-1)!);
   }
-  fireEvent.click(screen.getByRole('button', { name: '分析影响并生成候选方案' }));
+  fireEvent.click(screen.getByRole('button', { name: '开始 AI 分析并生成方案' }));
   await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
   await waitFor(() => expect(screen.queryByText('正在生成方案…')).toBeNull());
 }
@@ -601,7 +601,7 @@ it('starts one workflow only on explicit analysis and presents the returned cand
       : originalFetch(url, options),
   );
   render(<WorkbenchPage />);
-  const analyze = await screen.findByRole('button', { name: '分析影响并生成候选方案' });
+  const analyze = await screen.findByRole('button', { name: '开始 AI 分析并生成方案' });
   expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/workflow')).toBe(false);
   fireEvent.click(analyze);
   fireEvent.click(analyze);
@@ -667,7 +667,7 @@ it('blocks analysis of saved events with unknown recovery time', async () => {
       : originalFetch(url, options),
   );
   render(<WorkbenchPage />);
-  const analyze = await screen.findByRole('button', { name: '分析影响并生成候选方案' });
+  const analyze = await screen.findByRole('button', { name: '开始 AI 分析并生成方案' });
   expect((analyze as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText('请补充预计恢复时间并保存后再分析。')).toBeTruthy();
   fireEvent.click(analyze);
@@ -689,14 +689,15 @@ it.each([1000, 5000])(
       });
     });
     render(<WorkbenchPage />);
-    const analyze = await screen.findByRole('button', { name: '分析影响并生成候选方案' });
+    const analyze = await screen.findByRole('button', { name: '开始 AI 分析并生成方案' });
     vi.useFakeTimers();
     fireEvent.click(analyze);
     const back = screen.getByRole('button', { name: '← 返回工作台总览' }) as HTMLButtonElement;
     expect(back.disabled).toBe(false);
     expect(back.classList.contains('primary')).toBe(true);
     expect(
-      (screen.getByRole('button', { name: /生成候选方案 · 生成中/ }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'AI 正在分析并生成候选方案' }) as HTMLButtonElement)
+        .disabled,
     ).toBe(true);
     fireEvent.click(back);
     await act(() => vi.advanceTimersByTimeAsync(20));
@@ -732,7 +733,7 @@ it.each([1000, 5000])(
     fireEvent.click(screen.getByRole('button', { name: '查看 AI 分析详情' }));
     expect(screen.getByRole('dialog', { name: 'M1故障 R1 · 智能分析明细' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '本次智能分析链路' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '查看方案对比与发布' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看结果与提交审批' }));
     expect(screen.getByRole('heading', { name: '2　方案对比' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '本次智能分析链路' })).toBeTruthy();
     expect(screen.getAllByRole('img')).toHaveLength(2);
@@ -749,7 +750,7 @@ it.each([1000, 5000])(
     await act(() => vi.advanceTimersByTimeAsync(20));
     expect(screen.queryByRole('button', { name: '查看 AI 分析详情' })).toBeNull();
     expect(
-      (screen.getByRole('button', { name: '分析影响并生成候选方案' }) as HTMLButtonElement)
+      (screen.getByRole('button', { name: '开始 AI 分析并生成方案' }) as HTMLButtonElement)
         .disabled,
     ).toBe(false);
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(1);
@@ -769,7 +770,7 @@ it.each(['failed', 'blocked'])(
         : originalFetch(url, options),
     );
     render(<WorkbenchPage />);
-    const analyze = await screen.findByRole('button', { name: '分析影响并生成候选方案' });
+    const analyze = await screen.findByRole('button', { name: '开始 AI 分析并生成方案' });
     vi.useFakeTimers();
     fireEvent.click(analyze);
     fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
@@ -786,7 +787,15 @@ it.each(['failed', 'blocked'])(
     );
     await act(() => vi.advanceTimersByTimeAsync(4000));
     expect(screen.queryByRole('button', { name: '查看 AI 分析详情' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '分析影响并生成候选方案' }));
+    if (status === 'blocked') {
+      fireEvent.click(screen.getByRole('button', { name: '查看AI评估详情' }));
+      expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(
+        1,
+      );
+      fireEvent.click(screen.getByRole('button', { name: '重新生成评估' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: '开始 AI 分析并生成方案' }));
+    }
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(2);
     await act(async () =>
       finish(
@@ -804,6 +813,9 @@ it.each(['failed', 'blocked'])(
         ),
       ),
     );
+    if (status === 'blocked') {
+      fireEvent.click(screen.getByRole('button', { name: '查看结果与提交审批' }));
+    }
     expect(screen.getByRole('heading', { name: '2　方案对比' })).toBeTruthy();
   },
 );

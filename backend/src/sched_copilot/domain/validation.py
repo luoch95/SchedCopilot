@@ -124,7 +124,7 @@ def validate_case(case: ValidationCase) -> CaseValidation:
             "recovery_time",
             "duplicate_events",
             "wip_policy",
-            "supported_event_count",
+            "independent_failure_windows",
         ),
         tuple(unchecked),
     )
@@ -336,11 +336,3 @@ def _check_events(case: ValidationCase, add) -> None:
                         ref,
                         op_ref,
                     )
-
-    if len(case.failures) > 1:
-        add(
-            "MULTIPLE_FAILURES_UNSUPPORTED",
-            "当前输入包含多个故障事件。",
-            "现有候选工具仅支持单故障，不能声称已联合处理。",
-            "先选择一个独立案例；联合故障需后续扩展工具。",
-        )

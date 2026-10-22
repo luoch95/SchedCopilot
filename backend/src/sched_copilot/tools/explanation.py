@@ -131,6 +131,18 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
                     )
                 )
     evaluation = source.evaluation
+    if evaluation and evaluation.data and evaluation.data.assessment:
+        assessment = evaluation.data.assessment
+        facts.extend(assessment.findings)
+        limitations.extend(assessment.limitations)
+        steps.extend(
+            NextStep(
+                action=text,
+                requires_human_confirmation=True,
+                evidence_refs=[request.evaluation_result_ref],
+            )
+            for text in assessment.recommendations
+        )
     if evaluation and evaluation.data:
         for item in evaluation.data.evaluations:
             risks.extend(s.model_copy(deep=True) for s in item.risks)
@@ -249,7 +261,9 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
         re.IGNORECASE,
     ):
         limitations.append("当前仅支持结构化业务解释，未完整回答该自由文本问题。")
-    if validation and validation.status == "blocked":
+    if evaluation and evaluation.data and evaluation.data.assessment:
+        summary = evaluation.data.assessment.summary
+    elif validation and validation.status == "blocked":
         summary = "当前数据存在阻断项，需修复后重新校验；本次说明不生成候选。"
     elif order_ids:
         summary = "所询订单或工序的已有变化和交付证据如下；不推测证据之外的原因。"

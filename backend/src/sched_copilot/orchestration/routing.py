@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 
+from ..agents.contracts.assessment import is_business_conclusion
 from .state import WorkflowState
 
 
@@ -37,6 +38,8 @@ def route(state: WorkflowState) -> Action:
         if result is None:
             return action
         if result.status in {"blocked", "failed"}:
+            if action is Action.SCHEDULE and is_business_conclusion(result):
+                continue
             if action is Action.VALIDATE and state.explanation_input:
                 return Action.END if state.explanation_result is not None else Action.EXPLAIN
             return Action.END

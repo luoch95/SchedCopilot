@@ -28,7 +28,7 @@ def build_workbench(settings: Settings) -> WorkbenchService:
         demo_orders(),
         EVENT_TIME,
         MachineFailure(
-            "M1", EVENT_TIME, EVENT_TIME + timedelta(hours=4), "计划员手动录入", EVENT_TIME
+            "M1", EVENT_TIME, EVENT_TIME + timedelta(hours=4), "系统初始化示例", EVENT_TIME
         ),
         run_analysis,
         WorkflowEngine(
@@ -36,6 +36,7 @@ def build_workbench(settings: Settings) -> WorkbenchService:
             session_store=store,
             orchestrator=build_orchestrator(settings),
             demo_gate=FallbackDemoGate(settings.database_path),
+            failure_provider=store.failure_windows,
         ),
     )
     service.initialize()

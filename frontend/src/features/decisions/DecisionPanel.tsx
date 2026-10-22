@@ -14,6 +14,7 @@ interface Props {
   onReason: (value: string) => void;
   onAction: (value: string) => void;
   onDecide: () => void;
+  onSubmitReview: () => void;
 }
 export function DecisionPanel({
   state,
@@ -28,8 +29,14 @@ export function DecisionPanel({
   onReason,
   onAction,
   onDecide,
+  onSubmitReview,
 }: Props) {
   const { readOnly } = useDemoAccess();
+  const review = state.fault_review;
+  const matches =
+    review?.simulation_id === currentSimulation.id && review?.candidate_id === selected;
+  const approved = matches && review?.status === 'approved';
+  const pending = matches && review?.status === 'pending';
   return (
     <section id="fault-confirm" tabIndex={-1} className="section decision-section">
       <div className="section-heading">
@@ -58,7 +65,7 @@ export function DecisionPanel({
             处理方式
             <select disabled={readOnly} value={action} onChange={(e) => onAction(e.target.value)}>
               <option value="reject">暂不发布</option>
-              <option value="publish">确认发布</option>
+              <option value="publish">{approved ? '正式发布' : '提交管理者审批'}</option>
             </select>
           </label>
         </div>
@@ -75,22 +82,57 @@ export function DecisionPanel({
         {action === 'publish' && candidate?.metrics.moved_operations === 0 && (
           <p className="hint">该方案与当前计划相同，无需重复发布。</p>
         )}
-        <div className="inline-actions">
+        <div className="decision-feedback">
           <p className="hint">
             {action === 'publish'
-              ? `将发布“${candidate?.label}”，执行计划更新为 V${state.baseline.version + 1}。`
+              ? approved
+                ? `管理者已批准“${candidate?.label}”，可发布为 V${state.baseline.version + 1}。`
+                : pending
+                  ? '方案已提交，等待管理者审批。修改方案后需重新提交。'
+                  : '方案需经管理者审批，批准后才能发布。'
               : '只记录人工决定，执行计划保持不变。'}
           </p>
+        </div>
+        {review && (
+          <p className="hint">
+            管理者审批（{review.candidate_label}）：
+            {review.status === 'approved'
+              ? '已批准'
+              : review.status === 'pending'
+                ? '待审批'
+                : review.status === 'rejected'
+                  ? '已退回'
+                  : '已更新'}
+            {!matches && ' · 当前选择已变更，需重新审批'}
+            {review.review_reason && ` · ${review.review_reason}`}
+          </p>
+        )}
+        <div className="decision-actions">
           <WriteButton
-            className="primary"
+            disabled={!reason.trim() || blocked || action !== 'reject'}
+            onClick={onDecide}
+          >
+            记录暂不发布
+          </WriteButton>
+          <WriteButton
+            className="primary decision-publish"
             disabled={
               !reason.trim() ||
               blocked ||
-              (action === 'publish' && candidate?.metrics.moved_operations === 0)
+              pending ||
+              action !== 'publish' ||
+              !candidate ||
+              candidate.metrics.moved_operations === 0
             }
-            onClick={onDecide}
+            onClick={approved ? onDecide : onSubmitReview}
           >
-            {action === 'publish' ? '确认并发布所选方案' : '记录暂不发布'}
+            {approved
+              ? '确认发布执行计划'
+              : pending
+                ? '等待管理者审批'
+                : review
+                  ? '修改后重新提交审批'
+                  : '提交管理者审批'}
           </WriteButton>
         </div>
       </fieldset>

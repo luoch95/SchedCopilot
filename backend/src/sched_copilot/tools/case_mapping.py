@@ -1,7 +1,7 @@
 """在通信快照与领域模型之间转换，不修改源数据。"""
 
 from ..agents.contracts.inputs import SchedulingCase
-from ..domain.models import Machine, Operation, Order, Schedule, TaskStatus
+from ..domain.models import Machine, MachineFailure, Operation, Order, Schedule, TaskStatus
 from ..domain.production import ProductionResources
 from ..domain.validation import FailureRecord, MoldCompatibility, ValidationCase
 
@@ -64,4 +64,10 @@ def production_resources(case: SchedulingCase) -> ProductionResources | None:
         operation_molds={o.operation_id: o.mold_id for o in case.operations if o.mold_id},
         initial_molds=dict(data.initial_molds),
         changeover_minutes=data.changeover_minutes,
+        failures=tuple(
+            MachineFailure(
+                f.machine_id, f.started_at, f.estimated_recovery_at, f.source, f.received_at
+            )
+            for f in case.failures
+        ),
     )

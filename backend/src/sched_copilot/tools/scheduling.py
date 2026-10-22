@@ -50,6 +50,16 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
         "同一开工时间优先原设备，因此也可能主动转移未在故障设备上的工序。"
     )
     raw_event = case.failures[0]
+    additional_failures = tuple(
+        MachineFailure(
+            item.machine_id,
+            item.started_at,
+            item.estimated_recovery_at,
+            "历史故障",
+            item.received_at,
+        )
+        for item in domain.failures[1:]
+    )
     event = MachineFailure(
         raw_event.machine_id,
         raw_event.started_at,
@@ -91,6 +101,7 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
     limitations = []
     candidates = []
     fingerprints = set()
+    strategy_failures = []
     refs = [request.current_plan_ref, request.validation_result_ref, rules_ref]
     for strategy in request.allowed_strategies:
         try:
@@ -103,18 +114,24 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
                 strategies=(strategy.strategy_id,),
                 eligible_machine_ids=source.eligible_machine_ids,
                 production=domain.production,
+                additional_failures=additional_failures,
             )[0]
             _check_schedule(source, candidate.schedule, event)
-        except RuleViolation:
+        except RuleViolation as exc:
+            label = {"wait-recovery": "等待恢复", "allow-transfer": "允许合格设备转移"}[
+                strategy.strategy_id
+            ]
+            reason = f"{label}：{exc}"
+            strategy_failures.append(reason)
             warnings.append(
                 Notice(
                     code="STRATEGY_NO_FEASIBLE_CANDIDATE",
-                    message=f"策略 {strategy.strategy_id} 未生成通过约束检查的候选。",
-                    repair_hint="核对该策略的设备与工序条件，勿以无效方案替代。",
+                    message=reason,
+                    repair_hint="根据具体冲突调整生产条件后重新生成；已生成的其他候选仍可查看。",
                     evidence_refs=refs,
                 )
             )
-            limitations.append(f"策略 {strategy.strategy_id} 没有可用候选。")
+            limitations.append(reason)
             continue
         fingerprint = candidate.schedule.fingerprint
         if fingerprint in fingerprints:
@@ -202,8 +219,10 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
     if not candidates:
         raise SchedulingBlocked(
             "NO_FEASIBLE_CANDIDATE",
-            "所选策略没有生成有效候选。",
-            "核对设备、模具和工序条件后重新校验。",
+            "本次所选策略均未生成可用方案。" + " ".join(strategy_failures),
+            "请按实际生产安排补录后续班次，或调整工序安排后重新生成。"
+            if any("班次范围内没有可用时段" in reason for reason in strategy_failures)
+            else "请根据上述具体冲突核对设备能力、模具兼容关系和工序安排，再重新生成。",
             refs[:2],
         )
     if len(candidates) < 2:
@@ -232,11 +251,21 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
 def _check_schedule(source: SchedulingSource, schedule: Schedule, event: MachineFailure) -> None:
     """独立复核候选，防止生成过程遗漏约束或错误转移。"""
     domain = to_validation_case(source.case)
-    issues = validate_schedule(schedule, domain.machines, event, domain.schedule)
+    failures = tuple(
+        MachineFailure(
+            f.machine_id,
+            f.started_at,
+            f.estimated_recovery_at,
+            "历史故障",
+            f.received_at,
+        )
+        for f in domain.failures[1:]
+    )
+    issues = validate_schedule(schedule, domain.machines, event, domain.schedule, failures)
     if domain.production:
         issues += tuple(domain.production.check(schedule, event))
     if issues:
-        raise RuleViolation("候选未通过独立约束检查")
+        raise RuleViolation("候选未通过独立约束检查：" + "；".join(issues))
     original = {op.id: op for op in domain.schedule.operations}
     for op in schedule.operations:
         if op.status == TaskStatus.PLANNED:
@@ -244,7 +273,10 @@ def _check_schedule(source: SchedulingSource, schedule: Schedule, event: Machine
                 op.machine_id not in source.eligible_machine_ids[op.id]
                 or op.start < original[op.id].start
             ):
-                raise RuleViolation("候选不满足设备资格或原计划时间下界")
+                raise RuleViolation(
+                    f"工序 {op.id} 的候选设备 {op.machine_id} 不在合格设备清单内，"
+                    "或开工时间早于原计划；该候选不能使用。"
+                )
 
 
 def verify_tool_output(source: SchedulingSource, output: SchedulingToolOutput) -> None:

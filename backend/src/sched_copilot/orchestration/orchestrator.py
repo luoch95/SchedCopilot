@@ -7,6 +7,7 @@ from hashlib import sha256
 from time import monotonic
 from uuid import uuid4
 
+from ..agents.contracts.assessment import is_business_conclusion
 from ..agents.contracts.common import Evidence
 from ..agents.evaluation_agent import EvaluationAgent
 from ..agents.explanation_agent import ExplanationAgent
@@ -88,7 +89,17 @@ class DynamicOrchestrator:
         while True:
             action = route(current)
             if action is Action.END:
-                statuses = {r.status for r in self._results(current)}
+                assessed = bool(
+                    current.evaluation_result
+                    and current.evaluation_result.status in {"success", "warning"}
+                    and current.evaluation_result.data
+                    and current.evaluation_result.data.assessment
+                )
+                statuses = {
+                    r.status
+                    for r in self._results(current)
+                    if not (assessed and is_business_conclusion(r))
+                }
                 current.workflow_status = (
                     "failed"
                     if "failed" in statuses
@@ -261,6 +272,12 @@ class DynamicOrchestrator:
             state.scheduling_input = state.scheduling_input.model_copy(update=updates)
         if state.evaluation_input:
             evaluation = {k: v for k, v in updates.items() if k != "validation_result_ref"}
+            if is_business_conclusion(state.scheduling_result):
+                evaluation.update(
+                    analysis_result_ref=state.candidate_batch_ref,
+                    candidate_batch_id=state.candidate_batch_ref,
+                    candidate_refs={},
+                )
             if state.scheduling_result and state.scheduling_result.data:
                 evaluation.update(
                     candidate_batch_id=state.scheduling_result.data.candidate_batch_id,
@@ -271,6 +288,8 @@ class DynamicOrchestrator:
             state.evaluation_input = state.evaluation_input.model_copy(update=evaluation)
         if state.explanation_input:
             question = state.explanation_input.question
+            if is_business_conclusion(state.scheduling_result):
+                question = "解释本次未生成可用方案的评估结论、具体原因、影响和处理建议。"
             if (
                 state.intent == "generate_candidates"
                 and state.scheduling_result

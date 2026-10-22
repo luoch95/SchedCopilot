@@ -255,7 +255,22 @@ def _check_completed(result: AgentResult, request: AgentRequest) -> None:
         if request.evaluation_tool_result is None or data != request.evaluation_tool_result:
             _reject("TOOL_RESULT_MISMATCH", "评估必须与确定性评价工具结果一致。")
         ids = [item.candidate_id for item in data.evaluations]
-        if not ids or set(ids) != set(request.candidate_refs) or len(ids) != len(set(ids)):
+        if data.assessment is not None:
+            from ..tools.assessment import assess_business_result
+
+            ref = request.analysis_result_ref
+            if (
+                not ref
+                or ids
+                or request.candidate_refs
+                or data.tradeoffs
+                or result.status != "warning"
+            ):
+                _reject("CANDIDATE_MISMATCH", "结论评估不能携带候选或候选指标。")
+            source = _linked_result(request, ref, SchedulingResult)
+            if data.assessment != assess_business_result(source, ref):
+                _reject("TOOL_RESULT_MISMATCH", "结论必须来自实际业务检查结果。")
+        elif not ids or set(ids) != set(request.candidate_refs) or len(ids) != len(set(ids)):
             _reject("CANDIDATE_MISMATCH", "评价必须覆盖请求中的候选且不能重复。")
         if data.candidate_batch_id != request.candidate_batch_id:
             _reject("CANDIDATE_MISMATCH", "评价批次与请求不一致。")

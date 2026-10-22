@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useLayoutEffect, useState } from 'react';
 import { statusLabel } from '../lib/status';
 import { useEffect, useRef } from 'react';
 import { stamp } from '../lib/time';
@@ -12,6 +12,10 @@ const comparisonColors = {
   green: ['#24744F', '#388360', '#437A45', '#21685D', '#52864E'],
 };
 const hour = (value: number) => stamp(new Date(value).toISOString()).split(' ')[1];
+type FaultOverlay = {
+  failure: Failure;
+  faultTrace?: { version: number; affectedOperations: Operation[] };
+};
 
 export default function Gantt({
   schedule,
@@ -21,6 +25,8 @@ export default function Gantt({
   range,
   changes = [],
   tone,
+  faultTrace,
+  faults,
 }: {
   schedule: Schedule;
   baseline?: Schedule;
@@ -29,19 +35,35 @@ export default function Gantt({
   range: [number, number];
   changes?: Change[];
   tone?: 'red' | 'green';
+  faultTrace?: { version: number; affectedOperations: Operation[] };
+  faults?: FaultOverlay[];
 }) {
+  const overlays = faults ?? [{ failure, faultTrace }];
+  const [hoveredFault, setHoveredFault] = useState(0);
+  const activeFault = overlays[hoveredFault] ?? { failure, faultTrace };
+  const patternId = `fault-pattern-${useId().replace(/:/g, '')}`;
+  const tooltipId = useId();
+  const [faultHovered, setFaultHovered] = useState(false);
+  const [faultAnchor, setFaultAnchor] = useState({ x: 0, y: 0 });
+  const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0 });
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const palette = tone ? comparisonColors[tone] : colors;
   const sharedSelection = useGanttSelection();
   const [localSelection, setLocalSelection] = useState<string | null>(null);
   const selectedId = sharedSelection?.operationId ?? localSelection;
   const select = sharedSelection?.select ?? setLocalSelection;
   const [hover, setHover] = useState<Operation | null>(null);
+  useEffect(() => {
+    setFaultHovered(false);
+    setHover(null);
+  }, [failure.machine_id, failure.started_at, failure.recovered_at, schedule.fingerprint]);
   const chartRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(920);
   useEffect(() => {
     const container = chartRef.current;
     if (!container) return;
     const updateWidth = () => {
+      setFaultHovered(false);
       const measured = container.getBoundingClientRect().width;
       if (measured > 0) setWidth(Math.max(120, measured));
     };
@@ -54,6 +76,27 @@ export default function Gantt({
       window.removeEventListener('resize', updateWidth);
     };
   }, []);
+  useLayoutEffect(() => {
+    const chart = chartRef.current;
+    const tooltip = tooltipRef.current;
+    if (!faultHovered || !chart || !tooltip) return;
+    const bounds = chart.getBoundingClientRect();
+    const tip = tooltip.getBoundingClientRect();
+    const mouseX = faultAnchor.x - bounds.left;
+    const mouseY = faultAnchor.y - bounds.top;
+    const inset = 8;
+    const gap = 12;
+    const desiredX =
+      mouseX + gap + tip.width > bounds.width - inset ? mouseX - tip.width - gap : mouseX + gap;
+    const desiredY =
+      mouseY + gap + tip.height > bounds.height - inset ? mouseY - tip.height - gap : mouseY + gap;
+    setTooltipPosition({
+      left:
+        chart.scrollLeft + Math.max(inset, Math.min(desiredX, bounds.width - tip.width - inset)),
+      top:
+        chart.scrollTop + Math.max(inset, Math.min(desiredY, bounds.height - tip.height - inset)),
+    });
+  }, [faultHovered, faultAnchor]);
   const left = 65,
     right = 18,
     rowHeight = 66,
@@ -65,7 +108,8 @@ export default function Gantt({
       (range[1] - range[0])) *
       (width - left - right);
   const orderIds = [...new Set(schedule.operations.map((op) => op.order_id))].sort();
-  const eventTicks = [failure.started_at, failure.recovered_at]
+  const eventTicks = overlays
+    .flatMap(({ failure }) => [failure.started_at, failure.recovered_at])
     .filter((value): value is string => !!value)
     .map((value) => +new Date(value));
   const step = range[1] - range[0] > 18 * 3600_000 ? 2 * 3600_000 : 3600_000;
@@ -99,10 +143,27 @@ export default function Gantt({
   const inspected = hover ?? schedule.operations.find((op) => op.id === selectedId) ?? null;
   const before = inspected && baseline?.operations.find((op) => op.id === inspected.id);
   const change = inspected && changes.find((item) => item.工序 === inspected.id);
-  const faultEnd = failure.recovered_at ? +new Date(failure.recovered_at) : range[1];
+  const activeFailure = activeFault.failure;
+  const activeTrace = activeFault.faultTrace;
+  const faultEnd = activeFailure.recovered_at ? +new Date(activeFailure.recovered_at) : range[1];
+  const conflicts = schedule.operations.filter(
+    (op) =>
+      op.machine_id === activeFailure.machine_id &&
+      op.status === 'planned' &&
+      Date.parse(op.start) < faultEnd &&
+      Date.parse(op.end) > Date.parse(activeFailure.started_at),
+  );
+  const allTransferred =
+    !!activeTrace?.affectedOperations.length &&
+    activeTrace.affectedOperations.every((original) =>
+      schedule.operations.some(
+        (op) => op.id === original.id && op.machine_id !== activeFailure.machine_id,
+      ),
+    );
+  const faultDescription = `${activeTrace ? `V${activeTrace.version} 变更留痕：` : '设备停机窗口：'}因 ${activeFailure.machine_id} 设备故障（${hour(Date.parse(activeFailure.started_at))}—${activeFailure.recovered_at ? hour(Date.parse(activeFailure.recovered_at)) : '恢复时间未知'}），${conflicts.length ? `当前仍有 ${conflicts.length} 道工序与停机窗口重叠，需调整排产` : allTransferred ? '相关订单工序已全部转移' : activeTrace ? '相关工序已调整避开停机窗口' : '当前窗口内无排产冲突'}，当前时段设备不可用。`;
   return (
     <div className="gantt">
-      <div className="chart-scroll" ref={chartRef}>
+      <div className="chart-scroll" ref={chartRef} onScroll={() => setFaultHovered(false)}>
         <svg
           width="100%"
           height={height}
@@ -110,6 +171,17 @@ export default function Gantt({
           role="img"
           aria-label="设备工序甘特图"
         >
+          <defs>
+            <pattern id={patternId} width="8" height="8" patternUnits="userSpaceOnUse">
+              <rect width="8" height="8" fill="#f5f2f2" />
+              <path
+                d="M-2 2L2-2M0 8L8 0M6 10L10 6"
+                stroke="#d9cfd0"
+                strokeWidth="0.6"
+                strokeOpacity="0.55"
+              />
+            </pattern>
+          </defs>
           {ticks.map((tick) => (
             <g key={tick}>
               <line
@@ -117,7 +189,7 @@ export default function Gantt({
                 x2={x(tick)}
                 y1={28}
                 y2={height - 20}
-                stroke={eventTicks.includes(tick) ? '#CF8F80' : '#DFE6EB'}
+                stroke={eventTicks.includes(tick) ? '#D3CDCE' : '#DFE6EB'}
                 strokeDasharray={eventTicks.includes(tick) ? '3 3' : undefined}
               />
               {visibleLabels.has(tick) && (
@@ -149,32 +221,63 @@ export default function Gantt({
               >
                 {machine.id}
               </text>
-              {machine.id === failure.machine_id &&
-                x(faultEnd) > left &&
-                x(failure.started_at) < width - right && (
-                  <>
-                    <rect
-                      x={Math.max(left, x(failure.started_at))}
-                      y={top + index * rowHeight + 2}
-                      width={Math.max(
-                        0,
-                        Math.min(width - right, x(faultEnd)) -
-                          Math.max(left, x(failure.started_at)),
-                      )}
-                      height={rowHeight - 11}
-                      fill="#F6DAD5"
-                      stroke="#CF8F80"
-                      strokeDasharray="4 3"
-                    />
-                    <text
-                      x={Math.max(left, x(failure.started_at)) + 5}
-                      y={top + index * rowHeight + 13}
-                      className="fault-label"
+              {overlays.map(({ failure }, faultIndex) => {
+                const faultEnd = failure.recovered_at ? +new Date(failure.recovered_at) : range[1];
+                return (
+                  machine.id === failure.machine_id &&
+                  x(faultEnd) > left &&
+                  x(failure.started_at) < width - right && (
+                    <g
+                      key={`${failure.machine_id}-${failure.started_at}-${failure.recovered_at}`}
+                      className="gantt-fault-region"
+                      tabIndex={0}
+                      role="group"
+                      aria-label={`${machine.id} 停机留痕`}
+                      aria-describedby={
+                        faultHovered && hoveredFault === faultIndex ? tooltipId : undefined
+                      }
+                      onMouseEnter={(event) => {
+                        setHoveredFault(faultIndex);
+                        setFaultAnchor({ x: event.clientX, y: event.clientY });
+                        setFaultHovered(true);
+                        setHover(null);
+                      }}
+                      onMouseMove={(event) =>
+                        setFaultAnchor({ x: event.clientX, y: event.clientY })
+                      }
+                      onMouseLeave={() => setFaultHovered(false)}
+                      onFocus={(event) => {
+                        setHoveredFault(faultIndex);
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        setFaultAnchor({ x: bounds.left + bounds.width / 2, y: bounds.top });
+                        setFaultHovered(true);
+                      }}
+                      onBlur={() => setFaultHovered(false)}
                     >
-                      故障{failure.recovered_at ? '' : ' · 恢复未知'}
-                    </text>
-                  </>
-                )}
+                      <rect
+                        x={Math.max(left, x(failure.started_at))}
+                        y={top + index * rowHeight + 2}
+                        width={Math.max(
+                          0,
+                          Math.min(width - right, x(faultEnd)) -
+                            Math.max(left, x(failure.started_at)),
+                        )}
+                        height={rowHeight - 11}
+                        fill={`url(#${patternId})`}
+                        stroke="#ded6d6"
+                      />
+                      <text
+                        x={Math.max(left, x(failure.started_at)) + 5}
+                        y={top + index * rowHeight + 13}
+                        className="fault-label"
+                        pointerEvents="none"
+                      >
+                        ⚠ 停机留痕
+                      </text>
+                    </g>
+                  )
+                );
+              })}
             </g>
           ))}
           {schedule.operations.map((op) => {
@@ -233,6 +336,17 @@ export default function Gantt({
             );
           })}
         </svg>
+        {faultHovered && (
+          <div
+            ref={tooltipRef}
+            style={tooltipPosition}
+            className="gantt-fault-tooltip"
+            role="tooltip"
+            id={tooltipId}
+          >
+            {faultDescription}
+          </div>
+        )}
       </div>
       <div className="gantt-inspector" aria-live="polite">
         {inspected ? (

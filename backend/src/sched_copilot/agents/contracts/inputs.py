@@ -97,6 +97,7 @@ class SchedulingInput(AgentInput):
 
 class EvaluationInput(AgentInput):
     agent_name: Literal["evaluation"]
+    analysis_result_ref: Text | None = None
     current_plan_ref: Text
     candidate_batch_id: Text
     candidate_refs: dict[Text, Text]

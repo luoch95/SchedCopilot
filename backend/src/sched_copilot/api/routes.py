@@ -10,8 +10,11 @@ from .demo_access import COOKIE, SESSION_SECONDS, LoginRequest, is_admin, new_se
 from .presenters import simulation_view, workbench_view
 from .schemas import (
     AnalysisRequest,
+    AssessmentReviewSubmit,
     DecisionRequest,
     EventRequest,
+    FaultReviewAction,
+    FaultReviewSubmit,
     InsertionAction,
     ProcessingEstimateRequest,
     SalesRequestCreate,
@@ -158,6 +161,11 @@ def latest_workflow(service: Service):
     return {"workflow": result, "simulation": simulation_view(simulation) if simulation else None}
 
 
+@router.get("/events/{revision}/analysis")
+def historical_fault_analysis(revision: int, service: Service):
+    return service.fault_analysis(revision)
+
+
 @router.get("/workflow/demo")
 def fallback_demo_status(service: Service):
     return service.workflow_runner.demo_gate.status()
@@ -220,3 +228,24 @@ def act_on_sales_request(
         snapshot=service.workbench(),
         production_snapshot=service.repository.production_snapshot(),
     )
+
+
+@router.post("/workflow/{workflow_id}/review")
+def submit_assessment_review(workflow_id: str, request: AssessmentReviewSubmit, service: Service):
+    return workbench_view(
+        service.submit_assessment_review(workflow_id, request.reason, request.request_id)
+    )
+
+
+@router.post("/fault-reviews")
+def submit_fault_review(request: FaultReviewSubmit, service: Service):
+    return workbench_view(
+        service.submit_fault_review(
+            request.simulation_id, request.candidate_id, request.reason, request.request_id
+        )
+    )
+
+
+@router.post("/fault-reviews/{review_id}/actions")
+def review_fault(review_id: str, request: FaultReviewAction, service: Service):
+    return workbench_view(service.review_fault(review_id, request.action, request.reason))

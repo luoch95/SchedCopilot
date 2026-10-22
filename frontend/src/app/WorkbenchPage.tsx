@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { stamp } from '../shared/lib/time';
 import { Modal } from '../shared/ui/Modal';
 import { GanttSelectionProvider } from '../shared/ui/GanttSelection';
-import type { InsertionRequestRecord } from '../shared/api/contracts';
+import type { InsertionRequestRecord, Workbench } from '../shared/api/contracts';
 import { PendingRequestsPanel, PlannerInsertionComparison } from '../features/sales';
 import {
   DEMO_PLANNER_ID,
@@ -13,10 +13,10 @@ import {
   SessionBar,
   usePlannerNavigation,
 } from '../features/session';
-import { WorkflowPanel } from '../features/analysis';
+import { FaultAnalysisDetails, FaultProgress } from '../features/analysis';
 import { EventEditor } from '../features/events';
 import { CurrentPlan, timelineRange } from '../features/plan';
-import { useWorkbench } from '../features/workbench';
+import { publishedFault, useWorkbench, useHistoricalFaultAnalysis } from '../features/workbench';
 import { WriteButton } from '../shared/ui/WriteButton';
 import { BusinessLabelProvider } from '../shared/lib/BusinessLabelProvider';
 import { DateRangeFilter } from '../shared/ui/DateRangeFilter';
@@ -32,11 +32,24 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
   const [requestRecord, setRequestRecord] = useState<InsertionRequestRecord | null>(null);
   const [requestsVersion, setRequestsVersion] = useState(0);
   const [requestBusy, setRequestBusy] = useState(false);
-  const [analysisOpen, setAnalysisOpen] = useState(false);
+  const { analysisOpen } = navigation;
+  const analysisScroll = useRef(0);
+  const [historicalEvent, setHistoricalEvent] = useState<
+    NonNullable<Workbench['event_history']>[number] | null
+  >(null);
+  const historicalAnalysis = useHistoricalFaultAnalysis(historicalEvent?.revision);
   const [notificationReady, setNotificationReady] = useState(true);
   const notificationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const generating = controller.activeIntent === 'generate_candidates';
-  const generated = !!controller.currentSimulation && controller.workflow?.status === 'completed';
+  const publication = publishedFault(controller.state);
+  const analysisWorkflow = controller.workflow ?? publication?.workflow ?? null;
+  const assessment =
+    analysisWorkflow?.status === 'completed' &&
+    analysisWorkflow.results.evaluation?.data?.assessment;
+  const generated =
+    (!!controller.currentSimulation && controller.workflow?.status === 'completed') ||
+    !!publication ||
+    !!assessment;
   useEffect(() => {
     if (!generating) return;
     setNotificationReady(false);
@@ -45,7 +58,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
     notificationTimer.current = setTimeout(() => setNotificationReady(true), 4000);
   }, [generating]);
   useEffect(() => () => clearTimeout(notificationTimer.current), []);
-  const backgroundPending = generating || (generated && !notificationReady);
+  const backgroundPending = !publication && (generating || (generated && !notificationReady));
   const openRequest = useCallback(
     (record: InsertionRequestRecord) => {
       navigateRequest({
@@ -104,22 +117,63 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       </main>
     );
   const range = timelineRange(state, currentSimulation, controller.zoom, controller.pan);
+  const breadcrumb = (
+    <nav className="console-breadcrumb" aria-label="当前位置">
+      <ol>
+        {onSwitchRole && (
+          <li>
+            <button disabled={!!controller.busy} onClick={switchRole}>
+              选择角色
+            </button>
+          </li>
+        )}
+        <li>
+          {view === 'fault' ? (
+            <button onClick={navigation.home}>工作台总览</button>
+          ) : (
+            <span aria-current="page">工作台总览</span>
+          )}
+        </li>
+        {view === 'fault' && (
+          <li>
+            <span aria-current="page">故障影响与方案决策</span>
+          </li>
+        )}
+      </ol>
+    </nav>
+  );
   const eventLabel = `${state.event.machine_id}故障 R${state.event_revision}`;
-  const analysisTime = controller.workflow?.created_at;
+  const analysisTime = analysisWorkflow?.created_at;
   const visibleEvents = [
     ...(state.event_history ?? []).filter((event) => event.revision !== state.event_revision),
-    { ...state.event, revision: state.event_revision, created_at: state.event.received_at },
+    {
+      ...state.event,
+      revision: state.event_revision,
+      created_at:
+        state.event_history?.find((event) => event.revision === state.event_revision)?.created_at ??
+        state.event.received_at,
+    },
   ]
     .filter((event) => inDateRange(event.started_at, dateRange))
-    .sort((a, b) => newestFirst(a.started_at, b.started_at) || b.revision - a.revision);
+    .sort(
+      (a, b) =>
+        newestFirst(a.created_at || a.started_at, b.created_at || b.started_at) ||
+        b.revision - a.revision,
+    );
   const currentFaultCard = (
     <>
       <section className="fault-event-banner" aria-label="已登记设备故障">
         <div className="fault-card-heading">
-          <h2>
-            <span aria-hidden="true">⚠️</span> 已登记设备故障：
-            {state.event.machine_id} 停机
-          </h2>
+          <div className="fault-card-identity">
+            <h2>
+              <span aria-hidden="true">⚠️</span> 已登记设备故障：
+              {state.event.machine_id} 停机
+            </h2>
+            <p className="fault-analysis-window">
+              分析窗口：{stamp(state.event.started_at)} —{' '}
+              {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复时间未知'}
+            </p>
+          </div>
           <div className="fault-task-actions">
             {backgroundPending ? (
               <>
@@ -128,42 +182,56 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                 </p>
                 <button onClick={navigation.openFault}>查看生成进度</button>
               </>
+            ) : analysisWorkflow?.status === 'blocked' || assessment ? (
+              <AiAnalysisButton label="查看AI评估详情" onClick={navigation.openAnalysis} />
             ) : generated ? (
               <div className="ai-analysis-action">
-                <AiAnalysisButton onClick={() => setAnalysisOpen(true)} />
+                <AiAnalysisButton onClick={navigation.openAnalysis} />
+                <WriteButton
+                  className="secondary"
+                  disabled={!!controller.busy || controller.dirty || controller.stale}
+                  onClick={() => {
+                    navigation.openFault();
+                    void controller.generate();
+                  }}
+                >
+                  重新生成方案
+                </WriteButton>
               </div>
             ) : (
-              <WriteButton
-                className="primary"
+              <AiAnalysisButton
+                label="开始 AI 分析并生成方案"
+                write
                 disabled={!!controller.busy || controller.blocked || controller.demoLoading}
                 onClick={analyzeFault}
-              >
-                分析影响并生成候选方案
-              </WriteButton>
+              />
             )}
           </div>
         </div>
+        <div className="fault-process-row">
+          <FaultProgress
+            state={state}
+            workflow={controller.workflow}
+            simulation={currentSimulation}
+            generating={generating}
+            dirty={controller.dirty}
+            onReview={() => {
+              const review = state.fault_review;
+              if (review && review.simulation_id === currentSimulation?.id && currentSimulation) {
+                controller.setSelected(review.candidate_id);
+                if (review.status === 'approved') controller.setAction('publish');
+              }
+              navigation.openApproval();
+            }}
+          />
+        </div>
         <div className="fault-card-details">
-          <p>
-            分析窗口：{stamp(state.event.started_at)} —{' '}
-            {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复时间未知'}
-          </p>
-          <p className="workflow-current-step">
-            当前步骤：
-            {controller.dirty
-              ? '故障录入（修改尚未保存）'
-              : generating
-                ? '方案正在由AI分析'
-                : generated
-                  ? 'AI评估方案已成，待排产员发布'
-                  : '故障已保存（待生成方案）'}
-          </p>
           {controller.blocked && (
             <p className="inline-error">
               {controller.dirty
                 ? '请先保存或放弃故障输入。'
                 : controller.stale
-                  ? '请重新载入已保存事件后再分析。'
+                  ? '请刷新页面获取最新记录后再分析。'
                   : !state.event.recovered_at
                     ? '请补充预计恢复时间并保存后再分析。'
                     : '事件与执行记录冲突，请修正故障信息后再分析。'}
@@ -172,7 +240,11 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
         </div>
         <p className="fault-impact-summary">
           <strong>结论简要：</strong>
-          <strong>当前计划有 {state.affected.length} 道工序受故障影响。</strong>
+          <strong>
+            {publication
+              ? `${publication.affected ? `本次故障原影响 ${publication.affected.length} 道工序；` : ''}发布后当前计划剩余 ${state.affected.length} 道工序受故障影响。`
+              : `当前计划有 ${state.affected.length} 道工序受故障影响。`}
+          </strong>
         </p>
       </section>
     </>
@@ -214,35 +286,14 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       >
         <main className="workspace">
           <div className="planner-topbar">
-            <div className="planner-navigation-row">
-              <nav className="console-breadcrumb" aria-label="当前位置">
-                <ol>
-                  {onSwitchRole && (
-                    <li>
-                      <button disabled={!!controller.busy} onClick={switchRole}>
-                        选择角色
-                      </button>
-                    </li>
-                  )}
-                  <li>
-                    {view === 'fault' ? (
-                      <button onClick={navigation.back}>工作台总览</button>
-                    ) : (
-                      <span aria-current="page">工作台总览</span>
-                    )}
-                  </li>
-                  {view === 'fault' && (
-                    <li>
-                      <span aria-current="page">故障影响与方案决策</span>
-                    </li>
-                  )}
-                </ol>
-              </nav>
-            </div>
+            {view === 'fault' && <div className="planner-navigation-row">{breadcrumb}</div>}
             {view === 'dashboard' && (
               <header className="page-header">
                 <div>
-                  <WorkbenchTitle />
+                  <div className="planner-title-row">
+                    <WorkbenchTitle />
+                    {breadcrumb}
+                  </div>
                   <p>
                     {view === 'dashboard'
                       ? '处理插单申请，查看当前已发布的生产安排。'
@@ -277,7 +328,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
           )}
           {view === 'fault' && controller.stale && (
             <div className="message warning">
-              后台事件或计划已更新，请点击“重新载入已保存事件”后继续。
+              后台事件或计划已更新，请刷新页面获取最新记录后继续。
             </div>
           )}
           {view === 'dashboard' ? (
@@ -316,7 +367,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                       )}
                       {controller.stale && (
                         <div className="message warning">
-                          后台事件或计划已更新，请重新载入已保存事件后继续。
+                          后台事件或计划已更新，请刷新页面获取最新记录后继续。
                         </div>
                       )}
                       {visibleEvents.length === 0 && (
@@ -339,7 +390,10 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                               分析窗口：{stamp(event.started_at)} —{' '}
                               {event.recovered_at ? stamp(event.recovered_at) : '恢复时间未知'}
                             </p>
-                            <span className="tag">历史修订 · 仅供查看</span>
+                            <AiAnalysisButton
+                              label="查看历史 AI 分析"
+                              onClick={() => setHistoricalEvent(event)}
+                            />
                           </article>
                         ),
                       )}
@@ -351,9 +405,16 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
             </>
           ) : (
             <>
-              <button className="console-back primary" onClick={navigation.back}>
-                ← 返回工作台总览
-              </button>
+              <div className="fault-page-navigation">
+                {navigation.fromAnalysis && (
+                  <button className="console-back primary" onClick={navigation.back}>
+                    ← 返回评估详情
+                  </button>
+                )}
+                <button className="console-back primary" onClick={navigation.home}>
+                  ← 返回工作台总览
+                </button>
+              </div>
               <FaultPlanPage
                 controller={controller}
                 state={state}
@@ -361,6 +422,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                 currentPlan={currentPlan}
                 roleControl={roleControl}
                 onAdjust={navigation.openEvent}
+                showApproval={navigation.approvalOpen}
               />
             </>
           )}
@@ -375,11 +437,13 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
             drawer
             drawerWidth="min(1120px, 100vw)"
             title={`${eventLabel} · 智能分析明细`}
-            onClose={() => setAnalysisOpen(false)}
+            onClose={navigation.back}
+            scrollPosition={analysisScroll}
           >
             <div className="fault-analysis-context" aria-label="事件分析标识">
               <span className="fault-analysis-version">
-                基线 V{state.baseline.version} · 故障 R{state.event_revision}
+                基线 V{publication?.baseline_version ?? state.baseline.version} · 故障 R
+                {state.event_revision}
               </span>
               <span>
                 {analysisTime && !Number.isNaN(Date.parse(analysisTime))
@@ -387,22 +451,85 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                   : '分析时间未记录'}
               </span>
             </div>
-            <WorkflowPanel
-              running={controller.activeIntent !== null}
-              disabled={!!controller.busy || controller.dirty || controller.stale}
-              result={controller.workflow}
-              progress={controller.progress}
-              onRun={controller.runWorkflow}
+            <FaultAnalysisDetails
+              state={state}
+              workflow={analysisWorkflow}
+              simulation={controller.currentSimulation}
             />
-            <button
-              className="primary"
-              onClick={() => {
-                setAnalysisOpen(false);
-                navigation.openFault();
-              }}
-            >
-              查看方案对比与发布
-            </button>
+            {(analysisWorkflow?.status === 'blocked' || assessment) && (
+              <div className="analysis-alert-actions">
+                <p className="message warning">
+                  {assessment
+                    ? '本次评估已完成，可提交管理者审批；如已调整生产条件，可主动重新生成评估。'
+                    : '本次评估未生成有效候选。请先查看上方阻断原因，再决定是否重新生成。'}
+                </p>
+              </div>
+            )}
+            <div className="assessment-detail-actions">
+              {(analysisWorkflow?.status === 'blocked' || assessment) && (
+                <WriteButton
+                  className="primary"
+                  disabled={!!controller.busy || controller.dirty || controller.stale}
+                  onClick={() => void controller.generate()}
+                >
+                  重新生成评估
+                </WriteButton>
+              )}
+              {!publication && analysisWorkflow?.status !== 'blocked' && (
+                <button className="primary assessment-submit-link" onClick={navigation.openFault}>
+                  查看结果与提交审批
+                </button>
+              )}
+            </div>
+          </Modal>
+        )}
+        {historicalEvent && (
+          <Modal
+            title={`${historicalEvent.machine_id}故障 R${historicalEvent.revision} · 历史智能分析明细`}
+            drawer
+            drawerWidth="min(1120px, 100vw)"
+            onClose={() => setHistoricalEvent(null)}
+          >
+            <div className="fault-analysis-context" aria-label="历史事件分析标识">
+              <span className="fault-analysis-version">
+                {historicalAnalysis.analysis &&
+                  `基线 V${historicalAnalysis.analysis.baseline_version} · `}
+                故障 R{historicalEvent.revision}
+              </span>
+              <span>
+                分析窗口：{stamp(historicalEvent.started_at)} —{' '}
+                {historicalEvent.recovered_at
+                  ? stamp(historicalEvent.recovered_at)
+                  : '恢复时间未知'}
+              </span>
+            </div>
+            {historicalAnalysis.loading ? (
+              <p role="status">正在加载历史 AI 分析…</p>
+            ) : historicalAnalysis.error ? (
+              <p role="alert">{historicalAnalysis.error}</p>
+            ) : historicalAnalysis.analysis ? (
+              <FaultAnalysisDetails
+                state={{
+                  ...state,
+                  event: historicalEvent,
+                  event_revision: historicalEvent.revision,
+                  baseline: historicalAnalysis.analysis.baseline ?? state.baseline,
+                  affected: historicalAnalysis.analysis.affected ?? [],
+                  fault_review: null,
+                  plan_publication: {
+                    version: historicalAnalysis.analysis.baseline_version + 1,
+                    published_at: null,
+                    published_by: null,
+                    version_summary: '',
+                    fault_analysis: historicalAnalysis.analysis,
+                  },
+                }}
+                workflow={historicalAnalysis.analysis.workflow}
+                simulation={historicalAnalysis.analysis.simulation}
+              />
+            ) : (
+              <p role="status">该历史修订尚未生成 AI 分析，暂无分析记录。</p>
+            )}
           </Modal>
         )}
         {eventOpen && (
@@ -426,8 +553,6 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
               draftInvalid={controller.draftInvalid}
               onEdit={controller.edit}
               onSave={saveEvent}
-              onReload={controller.reload}
-              onRecover={controller.recover}
             />
           </Modal>
         )}

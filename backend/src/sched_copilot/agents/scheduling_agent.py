@@ -8,10 +8,17 @@ from dataclasses import dataclass
 from ..prompts import PromptLoader
 from ..tools.scheduling import SchedulingToolOutput, generate_schedule, verify_tool_output
 from ..tools.scheduling_context import SchedulingBlocked, SchedulingSource, prepare_scheduling
-from .contracts.common import AgentContext, Notice
+from .contracts.common import AgentContext
 from .contracts.inputs import SchedulingInput
 from .contracts.results import SchedulingResult
-from .quality import QualityFailure, checked_execute, finish_quality, verify_evidence
+from .quality import (
+    QualityFailure,
+    checked_execute,
+    failure_notice,
+    failure_status,
+    finish_quality,
+    verify_evidence,
+)
 from .result_validation import AgentContractError, validate_request, validate_result
 
 logger = logging.getLogger(__name__)
@@ -119,22 +126,11 @@ class SchedulingAgent:
                 prompt_version=prompt.role_metadata.prompt_version,
                 requirements_version=prompt.role_metadata.requirements_version,
                 context=checked.context,
-                status="blocked"
-                if isinstance(exc, QualityFailure)
-                and exc.report.issues
-                and all(issue.repairable for issue in exc.report.issues)
-                else "failed",
+                status=failure_status(exc),
                 data=None,
                 evidence_refs=[],
                 warnings=[],
-                errors=[
-                    Notice(
-                        code="SCHEDULING_TOOL_FAILED",
-                        message="候选生成工具执行失败或结果无效。",
-                        repair_hint="检查工具记录后重试，本次结果不能用于方案选择。",
-                        evidence_refs=[],
-                    )
-                ],
+                errors=[failure_notice(exc, "scheduling", "SCHEDULING_TOOL_FAILED")],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         result = finish_quality(result, quality)

@@ -76,6 +76,7 @@ class WorkbenchService:
             self.repository.plan_metadata(baseline.version),
             self.repository.operation_labels(baseline),
             self.repository.event_history(),
+            self.repository.fault_review(revision, baseline.fingerprint),
         )
 
     def save_event(self, command: SaveEvent) -> WorkbenchSnapshot:
@@ -113,7 +114,12 @@ class WorkbenchService:
     def simulate(self, version: SnapshotVersion) -> SimulationResult:
         baseline, event, revision = self.checked_snapshot(version)
         candidates = generate_candidates(
-            baseline, event, self.machines, self.orders, event_revision=revision
+            baseline,
+            event,
+            self.machines,
+            self.orders,
+            event_revision=revision,
+            additional_failures=tuple(f for f in self.repository.failure_windows() if f != event),
         )
         simulation_id = str(uuid4())
         self.repository.record_simulation(simulation_id, candidates, event)
@@ -131,6 +137,27 @@ class WorkbenchService:
             self.repository.operation_labels(baseline),
         )
 
+    def submit_fault_review(self, simulation_id, candidate_id, reason, request_id):
+        self.repository.submit_fault_review(simulation_id, candidate_id, reason, request_id)
+        return self.workbench()
+
+    def review_fault(self, review_id, action, reason):
+        baseline, _, revision = self.repository.snapshot()
+        current = self.repository.fault_review(revision, baseline.fingerprint)
+        if current and current["id"] == review_id and current.get("kind") == "assessment":
+            latest = self.latest_workflow()
+            if not latest or latest[0]["id"] != current["workflow_id"]:
+                raise SnapshotConflict("评估数据已更新，请重新生成并提交审批")
+        self.repository.review_fault(review_id, action, reason)
+        return self.workbench()
+
+    def submit_assessment_review(self, workflow_id, reason, request_id):
+        latest = self.latest_workflow()
+        if not latest or latest[0]["id"] != workflow_id:
+            raise SnapshotConflict("评估数据已更新，请重新生成并提交审批")
+        self.repository.submit_assessment_review(workflow_id, reason, request_id)
+        return self.workbench()
+
     def decide(self, command: Decide) -> tuple[int, WorkbenchSnapshot]:
         row = self.repository.simulation(command.simulation_id)
         if row is None:
@@ -142,7 +169,13 @@ class WorkbenchService:
         if command.action == "publish" and candidate.metrics.moved_operations == 0:
             raise RuleViolation("该候选与当前计划相同，无需重复发布")
         result = self.repository.decide(
-            candidate, event, self.machines, command.action, command.reason, command.request_id
+            candidate,
+            event,
+            self.machines,
+            command.action,
+            command.reason,
+            command.request_id,
+            approval_simulation_id=command.simulation_id,
         )
         logger.info(
             "Human decision recorded: action=%s plan_version=%s", command.action, result.version
@@ -198,6 +231,9 @@ class WorkbenchService:
             simulation_id = self.repository.workflow_simulation_id(workflow_id)
         self.repository.attach_workflow_simulation(outcome.payload["id"], simulation_id)
         return outcome.payload, simulation
+
+    def fault_analysis(self, revision: int) -> dict | None:
+        return self.repository.fault_analysis(revision)
 
     def latest_workflow(self) -> tuple[dict, SimulationResult | None] | None:
         saved = self.repository.latest_workflow()

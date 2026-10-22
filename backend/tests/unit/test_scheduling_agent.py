@@ -318,6 +318,8 @@ def test_no_feasible_candidate_is_business_block(scheduling_request, monkeypatch
     run = SchedulingAgent().run(request)
     assert run.result.status == "blocked"
     assert run.result.errors[0].code == "NO_FEASIBLE_CANDIDATE"
+    assert "等待恢复：没有可用设备" in run.result.errors[0].message
+    assert "允许合格设备转移：没有可用设备" in run.result.errors[0].message
 
 
 def test_one_failed_strategy_keeps_other_valid_candidate(scheduling_request, monkeypatch):
@@ -333,6 +335,8 @@ def test_one_failed_strategy_keeps_other_valid_candidate(scheduling_request, mon
     run = SchedulingAgent().run(request)
     assert run.result.status == "warning"
     assert len(run.result.data.candidates) == 1
+
+    assert any("转移不可行" in notice.message for notice in run.result.warnings)
 
 
 def test_tool_exception_does_not_leak_business_data(scheduling_request, caplog):

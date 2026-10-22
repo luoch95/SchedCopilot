@@ -101,3 +101,26 @@ class InsertionAction(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
     assessment_id: str | None = Field(default=None, max_length=100)
     operator_role: Literal["sales", "planner", "leader"]
+
+
+class FaultReviewSubmit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    simulation_id: str
+    candidate_id: str
+    reason: str = Field(min_length=1, max_length=2000)
+    request_id: str = Field(min_length=1, max_length=100)
+    operator_role: Literal["planner"]
+
+
+class AssessmentReviewSubmit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=1, max_length=2000)
+    request_id: str = Field(min_length=1, max_length=100)
+    operator_role: Literal["planner"]
+
+
+class FaultReviewAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["approve", "reject"]
+    reason: str = Field(min_length=1, max_length=2000)
+    operator_role: Literal["leader"]

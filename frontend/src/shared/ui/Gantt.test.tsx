@@ -10,6 +10,80 @@ const range: [number, number] = [
   +new Date('2026-10-19T18:00:00+08:00'),
 ];
 
+it('shows subtle fault trace and truthful transfer details on hover and focus', () => {
+  const original = workbench.baseline.operations[0];
+  const failure = {
+    ...workbench.event,
+    machine_id: original.machine_id,
+    started_at: original.start,
+    recovered_at: original.end,
+  };
+  const moved = { ...original, machine_id: 'another-machine' };
+  const props = {
+    machines: workbench.machines,
+    range,
+    failure,
+    faultTrace: { version: 4, affectedOperations: [original] },
+  };
+  const { rerender } = render(
+    <Gantt {...props} schedule={{ ...workbench.baseline, operations: [moved] }} />,
+  );
+  const region = screen.getByRole('group', { name: `${original.machine_id} 停机留痕` });
+  expect(region.querySelector('rect')?.getAttribute('fill')).toMatch(/^url\(#fault-pattern-/);
+  expect(screen.getByText('⚠ 停机留痕')).toBeTruthy();
+  expect(screen.queryByRole('tooltip')).toBeNull();
+  fireEvent.mouseEnter(region);
+  expect(region.querySelector('title')).toBeNull();
+  expect(screen.getAllByRole('tooltip')).toHaveLength(1);
+  expect(screen.getByRole('tooltip').textContent).toContain('V4 变更留痕');
+  expect(screen.getByRole('tooltip').textContent).toContain('已全部转移');
+  fireEvent.mouseLeave(region);
+  expect(screen.queryByRole('tooltip')).toBeNull();
+  rerender(<Gantt {...props} schedule={{ ...workbench.baseline, operations: [original] }} />);
+  fireEvent.focus(region);
+  expect(screen.getByRole('tooltip').textContent).toContain('当前仍有 1 道工序');
+  expect(screen.getByRole('tooltip').textContent).not.toContain('已全部转移');
+  fireEvent.blur(region);
+  expect(screen.queryByRole('tooltip')).toBeNull();
+});
+
+it('follows the pointer in chart coordinates and flips inside the right and bottom boundaries', () => {
+  const measure = vi
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      return (
+        this.classList.contains('gantt-fault-tooltip')
+          ? { left: 0, top: 0, width: 200, height: 80 }
+          : { left: 100, top: 200, width: 600, height: 280 }
+      ) as DOMRect;
+    });
+  try {
+    render(
+      <Gantt
+        schedule={workbench.baseline}
+        failure={workbench.event}
+        machines={workbench.machines}
+        range={range}
+      />,
+    );
+    const region = screen.getByRole('group', { name: `${workbench.event.machine_id} 停机留痕` });
+    fireEvent.mouseEnter(region, { clientX: 250, clientY: 250 });
+    const tip = screen.getByRole('tooltip');
+    expect(tip.style.left).toBe('162px');
+    expect(tip.style.top).toBe('62px');
+    fireEvent.mouseMove(region, { clientX: 680, clientY: 470 });
+    expect(tip.style.left).toBe('368px');
+    expect(tip.style.top).toBe('178px');
+    fireEvent.mouseMove(region, { clientX: 100, clientY: 200 });
+    expect(tip.style.left).toBe('12px');
+    expect(tip.style.top).toBe('12px');
+    fireEvent.scroll(tip.parentElement!);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  } finally {
+    measure.mockRestore();
+  }
+});
+
 it('recalculates chart coordinates and label spacing on container and window resize, then cleans up', () => {
   let measuredWidth = 1200;
   let notifyResize: () => void = () => {};

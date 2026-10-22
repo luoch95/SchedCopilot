@@ -39,12 +39,28 @@ export interface Decision {
   created_at: string;
 }
 export interface PlanPublication {
+  history?: {
+    version: number;
+    published_at: string | null;
+    published_by: string | null;
+    version_summary: string;
+    details: string[];
+  }[];
   version: number;
   published_at: string | null;
   published_by: string | null;
   version_summary: string;
+  fault_analysis?: {
+    event_revision: number;
+    baseline_version: number;
+    affected: string[] | null;
+    workflow: WorkflowResult | null;
+    baseline?: Schedule;
+    simulation?: Simulation;
+  } | null;
 }
 export interface Workbench {
+  fault_review?: FaultReview | null;
   event_history?: (Failure & { revision: number; created_at: string })[];
   plan_publication?: PlanPublication;
   baseline: Schedule;
@@ -56,6 +72,25 @@ export interface Workbench {
   affected: string[];
   issues: string[];
   history: Decision[];
+}
+export interface FaultReview {
+  kind?: 'assessment';
+  workflow_id?: string;
+  workflow?: WorkflowResult;
+  assessment?: AnalysisAssessment;
+  analysis?: NonNullable<PlanPublication['fault_analysis']> | null;
+  id: string;
+  simulation_id: string;
+  candidate_id: string;
+  baseline_fingerprint: string;
+  event_revision: number;
+  status: 'pending' | 'approved' | 'rejected' | 'superseded' | 'published';
+  reason: string;
+  review_reason: string;
+  created_at: string;
+  reviewed_at: string | null;
+  candidate_label: string;
+  metrics: { total_lateness_minutes: number; moved_operations: number } | null;
 }
 export interface Change {
   工序: string;
@@ -188,12 +223,20 @@ export interface QualityReport {
   stop_reason: string | null;
   history: { round: number; issues: QualityIssue[]; repair: string | null }[];
 }
+export interface AnalysisAssessment {
+  outcome: 'no_feasible_candidate';
+  summary: string;
+  findings: WorkflowStatement[];
+  recommendations: string[];
+  limitations: string[];
+}
 export interface WorkflowReport {
   quality?: QualityReport | null;
   status: 'success' | 'warning' | 'blocked' | 'failed';
   warnings: WorkflowNotice[];
   errors: WorkflowNotice[];
   data: {
+    assessment?: AnalysisAssessment | null;
     summary?: string;
     facts?: WorkflowStatement[];
     assumptions?: WorkflowStatement[];

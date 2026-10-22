@@ -52,6 +52,7 @@ class WorkbenchSnapshot:
     plan_publication: dict = field(default_factory=dict)
     operation_labels: dict = field(default_factory=dict)
     event_history: list[dict] = field(default_factory=list)
+    fault_review: dict | None = None
 
 
 @dataclass(frozen=True)

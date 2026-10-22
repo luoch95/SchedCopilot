@@ -14,7 +14,7 @@ from ..tools.explanation_context import (
 from .contracts.common import AgentContext, Notice
 from .contracts.inputs import ExplanationInput
 from .contracts.results import ExplanationData, ExplanationResult
-from .quality import QualityFailure, checked_execute, finish_quality
+from .quality import QualityFailure, checked_execute, failure_notice, failure_status, finish_quality
 from .result_validation import AgentContractError, validate_request, validate_result
 
 logger = logging.getLogger(__name__)
@@ -137,18 +137,11 @@ class ExplanationAgent:
                 context=checked.context,
                 prompt_version=prompt.role_metadata.prompt_version,
                 requirements_version=prompt.role_metadata.requirements_version,
-                status="failed",
+                status=failure_status(exc),
                 data=None,
                 evidence_refs=[],
                 warnings=[],
-                errors=[
-                    Notice(
-                        code="EXPLANATION_TOOL_FAILED",
-                        message="解释工具执行失败或输出无效。",
-                        repair_hint="检查上游证据与工具记录后重试。",
-                        evidence_refs=[],
-                    )
-                ],
+                errors=[failure_notice(exc, "explanation", "EXPLANATION_TOOL_FAILED")],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
         result = finish_quality(result, quality)

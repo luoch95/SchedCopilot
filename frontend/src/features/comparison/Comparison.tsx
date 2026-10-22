@@ -13,12 +13,14 @@ export function Comparison({
   range,
   workflow,
   mode = 'full',
+  archived = false,
 }: {
   state: Workbench;
   simulation: Simulation;
   range: [number, number];
   workflow: WorkflowResult | null;
   mode?: 'full' | 'plans' | 'details';
+  archived?: boolean;
 }) {
   const candidates = simulation.candidates;
   const waitingIds = new Set(
@@ -46,7 +48,9 @@ export function Comparison({
               <p className="eyebrow">SCENARIO COMPARISON</p>
               <h2 id="section-comparison">方案比较</h2>
             </div>
-            <span className="tag">{candidates.length} 套候选 · 尚未发布</span>
+            <span className="tag">
+              {candidates.length} 套候选 · {archived ? '原始分析存档' : '尚未发布'}
+            </span>
           </div>
         )}
         {mode === 'full' && <MetricsTable candidates={candidates} />}
@@ -79,7 +83,11 @@ export function Comparison({
                   <p className="candidate-delay">
                     总延期 {item.metrics.total_lateness_minutes} 分钟
                   </p>
-                  {isWaiting(item) && <p className="hint">原设备等待恢复后的排产候选 · 尚未发布</p>}
+                  {isWaiting(item) && (
+                    <p className="hint">
+                      原设备等待恢复后的排产候选 · {archived ? '原始分析存档' : '尚未发布'}
+                    </p>
+                  )}
                   <Gantt
                     tone={isWaiting(item) ? 'red' : 'green'}
                     schedule={item.schedule}

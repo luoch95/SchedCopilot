@@ -52,11 +52,20 @@ class EvaluationTradeoff(Contract):
     evidence_refs: Refs
 
 
+class AnalysisAssessment(Contract):
+    outcome: Literal["no_feasible_candidate"]
+    summary: Text
+    findings: list[Statement]
+    recommendations: list[Text]
+    limitations: list[Text]
+
+
 class EvaluationData(Contract):
     candidate_batch_id: Text
     criteria_ref: Text | None
     evaluations: list[CandidateEvaluation]
     tradeoffs: list[EvaluationTradeoff]
+    assessment: AnalysisAssessment | None = None
 
 
 class ExplanationTradeoff(Contract):

@@ -1,10 +1,16 @@
 import { DemoAccessBar, SessionBar } from '../session';
 import { useEffect, useState } from 'react';
-import type { InsertionRequestRecord, Workbench, WorkflowResult } from '../../shared/api/contracts';
+import type {
+  InsertionRequestRecord,
+  Simulation,
+  Workbench,
+  WorkflowResult,
+} from '../../shared/api/contracts';
 import { Modal } from '../../shared/ui/Modal';
 import { CurrentPlan, timelineRange } from '../plan';
-import { workbenchApi } from '../workbench';
-import { WorkflowPanel } from '../analysis';
+import { publishedFault, workbenchApi } from '../workbench';
+import { FaultAnalysisDetails, FaultProgress } from '../analysis';
+import { FaultReviewPanel } from './FaultReviewPanel';
 import { AiAnalysisButton } from '../../shared/ui/AiAnalysisButton';
 import { WorkbenchTitle } from '../../shared/ui/WorkbenchTitle';
 import { DateRangeFilter } from '../../shared/ui/DateRangeFilter';
@@ -19,6 +25,7 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState<Workbench | null>(null);
   const [workflow, setWorkflow] = useState<WorkflowResult | null>(null);
+  const [simulation, setSimulation] = useState<Simulation | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [planRevision, setPlanRevision] = useState(0);
@@ -34,6 +41,7 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     setLoading(true);
     setError('');
     setWorkflow(null);
+    setSimulation(null);
     setAnalysisError(false);
     void workbenchApi
       .load()
@@ -43,7 +51,10 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
         return workbenchApi
           .latestWorkflow()
           .then((saved) => {
-            if (active) setWorkflow(saved?.workflow ?? null);
+            if (active) {
+              setWorkflow(saved?.workflow ?? null);
+              setSimulation(saved?.simulation ?? null);
+            }
           })
           .catch(() => {
             if (active) setAnalysisError(true);
@@ -60,14 +71,23 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     };
   }, [planRevision]);
   const fault = state?.event;
-  const step =
-    workflow?.status === 'completed'
-      ? 'AI评估方案已成，待排产员发布'
-      : workflow?.status === 'failed' || workflow?.status === 'blocked'
-        ? 'AI分析未完成，待排产员处理'
-        : analysisError
-          ? '分析记录暂不可用'
-          : '故障已保存（待生成方案）';
+  const publication = publishedFault(state);
+  const analysisWorkflow = workflow ?? publication?.workflow ?? null;
+  const step = publication
+    ? `调整方案已发布（V${state!.baseline.version}）`
+    : state?.fault_review?.status === 'pending'
+      ? 'AI评估方案已提交，待管理者审批'
+      : state?.fault_review?.status === 'approved'
+        ? '管理者已批准，待排产员发布'
+        : state?.fault_review?.status === 'rejected'
+          ? '管理者已退回，待排产员修改'
+          : workflow?.status === 'completed'
+            ? 'AI评估方案已成，待提交管理者审批'
+            : workflow?.status === 'failed' || workflow?.status === 'blocked'
+              ? 'AI分析未完成，待排产员处理'
+              : analysisError
+                ? '分析记录暂不可用'
+                : '故障已保存（待生成方案）';
   const broadcast = [
     fault
       ? `${fault.machine_id} 停机故障 · ${step}`
@@ -115,36 +135,46 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
         <section className="dashboard-alerts leader-alerts" aria-label="异常与预警">
           <header className="dashboard-card-heading">
             <h2>异常与预警</h2>
-            <DateRangeFilter initialRange={faultRange} onChange={setFaultRange} />
+            <div className="inline-actions">
+              <DateRangeFilter initialRange={faultRange} onChange={setFaultRange} />
+              {sync}
+            </div>
           </header>
           <div className="dashboard-alerts-body" tabIndex={0} aria-label="故障与预警内容">
             {error && (
               <div role="alert">
                 <p>{error}</p>
-                {sync}
               </div>
             )}
             {!state && loading && <p role="status">正在同步车间信息…</p>}
             {fault && inDateRange(fault.started_at, faultRange) && (
               <section className="fault-event-banner" aria-label="已登记设备故障">
                 <div className="fault-card-heading">
-                  <h2>⚠️ 已登记设备故障：{fault.machine_id} 停机</h2>
+                  <div className="fault-card-identity">
+                    <h2>⚠️ 已登记设备故障：{fault.machine_id} 停机</h2>
+                    <p className="fault-analysis-window">
+                      分析窗口：{stamp(fault.started_at)} —{' '}
+                      {fault.recovered_at ? stamp(fault.recovered_at) : '恢复时间未知'}
+                    </p>
+                  </div>
                   <div className="fault-task-actions">
                     <div className="ai-analysis-action">
                       <AiAnalysisButton onClick={() => setAnalysisOpen(true)} />
                     </div>
                   </div>
                 </div>
-                <div className="fault-card-details">
-                  <p>
-                    分析窗口：{stamp(fault.started_at)} —{' '}
-                    {fault.recovered_at ? stamp(fault.recovered_at) : '恢复时间未知'}
-                  </p>
-                  <p className="workflow-current-step">当前步骤：{step}</p>
+                <div className="fault-process-row">
+                  <FaultProgress state={state!} workflow={workflow} simulation={simulation} />
                 </div>
                 <p className="fault-impact-summary">
-                  <strong>结论简要：当前计划有 {state!.affected.length} 道工序受故障影响。</strong>
+                  <strong>
+                    结论简要：
+                    {publication
+                      ? `${publication.affected ? `本次故障原影响 ${publication.affected.length} 道工序；` : ''}发布后当前计划剩余 ${state!.affected.length} 道工序受故障影响。`
+                      : `当前计划有 ${state!.affected.length} 道工序受故障影响。`}
+                  </strong>
                 </p>
+                <FaultReviewPanel state={state!} onChange={setState} />
               </section>
             )}
             {fault && !inDateRange(fault.started_at, faultRange) && (
@@ -189,7 +219,11 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
           onClose={() => setAnalysisOpen(false)}
         >
           {analysisError && <p role="alert">分析记录读取失败，请关闭后同步最新计划重试。</p>}
-          <WorkflowPanel running={false} disabled result={workflow} onRun={() => {}} />
+          <FaultAnalysisDetails
+            state={state}
+            workflow={analysisWorkflow}
+            simulation={state.fault_review?.analysis?.simulation ?? simulation}
+          />
         </Modal>
       )}
       {selected && (

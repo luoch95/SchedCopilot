@@ -2,6 +2,7 @@ from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from test_fault_reviews import approve_fault
 
 from sched_copilot.api import create_app
 from sched_copilot.infrastructure.sqlite_repository import DecisionStore
@@ -100,6 +101,7 @@ def test_api_persists_authoritative_candidates_and_publication_is_idempotent(tmp
         assert (
             restarted.post("/api/decisions", json={**decision, "schedule": {}}).status_code == 422
         )
+        approve_fault(restarted, decision["simulation_id"], decision["candidate_id"])
         published = restarted.post("/api/decisions", json=decision)
         assert published.status_code == 200
         assert (

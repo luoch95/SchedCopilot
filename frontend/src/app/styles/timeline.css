@@ -1,9 +1,11 @@
 .chart-scroll {
+  position: relative;
   width: 100%;
   min-width: 0;
   overflow-x: auto;
 }
 .gantt {
+  position: relative;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -35,10 +37,30 @@
     sans-serif;
 }
 .fault-label {
-  fill: #aa4c3a;
+  fill: #8c8587;
   font:
     10px 'Microsoft YaHei',
     sans-serif;
+}
+.gantt-fault-region:focus-visible {
+  outline: 1px solid #8799aa;
+}
+.gantt-fault-tooltip {
+  position: absolute;
+  z-index: 5;
+  width: min(340px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #dce3e9;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 4px 16px #173b5014;
+  color: #526171;
+  font-size: 12px;
+  line-height: 1.6;
+  pointer-events: none;
 }
 .gantt-inspector {
   background: #f4f8fa;

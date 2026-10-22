@@ -1,6 +1,19 @@
-export function AiAnalysisButton({ onClick }: { onClick: () => void }) {
+import { WriteButton } from './WriteButton';
+
+export function AiAnalysisButton({
+  onClick,
+  label = '查看 AI 分析详情',
+  disabled = false,
+  write = false,
+}: {
+  onClick: () => void;
+  label?: string;
+  disabled?: boolean;
+  write?: boolean;
+}) {
+  const Button = write ? WriteButton : 'button';
   return (
-    <button className="ai-analysis-button" onClick={onClick}>
+    <Button className="ai-analysis-button" onClick={onClick} disabled={disabled}>
       <svg
         className="ai-bot-icon"
         viewBox="0 0 24 24"
@@ -22,7 +35,7 @@ export function AiAnalysisButton({ onClick }: { onClick: () => void }) {
           <circle cx="15" cy="11" r="1.3" />
         </g>
       </svg>
-      <span>查看 AI 分析详情</span>
-    </button>
+      <span>{label}</span>
+    </Button>
   );
 }

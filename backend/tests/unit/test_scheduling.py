@@ -41,6 +41,74 @@ def test_candidates_are_traceable_and_valid():
     )
 
 
+def test_replan_keeps_other_machine_outage_as_a_resource_constraint():
+    baseline = demo_schedule()
+    current = MachineFailure(
+        "M2",
+        BASE_TIME.replace(hour=13),
+        BASE_TIME.replace(hour=15),
+        "M2停机",
+        BASE_TIME.replace(hour=13),
+    )
+    other = MachineFailure(
+        "M3",
+        BASE_TIME.replace(hour=13),
+        BASE_TIME.replace(hour=17),
+        "历史M3停机",
+        BASE_TIME.replace(hour=13),
+    )
+
+    candidates = generate_candidates(
+        baseline,
+        current,
+        demo_machines(),
+        demo_orders(),
+        additional_failures=(other,),
+    )
+
+    for candidate in candidates:
+        op = candidate.schedule.by_id("O1002-OP2")
+        assert op.machine_id != "M3" or op.start >= other.recovered_at
+        assert not validate_schedule(
+            candidate.schedule, demo_machines(), current, baseline, (other,)
+        )
+
+    invalid_operations = tuple(
+        replace(op, machine_id="M3", start=BASE_TIME.replace(hour=14))
+        if op.id == "O1002-OP2"
+        else op
+        for op in baseline.operations
+    )
+    invalid = replace(baseline, operations=invalid_operations)
+    assert any(
+        "M3" in error and "故障窗口冲突" in error
+        for error in validate_schedule(invalid, demo_machines(), current, baseline, (other,))
+    )
+
+
+def test_blockout_search_skips_adjacent_failure_and_operation_windows():
+    baseline = demo_schedule()
+    current = MachineFailure(
+        "M2",
+        BASE_TIME.replace(hour=13),
+        BASE_TIME.replace(hour=15),
+        "M2",
+        BASE_TIME.replace(hour=13),
+    )
+    m3 = MachineFailure(
+        "M3",
+        BASE_TIME.replace(hour=13),
+        BASE_TIME.replace(hour=17),
+        "M3",
+        BASE_TIME.replace(hour=13),
+    )
+    candidates = generate_candidates(
+        baseline, current, demo_machines(), demo_orders(), additional_failures=(m3,)
+    )
+    op = candidates[1].schedule.by_id("O1002-OP2")
+    assert not (op.machine_id == "M3" and op.start < m3.recovered_at)
+
+
 def test_candidate_is_bound_to_baseline_and_event():
     candidate = generate_candidates(demo_schedule(), failure(), demo_machines(), demo_orders())[0]
     assert candidate.baseline_fingerprint == demo_schedule().fingerprint

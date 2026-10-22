@@ -35,6 +35,7 @@ class WorkflowEngine:
         orchestrator=None,
         demo_gate=None,
         session_store=None,
+        failure_provider=None,
     ):
         self._sessions = OrderedDict()
         self._lock = RLock()
@@ -43,15 +44,19 @@ class WorkflowEngine:
         self.production_provider = production_provider or (lambda: None)
         self.demo_gate = demo_gate
         self.session_store = session_store
+        self.failure_provider = failure_provider or (lambda: ())
 
     @staticmethod
-    def _fingerprint(baseline, event, machines, orders, snapshot_time, revision, supplemental):
+    def _fingerprint(
+        baseline, event, machines, orders, snapshot_time, revision, supplemental, failures=()
+    ):
         return sha256(
             json.dumps(
                 {
                     "baseline": baseline.fingerprint,
                     "event": digest(event),
                     "revision": revision,
+                    "failures": [digest(failure) for failure in failures],
                     "machines": [
                         asdict(m) | {"capabilities": sorted(m.capabilities)} for m in machines
                     ],
@@ -65,9 +70,32 @@ class WorkflowEngine:
         ).hexdigest()
 
     def matches_snapshot(self, payload, baseline, event, machines, orders, snapshot_time, revision):
+        failures = self._ordered_failures(event)
         return payload["context"]["input_fingerprint"] == self._fingerprint(
-            baseline, event, machines, orders, snapshot_time, revision, self.production_provider()
+            baseline,
+            event,
+            machines,
+            orders,
+            snapshot_time,
+            revision,
+            self.production_provider(),
+            failures,
         )
+
+    def _ordered_failures(self, event):
+        """Build the workflow failure list with the active event first.
+
+        The scheduling tool treats the first failure as the event being
+        replanned and the remaining entries as independent blocking windows.
+        The repository returns windows in history order, which is not
+        necessarily the active event (for example after an M2 event is added
+        after the seeded M3 event).  Keeping that order leaked a stale event
+        into the primary slot and allowed transfers through another outage.
+        """
+        others = tuple(
+            failure for failure in self.failure_provider() if digest(failure) != digest(event)
+        )
+        return (event, *others)
 
     def _claim_demo(self):
         if not self.demo_gate.claim():
@@ -93,8 +121,9 @@ class WorkflowEngine:
         if demo_fallback and not self.demo_gate.status()["available"]:
             raise DemoCooldown("兜底演示冷却中，20 分钟内只能触发一次。可关闭演示后正常生成。")
         supplemental = self.production_provider()
+        failures = self._ordered_failures(event)
         fingerprint = self._fingerprint(
-            baseline, event, machines, orders, snapshot_time, revision, supplemental
+            baseline, event, machines, orders, snapshot_time, revision, supplemental, failures
         )
         context = AgentContext(
             case_id="workbench",
@@ -137,6 +166,7 @@ class WorkflowEngine:
                 question,
                 intent,
                 supplemental,
+                failures=failures,
             )
         trace_id = f"TRC-{uuid4().hex.upper()}"
         if on_progress:
@@ -147,6 +177,8 @@ class WorkflowEngine:
             **({"fallback_demo": self._claim_demo} if demo_fallback else {}),
         )
         result = run.state
+        if self._ordered_failures(event) != failures:
+            raise SnapshotConflict("设备故障数据已更新，请重新生成方案")
         if self.production_provider() != supplemental:
             raise SnapshotConflict("生产资源数据已更新，请重新生成方案")
         session_id = str(uuid4())
@@ -180,6 +212,7 @@ class WorkflowEngine:
             intent == "generate_candidates"
             and result.workflow_status == "completed"
             and result.scheduling_result
+            and result.scheduling_result.data
         ):
             for item in result.scheduling_result.data.candidates:
                 raw = result.evidence_catalog[item.plan_ref].content
@@ -229,6 +262,7 @@ class WorkflowEngine:
         question,
         intent,
         supplemental=None,
+        failures=(),
     ):
         common = {"context": context, "evidence_catalog": {}}
         validation = ValidationInput.model_validate(
@@ -275,13 +309,14 @@ class WorkflowEngine:
                     ],
                     "failures": [
                         {
-                            "event_id": f"event:{context.event_version}",
-                            "machine_id": event.machine_id,
-                            "started_at": event.started_at,
-                            "estimated_recovery_at": event.recovered_at,
-                            "received_at": event.received_at,
-                            "source": event.source,
+                            "event_id": f"event:{index}",
+                            "machine_id": item.machine_id,
+                            "started_at": item.started_at,
+                            "estimated_recovery_at": item.recovered_at,
+                            "received_at": item.received_at,
+                            "source": item.source,
                         }
+                        for index, item in enumerate(failures or (event,))
                     ],
                 },
             }

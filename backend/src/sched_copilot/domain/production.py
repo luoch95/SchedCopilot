@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from .errors import RuleViolation
 from .models import MachineFailure, Operation, Schedule
 from .scheduling import overlaps
+from .time_display import production_time
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class ProductionResources:
     operation_molds: dict[str, str]
     initial_molds: dict[str, str]
     changeover_minutes: int
+    failures: tuple[MachineFailure, ...] = ()
 
     def configuration_errors(self, schedule, machines):
         ids = {m.id for m in machines}
@@ -57,18 +59,31 @@ class ProductionResources:
         earliest = max(earliest, resource_end + timedelta(minutes=setup))
         if last:
             earliest = max(earliest, last.end + timedelta(minutes=setup))
+        attempts = []
         for left, right in self.windows(machine_id):
             start = max(earliest, left + timedelta(minutes=setup))
-            if machine_id == failure.machine_id and overlaps(
-                start - timedelta(minutes=setup),
-                start + timedelta(minutes=op.duration_minutes),
-                failure.started_at,
-                failure.recovered_at,
-            ):
-                start = max(start, failure.recovered_at + timedelta(minutes=setup))
+            blocked_windows = {
+                (item.machine_id, item.started_at): item for item in (failure,) + self.failures
+            }
+            for blocked in sorted(blocked_windows.values(), key=lambda f: f.started_at):
+                if machine_id == blocked.machine_id and overlaps(
+                    start - timedelta(minutes=setup),
+                    start + timedelta(minutes=op.duration_minutes),
+                    blocked.started_at,
+                    blocked.recovered_at or right,
+                ):
+                    start = max(start, (blocked.recovered_at or right) + timedelta(minutes=setup))
             if start + timedelta(minutes=op.duration_minutes) <= right:
                 return start
-        raise RuleViolation("班次范围内没有可用时段")
+            attempts.append((start, start + timedelta(minutes=op.duration_minutes), right))
+        start, end, shift_end = attempts[-1]
+        raise RuleViolation(
+            f"工序 {op.id} 使用模具 {mold} 在设备 {machine_id} 加工需 "
+            f"{op.duration_minutes} 分钟，换型准备需 {setup} 分钟。"
+            f"按本策略安排，最早可在 {production_time(start)} 开工，"
+            f"预计 {production_time(end)} 完工，超出班次结束时间 "
+            f"{production_time(shift_end)}；班次范围内没有可用时段。"
+        )
 
     def check(self, schedule: Schedule, failure: MachineFailure):
         errors = []
@@ -89,10 +104,14 @@ class ProductionResources:
                     for left, right in self.windows(machine_id)
                 ):
                     errors.append("加工或换型超出班次")
-                if machine_id == failure.machine_id and overlaps(
-                    setup_start, op.end, failure.started_at, failure.recovered_at
-                ):
-                    errors.append("加工或换型与故障窗口冲突")
+                blocked_windows = {
+                    (item.machine_id, item.started_at): item for item in (failure,) + self.failures
+                }
+                for blocked in blocked_windows.values():
+                    if machine_id == blocked.machine_id and overlaps(
+                        setup_start, op.end, blocked.started_at, blocked.recovered_at or op.end
+                    ):
+                        errors.append("加工或换型与故障窗口冲突")
                 previous, previous_end = mold, op.end
         for mold in set(self.operation_molds.values()):
             operations = sorted(

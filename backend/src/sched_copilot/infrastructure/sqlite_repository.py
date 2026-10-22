@@ -16,9 +16,12 @@ from ..domain.models import (
     Schedule,
     digest,
 )
-from ..domain.scheduling import validate_schedule
+from ..domain.scheduling import affected_operations, validate_schedule
+from . import fault_reviews
+from .fault_publication import fault_publication
 from .plan_publication import (
     insertion_publication,
+    plan_timeline,
     publication_info,
     raw_version,
     request_numbers,
@@ -92,6 +95,7 @@ class DecisionStore:
                     id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL
                 );
             """)
+            conn.executescript(fault_reviews.SCHEMA)
             conn.execute(
                 "INSERT OR IGNORE INTO current_plan VALUES (1, ?)", (schedule_json(baseline),)
             )
@@ -153,6 +157,42 @@ class DecisionStore:
         payload.setdefault("created_at", row[2])
         return payload, row[1]
 
+    def fault_analysis(self, revision: int) -> dict | None:
+        """Recover the original analysis independently of the current event/plan."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT w.payload,s.candidates,s.event FROM workflow_runs w "
+                "LEFT JOIN simulations s ON s.id=w.simulation_id ORDER BY w.sequence DESC"
+            ).fetchall()
+            for raw, candidates, event in rows:
+                payload = json.loads(raw)
+                if (
+                    payload.get("intent") != "generate_candidates"
+                    or payload.get("status") != "completed"
+                ):
+                    continue
+                assessment = (
+                    payload.get("results", {}).get("evaluation", {}).get("data") or {}
+                ).get("assessment")
+                if assessment and payload["context"]["event_version"] == revision:
+                    return {
+                        "event_revision": revision,
+                        "baseline_version": int(payload["context"]["current_plan_version"]),
+                        "workflow": payload,
+                    }
+                if not candidates:
+                    continue
+                plans = parse_candidates(candidates)
+                if plans and plans[0].event_revision == revision:
+                    return fault_publication(
+                        conn,
+                        {
+                            "candidate": asdict(plans[0]),
+                            "event": json.loads(event),
+                        },
+                    )
+        return None
+
     def _restore_publication_metadata(self):
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -198,15 +238,22 @@ class DecisionStore:
 
     def plan_metadata(self, version):
         with self._connect() as conn:
+            timeline = plan_timeline(conn, version)
             rows = conn.execute(
                 "SELECT created_at,result,evidence FROM decisions "
                 "WHERE action='publish' ORDER BY id DESC"
             ).fetchall()
-        for created_at, payload, raw in rows:
-            if raw_version(payload) == version:
-                return publication_info(version, created_at, json.loads(raw))
+            for created_at, payload, raw in rows:
+                if raw_version(payload) == version:
+                    evidence = json.loads(raw)
+                    return {
+                        **publication_info(version, created_at, evidence),
+                        "history": timeline,
+                        "fault_analysis": fault_publication(conn, evidence),
+                    }
         return {
             "version": version,
+            "history": timeline,
             "published_at": None,
             "published_by": None,
             "version_summary": "初始演示计划" if version == 1 else "历史版本，未记录发布信息",
@@ -276,6 +323,18 @@ class DecisionStore:
         if not row:
             return None
         return parse_event(row[0]), row[1]
+
+    def failure_windows(self) -> tuple[MachineFailure, ...]:
+        """Keep independent outages; a revision of the same start replaces its older value."""
+        windows = {}
+        for item in self.event_history():
+            payload = {k: v for k, v in item.items() if k not in {"revision", "created_at"}}
+            event = parse_event(json.dumps(payload))
+            windows.setdefault((event.machine_id, event.started_at), event)
+        values = tuple(windows.values())
+        if len(values) > 1:
+            values = tuple(item for item in values if item.source != "系统初始化示例")
+        return values
 
     def snapshot(self) -> tuple[Schedule, MachineFailure, int]:
         """Read the formal plan and active event in one consistent database snapshot."""
@@ -366,6 +425,25 @@ class DecisionStore:
             )
             return cursor.lastrowid
 
+    def fault_review(self, revision, fingerprint):
+        with self._connect() as conn:
+            return fault_reviews.current_review(conn, revision, fingerprint)
+
+    def submit_fault_review(self, simulation_id, candidate_id, reason, request_id):
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            return fault_reviews.submit(conn, simulation_id, candidate_id, reason, request_id)
+
+    def review_fault(self, review_id, action, reason):
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            return fault_reviews.review(conn, review_id, action, reason)
+
+    def submit_assessment_review(self, workflow_id, reason, request_id):
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            return fault_reviews.submit_assessment(conn, workflow_id, reason, request_id)
+
     def decide(
         self,
         candidate: CandidatePlan,
@@ -374,6 +452,7 @@ class DecisionStore:
         action: str,
         reason: str,
         request_id: str,
+        approval_simulation_id: str | None = None,
     ) -> Schedule:
         if action not in {"publish", "reject"} or not reason.strip() or not request_id:
             raise RuleViolation("需要有效操作、人工理由和请求 ID")
@@ -409,11 +488,28 @@ class DecisionStore:
                 raise RuleViolation("事件版本已变化，请重新分析")
             if action == "publish" and event.recovered_at is None:
                 raise RuleViolation("恢复时间未知，不能发布候选方案")
-            errors = validate_schedule(candidate.schedule, machines, event, baseline)
+            failure_rows = conn.execute(
+                "SELECT payload FROM event_history ORDER BY revision DESC"
+            ).fetchall()
+            windows = {}
+            for row in failure_rows:
+                saved_failure = parse_event(row[0])
+                windows.setdefault(
+                    (saved_failure.machine_id, saved_failure.started_at), saved_failure
+                )
+            saved_windows = tuple(windows.values())
+            if len(saved_windows) > 1:
+                saved_windows = tuple(
+                    item for item in saved_windows if item.source != "系统初始化示例"
+                )
+            additional = tuple(f for f in saved_windows if f != event)
+            errors = validate_schedule(candidate.schedule, machines, event, baseline, additional)
             if errors:
                 raise RuleViolation("发布校验失败：" + "; ".join(errors))
             if candidate.schedule.version != baseline.version + 1:
                 raise RuleViolation("候选版本号无效")
+            if action == "publish" and approval_simulation_id is not None:
+                fault_reviews.require_approval(conn, candidate, approval_simulation_id)
             result = candidate.schedule if action == "publish" else baseline
             if action == "publish":
                 conn.execute(
@@ -433,6 +529,7 @@ class DecisionStore:
                         {
                             "candidate": asdict(candidate),
                             "event": asdict(event),
+                            "affected": [op.id for op in affected_operations(baseline, event)],
                             "published_by": "planner_01",
                             "version_summary": f"因设备 {event.machine_id} 故障调整排产计划。",
                         },

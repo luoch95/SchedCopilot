@@ -1,6 +1,7 @@
 """RAG adds reference material without changing scheduling or human decisions."""
 
 from fastapi.testclient import TestClient
+from test_fault_reviews import approve_fault
 from test_insertion_closure import act, assess, submit
 
 from sched_copilot.api import create_app
@@ -50,6 +51,7 @@ def test_fault_followup_retrieves_sources_without_changing_plan(tmp_path):
             workflow_id = body["workflow"]["id"]
         assert client.get("/api/workbench").json() == before
         candidate = candidates[0]
+        approve_fault(client, generated["simulation"]["id"], candidate["id"])
         response = client.post(
             "/api/decisions",
             json={

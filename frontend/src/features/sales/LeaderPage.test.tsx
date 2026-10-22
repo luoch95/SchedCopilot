@@ -114,18 +114,18 @@ it('recovers a failed formal plan read and refreshes to the latest version', asy
   render(<LeaderPage onSwitchRole={() => {}} />);
   await screen.findByText('执行计划读取失败，请重试。');
   failed = false;
-  fireEvent.click(screen.getByRole('button', { name: '同步最新计划' }));
+  fireEvent.click(screen.getAllByRole('button', { name: '同步最新计划' })[0]);
   fireEvent.click(await screen.findByText('展开查看底层排产执行计划（当前版本 V2）'));
   await screen.findByRole('button', { name: '查看执行计划 V2 发布信息' });
   version = 3;
-  fireEvent.click(screen.getByRole('button', { name: '同步最新计划' }));
+  fireEvent.click(screen.getAllByRole('button', { name: '同步最新计划' })[0]);
   await screen.findByRole('button', { name: '查看执行计划 V3 发布信息' });
 });
 
 it('opens the same fault analysis in a read-only drawer without navigating or writing', async () => {
   render(<LeaderPage onSwitchRole={() => {}} />);
   const trigger = await screen.findByRole('button', { name: '查看 AI 分析详情' });
-  await screen.findByText('当前步骤：AI评估方案已成，待排产员发布');
+  await screen.findByRole('list', { name: '故障处理流程' });
   const hash = location.hash;
   fireEvent.click(trigger);
   const dialog = screen.getByRole('dialog', { name: 'M1故障 R1 · 智能分析明细' });

@@ -35,6 +35,7 @@ def validate_schedule(
     machines: tuple[Machine, ...],
     failure: MachineFailure | None = None,
     baseline: Schedule | None = None,
+    additional_failures: tuple[MachineFailure, ...] = (),
 ) -> tuple[str, ...]:
     errors: list[str] = []
     machine_map = {machine.id: machine for machine in machines}
@@ -57,9 +58,10 @@ def validate_schedule(
             errors.append(f"{op.id} 缺少时区")
         by_machine[op.machine_id].append(op)
         by_order[op.order_id].append(op)
-        if failure and failure.recovered_at and op.machine_id == failure.machine_id:
-            if overlaps(op.start, op.end, failure.started_at, failure.recovered_at):
-                errors.append(f"{op.id} 与设备故障窗口冲突")
+        for blocked in ((failure,) if failure else ()) + additional_failures:
+            if op.machine_id == blocked.machine_id and op.end > blocked.started_at:
+                if blocked.recovered_at is None or op.start < blocked.recovered_at:
+                    errors.append(f"{op.id} 与设备 {blocked.machine_id} 故障窗口冲突")
         if baseline:
             original = next((item for item in baseline.operations if item.id == op.id), None)
             if original:
@@ -116,12 +118,28 @@ def metrics(schedule: Schedule, orders: tuple[Order, ...], baseline: Schedule) -
 def _available_start(
     start: datetime, duration: int, occupied: list[tuple[datetime, datetime, str]]
 ) -> tuple[datetime, tuple[str, ...]]:
-    blockers = []
-    for left, right, reference in sorted(occupied):
-        if overlaps(start, start + timedelta(minutes=duration), left, right):
-            start = right
-            blockers.append(reference)
-    return start, tuple(blockers)
+    """Find the first interval that clears every machine blockout.
+
+    Blockouts are rechecked after every forward jump. This matters when a
+    failure, maintenance window, and an existing operation are adjacent or
+    overlapping: checking only the original start can still return a second
+    conflict after the first jump.
+    """
+    blockers: list[str] = []
+    windows = sorted(occupied, key=lambda item: (item[0], item[1], item[2]))
+    while True:
+        end = start + timedelta(minutes=duration)
+        conflict = next(
+            (item for item in windows if overlaps(start, end, item[0], item[1])),
+            None,
+        )
+        if conflict is None:
+            return start, tuple(dict.fromkeys(blockers))
+        left, right, reference = conflict
+        blockers.append(reference)
+        if right <= start:
+            raise ValueError("无效的机台阻断时间")
+        start = right
 
 
 def _replan(
@@ -132,10 +150,29 @@ def _replan(
     allow_transfer: bool,
     eligible_machine_ids: Mapping[str, frozenset[str]] | None = None,
     production=None,
+    additional_failures: tuple[MachineFailure, ...] = (),
 ) -> tuple[Schedule, tuple[tuple[str, tuple[str, ...]], ...]]:
     occupied: dict[str, list[tuple[datetime, datetime, str]]] = defaultdict(list)
     root = f"故障:{failure.machine_id}"
     occupied[failure.machine_id].append((failure.started_at, failure.recovered_at, root))
+    for blocked in additional_failures:
+        if blocked.recovered_at:
+            occupied[blocked.machine_id].append(
+                (blocked.started_at, blocked.recovered_at, f"failure:{blocked.machine_id}")
+            )
+    if production is not None:
+        for blocked in production.failures:
+            if blocked.recovered_at is not None:
+                key = (blocked.machine_id, blocked.started_at)
+                existing = {
+                    (machine, item_start)
+                    for machine, entries in occupied.items()
+                    for item_start, _, _ in entries
+                }
+                if key not in existing:
+                    occupied[blocked.machine_id].append(
+                        (blocked.started_at, blocked.recovered_at, f"failure:{blocked.machine_id}")
+                    )
     placed = {op.id: op for op in baseline.operations if op.status != TaskStatus.PLANNED}
     for op in placed.values():
         occupied[op.machine_id].append((op.start, op.end, op.id))
@@ -185,6 +222,7 @@ def _replan(
         if op.id in machine_predecessors:
             earliest = max(earliest, placed[machine_predecessors[op.id]].end)
         options = []
+        placement_errors = []
         original_blockers = ()
         for machine in machines:
             if eligible_machine_ids is not None and machine.id not in eligible_machine_ids.get(
@@ -198,14 +236,20 @@ def _replan(
             start, blockers = _available_start(earliest, op.duration_minutes, occupied[machine.id])
             if production is not None:
                 try:
-                    start = production.place(op, machine.id, earliest, placed, failure)
-                except RuleViolation:
+                    start = production.place(op, machine.id, start, placed, failure)
+                except RuleViolation as exc:
+                    placement_errors.append(str(exc))
                     continue
             if machine.id == op.machine_id:
                 original_blockers = blockers
             options.append((start, machine.id != op.machine_id, machine.id, blockers))
         if not options:
-            raise RuleViolation(f"{op.id} 无合格设备")
+            if placement_errors:
+                raise RuleViolation("；".join(placement_errors))
+            raise RuleViolation(
+                f"工序 {op.id} 在本策略下没有满足设备能力和模具兼容条件的可选设备"
+                f"（原设备 {op.machine_id}，所需能力 {op.capability}）。"
+            )
         start, transferred, machine_id, blockers = min(options)
         references = list(blockers)
         machine_predecessor = placed.get(machine_predecessors.get(op.id))
@@ -280,6 +324,7 @@ def generate_candidates(
     strategies: tuple[str, ...] = ("wait-recovery", "allow-transfer"),
     eligible_machine_ids: Mapping[str, frozenset[str]] | None = None,
     production=None,
+    additional_failures: tuple[MachineFailure, ...] = (),
 ) -> tuple[CandidatePlan, ...]:
     # 新入口按明确指定的策略执行；旧调用不传参数时保留原有两方案行为。
     supported = {"wait-recovery", "allow-transfer"}
@@ -298,13 +343,20 @@ def generate_candidates(
     ):
         if strategy not in strategies:
             continue
-        if affected:
+        if affected or any(affected_operations(schedule, f) for f in additional_failures):
             result, causes = _replan(
-                schedule, failure, machines, orders, transfer, eligible_machine_ids, production
+                schedule,
+                failure,
+                machines,
+                orders,
+                transfer,
+                eligible_machine_ids,
+                production,
+                additional_failures,
             )
         else:
             result, causes = Schedule(schedule.version + 1, schedule.operations), ()
-        errors = validate_schedule(result, machines, failure, schedule)
+        errors = validate_schedule(result, machines, failure, schedule, additional_failures)
         if production is not None:
             errors += tuple(production.check(result, failure))
         if errors:

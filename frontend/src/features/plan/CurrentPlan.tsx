@@ -25,6 +25,37 @@ export function CurrentPlan({
   compact = false,
   actions,
 }: Props) {
+  const publication = state.plan_publication;
+  const events = [
+    { ...state.event, revision: state.event_revision },
+    ...(state.event_history ?? []),
+  ];
+  const seen = new Set<string>();
+  const faults = events
+    .filter((event) => {
+      const key = `${event.machine_id}-${event.started_at}-${event.recovered_at}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((event) => {
+      const analysis =
+        publication?.version === state.baseline.version &&
+        publication.fault_analysis?.event_revision === event.revision
+          ? publication.fault_analysis
+          : null;
+      return {
+        failure: event,
+        faultTrace: analysis
+          ? {
+              version: publication!.version,
+              affectedOperations:
+                analysis.baseline?.operations.filter((op) => analysis.affected?.includes(op.id)) ??
+                [],
+            }
+          : undefined,
+      };
+    });
   const originalById = new Map(state.baseline.operations.map((op) => [op.id, op]));
   const affected = state.affected.map((id) => originalById.get(id)!);
   const planTimes = state.baseline.operations
@@ -130,13 +161,15 @@ export function CurrentPlan({
           aria-label={compact ? '执行计划图表内容' : undefined}
         >
           <Gantt
+            key={`fault-${state.event_revision}-${state.event.machine_id}-${state.event.started_at}-${state.event.recovered_at}`}
             schedule={state.baseline}
             failure={state.event}
+            faults={faults}
             machines={state.machines}
             range={range}
           />
           <p className="hint">
-            浅色条为已完成工序，红色阴影及虚线区域为已保存的故障窗口。
+            浅色条为已完成工序，浅灰斜线底纹为设备停机留痕，悬停可查看说明。
             此图保留已发布安排，生成候选不会自动修改执行计划。
           </p>
         </div>

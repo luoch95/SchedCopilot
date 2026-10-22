@@ -133,6 +133,12 @@ def focus_catalog(run):
             for item in data.assumptions:
                 add(item.text, item.evidence_refs)
         elif role == "evaluation":
+            if data.assessment:
+                add(data.assessment.summary, result.evidence_refs)
+                for finding in data.assessment.findings:
+                    add(finding.text, finding.evidence_refs)
+                for text in [*data.assessment.recommendations, *data.assessment.limitations]:
+                    add(text, result.evidence_refs)
             for candidate in data.evaluations:
                 metrics = request.evidence_catalog[candidate.metrics_ref].content
                 label = candidate.candidate_id

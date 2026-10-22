@@ -1,7 +1,9 @@
-import type { Workbench } from '../../shared/api/contracts';
-import { explainIssue } from './model';
-import { WriteButton } from '../../shared/ui/WriteButton';
+import type { Workbench, WorkflowResult } from '../../shared/api/contracts';
+import { AiAnalysisButton } from '../../shared/ui/AiAnalysisButton';
 import { useDemoAccess } from '../../shared/lib/demoAccess';
+import { explainIssue } from './model';
+import { businessText } from '../../shared/lib/businessLabels';
+
 export function SimulationActions({
   state,
   busy,
@@ -13,6 +15,7 @@ export function SimulationActions({
   demoRemaining,
   demoLoading,
   onDemoChange,
+  workflow,
 }: {
   state: Workbench;
   busy: string;
@@ -24,34 +27,25 @@ export function SimulationActions({
   demoRemaining: number;
   demoLoading: boolean;
   onDemoChange: (enabled: boolean) => void;
+  workflow?: WorkflowResult | null;
 }) {
   const { readOnly } = useDemoAccess();
+  const hasAlert = workflow?.status === 'blocked';
   return (
     <section className="simulation-actions">
       <div>
         <h2 id="section-generation">智能分析链路</h2>
-        <p>对比“原计划对照（原设备顺延）”与“允许合格设备转移”，不会修改执行计划。</p>
+        <p>对比原计划顺延与允许合格设备转移，不会修改执行计划。</p>
       </div>
       <div className="simulation-action-buttons">
-        <WriteButton
-          className={`primary${running ? ' is-running' : ''}`}
-          disabled={blocked || !!busy || demoLoading}
-          onClick={onGenerate}
-          aria-label={running ? '生成候选方案 · 生成中' : '生成候选方案'}
-        >
-          {running ? (
-            <>
-              生成中
-              <span className="loading-dots" aria-hidden="true">
-                ...
-              </span>
-            </>
-          ) : (
-            <>
-              生成候选方案 <span aria-hidden="true">→</span>
-            </>
-          )}
-        </WriteButton>
+        {(!hasAlert || running) && (
+          <AiAnalysisButton
+            label={running ? 'AI 正在分析并生成候选方案' : '开始 AI 分析并生成候选方案'}
+            disabled={blocked || !!busy || demoLoading}
+            onClick={onGenerate}
+            write
+          />
+        )}
         {running && (
           <button className="cancel-workflow" onClick={onCancel} aria-label="取消">
             取消
@@ -74,7 +68,7 @@ export function SimulationActions({
             ? '正在读取演示状态…'
             : demoRemaining > 0
               ? `演示冷却中，剩余 ${Math.ceil(demoRemaining / 60)} 分钟。可正常生成方案。`
-              : '规则排产仍会执行，结果明确标注为模拟。触发后冷却 20 分钟，真实故障始终如实显示。'}
+              : '规则排产仍会执行，结果明确标注为模拟。触发后冷却 20 分钟。'}
         </p>
       </details>
       {!!state.issues.length && (
@@ -83,15 +77,12 @@ export function SimulationActions({
           {state.issues.map((issue) => (
             <p key={issue}>{businessText(explainIssue(state, issue), state.baseline.operations)}</p>
           ))}
-          <p>本案例固定在13:00；更改故障时间不会自动推进或回退工序状态。</p>
+          <p>更改故障时间不会自动推进或回退工序状态。</p>
         </div>
       )}
       {!state.event.recovered_at && (
-        <div className="blockers">
-          已保存事件的恢复时间未知。请打开“录入设备故障”，取消“恢复时间未知”，填写恢复时间并保存。
-        </div>
+        <div className="blockers">已保存事件的恢复时间未知，请补充恢复时间并保存。</div>
       )}
     </section>
   );
 }
-import { businessText } from '../../shared/lib/businessLabels';

@@ -92,6 +92,19 @@
 .console-modal-body {
   padding: 24px;
 }
+.assessment-detail-actions,
+.fault-page-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.assessment-detail-actions {
+  margin-top: 16px;
+}
+.assessment-submit-link {
+  margin-left: auto;
+}
 .console-drawer {
   position: fixed;
   inset: 0 0 0 auto;
@@ -165,6 +178,24 @@
 .event-editor fieldset {
   display: grid;
   gap: 12px;
+}
+.event-datetime {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.55fr);
+  gap: 10px;
+}
+.event-datetime label {
+  min-width: 0;
+}
+.event-datetime input {
+  width: 100%;
+  min-width: 0;
+}
+@media (max-width: 560px) {
+  .event-datetime {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
 }
 .event-editor .snapshot-note {
   margin: 12px 0 20px;
@@ -254,6 +285,10 @@
 }
 .plan-version-tag {
   cursor: pointer;
+  border-color: #23496e;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease;
 }
 .stat-strip .event-revision-tag {
   display: inline-flex;
@@ -267,6 +302,82 @@
 .plan-version-tag:hover,
 .plan-version-tag:focus-visible {
   background: #dceaf8;
+  box-shadow: 0 0 0 3px #23496e18;
+}
+.plan-version-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 18px;
+  border-left: 2px solid #dce5ed;
+}
+.plan-version-timeline > li {
+  position: relative;
+  margin-bottom: 16px;
+}
+.plan-version-timeline > li::before {
+  content: '';
+  position: absolute;
+  left: -24px;
+  top: 19px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #23496e;
+  box-shadow: 0 0 0 3px #fff;
+}
+.plan-version-entry {
+  border: 1px solid #dce5ed;
+  border-radius: 10px;
+  background: #fff;
+  color: #34475a;
+  font-size: 13px;
+}
+.plan-version-entry summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px;
+  cursor: pointer;
+}
+.plan-version-entry summary:hover {
+  background: #f4f7fa;
+}
+.plan-version-status {
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #eef1f4;
+  color: #697786;
+  font-size: 11px;
+}
+.plan-version-status.is-current {
+  background: #e5f5ec;
+  color: #23754a;
+}
+.plan-version-date {
+  margin-left: auto;
+  color: #7b8794;
+  font-size: 11px;
+}
+.plan-version-row-meta,
+.plan-version-row-summary {
+  flex-basis: 100%;
+  line-height: 1.5;
+}
+.plan-version-row-meta {
+  color: #7b8794;
+  font-size: 12px;
+}
+.plan-version-description {
+  padding: 0 14px 14px;
+  line-height: 1.6;
+}
+.plan-version-description p {
+  margin: 5px 0;
+}
+.plan-version-description ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
 .plan-version-card {
   position: absolute;

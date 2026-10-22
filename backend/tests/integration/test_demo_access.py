@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from test_fault_reviews import approve_fault
 
 from sched_copilot.api import create_app
 
@@ -74,6 +75,7 @@ def test_admin_publishes_then_resets_and_logs_out(client):
     login(client)
     assert client.get("/api/demo/session").json() == {"admin": True, "read_only": False}
     simulation = saved["simulation"]
+    approve_fault(client, simulation["id"], simulation["candidates"][1]["id"])
     response = client.post(
         "/api/decisions",
         json={

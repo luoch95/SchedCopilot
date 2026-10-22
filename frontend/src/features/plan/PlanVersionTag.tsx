@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from 'react';
+﻿import { useState } from 'react';
 import type { PlanPublication } from '../../shared/api/contracts';
 import { localInput } from '../../shared/lib/time';
+import { Modal } from '../../shared/ui/Modal';
 
 export function PlanVersionTag({
   version,
@@ -10,51 +11,85 @@ export function PlanVersionTag({
   publication?: PlanPublication;
 }) {
   const [open, setOpen] = useState(false);
-  const root = useRef<HTMLSpanElement>(null);
-  const id = useId();
   const info = publication?.version === version ? publication : undefined;
-  useEffect(() => {
-    function outside(event: PointerEvent) {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener('pointerdown', outside);
-    return () => document.removeEventListener('pointerdown', outside);
-  }, []);
+  const history = info?.history?.length
+    ? info.history
+    : [
+        {
+          version,
+          published_at: info?.published_at ?? null,
+          published_by: info?.published_by ?? null,
+          version_summary:
+            info?.version_summary ?? (version === 1 ? '初始演示计划' : '历史版本，未记录发布信息'),
+          details: ['未记录详细变更说明'],
+        },
+      ];
   return (
-    <span
-      className="plan-version"
-      ref={root}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') setOpen(false);
-      }}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-      }}
-    >
-      <button
-        type="button"
-        className="plan-version-tag"
-        aria-expanded={open}
-        aria-controls={id}
-        aria-label={`查看执行计划 V${version} 发布信息`}
-        onClick={() => setOpen(!open)}
-      >
-        V{version}
-      </button>
+    <>
+      <span className="plan-version">
+        <button
+          type="button"
+          className="plan-version-tag"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={`查看执行计划 V${version} 发布信息`}
+          title="查看计划版本历史"
+          onClick={() => setOpen(true)}
+        >
+          V{version} <span aria-hidden="true">›</span>
+        </button>
+      </span>
       {open && (
-        <span id={id} className="plan-version-card" role="region" aria-label="计划版本发布信息">
-          <strong>执行计划版本 V{version}</strong>
-          <span>
-            发布时间：
-            {info?.published_at ? localInput(info.published_at).replace('T', ' ') : '未记录'}
-          </span>
-          <span>发布人：{info?.published_by ?? '未记录'}</span>
-          <span>
-            变更摘要：
-            {info?.version_summary ?? (version === 1 ? '初始演示计划' : '历史版本，未记录发布信息')}
-          </span>
-        </span>
+        <Modal
+          title="计划版本历史"
+          drawer
+          drawerWidth="min(560px, 100vw)"
+          onClose={() => setOpen(false)}
+        >
+          <ol className="plan-version-timeline" aria-label="计划版本时间轴">
+            {[...history]
+              .sort((a, b) => b.version - a.version)
+              .map((entry) => (
+                <li key={entry.version}>
+                  <details className="plan-version-entry" open={entry.version === version}>
+                    <summary>
+                      <strong>V{entry.version}</strong>
+                      <span
+                        className={`plan-version-status${entry.version === version ? ' is-current' : ''}`}
+                      >
+                        {entry.version === version ? '当前执行版' : '历史修订'}
+                      </span>
+                      <span className="plan-version-date">
+                        {entry.published_at
+                          ? localInput(entry.published_at).replace('T', ' ')
+                          : '发布时间未记录'}
+                      </span>
+                      <span className="plan-version-row-meta">
+                        发布人：{entry.published_by ?? '未记录'}
+                      </span>
+                      <span className="plan-version-row-summary">
+                        变更摘要：{entry.version_summary}
+                      </span>
+                    </summary>
+                    <div className="plan-version-description">
+                      <p>
+                        发布时间：
+                        {entry.published_at
+                          ? localInput(entry.published_at).replace('T', ' ')
+                          : '未记录'}
+                      </p>
+                      <ul>
+                        {entry.details.map((detail, index) => (
+                          <li key={index}>{detail}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </details>
+                </li>
+              ))}
+          </ol>
+        </Modal>
       )}
-    </span>
+    </>
   );
 }

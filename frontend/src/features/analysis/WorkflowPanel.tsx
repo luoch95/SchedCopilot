@@ -20,6 +20,8 @@ interface Props {
   result: WorkflowResult | null;
   progress?: WorkflowProgress | null;
   onRun: (intent: WorkflowIntent) => void;
+  expanded?: boolean;
+  readOnly?: boolean;
 }
 
 const stages = [
@@ -92,11 +94,12 @@ const phaseLabels = {
 
 function stageSummary(name: string, report?: WorkflowReport) {
   if (!report) return '查看执行记录';
-  if (report.status === 'blocked' || report.status === 'failed') return '查看原因与处理建议';
+  if (report.status === 'blocked' || report.status === 'failed')
+    return report.errors[0]?.message ?? '尚未取得可用结果，具体原因未返回';
   if (name === 'scheduling' && report.data?.candidates)
     return `已生成 ${report.data.candidates.length} 个候选方案`;
   if (name === 'evaluation' && report.data?.evaluations)
-    return `已评估 ${report.data.evaluations.length} 个候选方案`;
+    return report.data.assessment?.summary ?? `已评估 ${report.data.evaluations.length} 个候选方案`;
   if (name === 'explanation') return '已生成结果解释，查看结论与建议';
   if (name !== 'validation') return '本环节已完成，查看结果与提示';
   return report.warnings.length
@@ -104,7 +107,15 @@ function stageSummary(name: string, report?: WorkflowReport) {
     : '数据校验已完成';
 }
 
-export function WorkflowPanel({ running, disabled, result: finalResult, progress, onRun }: Props) {
+export function WorkflowPanel({
+  running,
+  disabled,
+  result: finalResult,
+  progress,
+  onRun,
+  expanded = false,
+  readOnly = false,
+}: Props) {
   const format = useBusinessText();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const detailRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -123,6 +134,7 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
       }
     : finalResult;
   const intent = progress?.intent ?? result?.intent;
+  const assessment = result?.status === 'completed' && result.results.evaluation?.data?.assessment;
   const planned =
     progress?.actions ??
     (intent
@@ -147,7 +159,10 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
   const fallback = executions.filter(({ step }) => step.execution?.mode === 'fallback');
   const modelCompleted = executions.filter(({ step }) => step.execution?.mode === 'live');
   const modelCount = executions.filter(({ step }) => step.execution).length;
-  const completed = executions.filter(({ step }) => ['success', 'warning'].includes(step.status));
+  const completed = executions.filter(
+    ({ name, step }) =>
+      ['success', 'warning'].includes(step.status) || (assessment && name === 'scheduling'),
+  );
   return (
     <section className="workflow-progress" aria-label="四个智能环节执行状态" aria-busy={running}>
       <div className="workflow-caption">
@@ -177,10 +192,12 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
         {visibleStages.map((stage, index) => {
           const report = result?.results[stage.name];
           const execution = result?.trace.find((step) => step.action === stage.action);
-          const status =
-            execution?.status ??
-            (partial ? undefined : report?.status) ??
-            (running && progress?.active === stage.action ? 'running' : 'pending');
+          const assessed = assessment && stage.name === 'scheduling';
+          const status = assessed
+            ? 'warning'
+            : (execution?.status ??
+              (partial ? undefined : report?.status) ??
+              (running && progress?.active === stage.action ? 'running' : 'pending'));
           const wasSkipped =
             running &&
             !!progress?.active &&
@@ -218,7 +235,9 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                     ? `${phaseLabels[progress.quality.phase]} · 第 ${progress.quality.round}/3 轮`
                     : '执行中'
                   : status !== 'pending'
-                    ? labels[status]
+                    ? assessed
+                      ? '条件检查完成，未生成方案'
+                      : labels[status]
                     : intent
                       ? pendingText
                       : '待执行'}
@@ -228,7 +247,8 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
               )}
               {report?.quality && (
                 <small>
-                  质量{qualityLabels[report.quality.outcome]} · {report.quality.round} 轮
+                  {assessed ? '检查结论已纳入评估' : `质量${qualityLabels[report.quality.outcome]}`}{' '}
+                  · {report.quality.round} 轮
                 </small>
               )}
               {execution?.execution && (
@@ -275,7 +295,8 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
         <p className="hint">
           本次已完成 {completed.length}/{executions.length} 个智能环节
           {completed.length > 0 && `：${completed.map((stage) => stage.label).join('、')}`}。
-          {executions.some(({ step }) => step.status === 'blocked') &&
+          {!assessment &&
+            executions.some(({ step }) => step.status === 'blocked') &&
             '阻断环节已标注，后续依赖环节未执行。'}
         </p>
       )}
@@ -299,18 +320,64 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                   `未完成步骤：${modelPhases[step.execution.failure_phase] ?? '模型辅助'}；`}
                 {step.status === 'failed'
                   ? '该环节执行失败，未得到可用结果。'
-                  : step.status === 'blocked'
-                    ? '规则检查已阻断后续执行，请先处理阻断项。'
-                    : `${ruleResults[name]}，本环节使用规则结果。`}
+                  : assessment && name === 'scheduling'
+                    ? '生产条件检查完成，未生成可用方案，具体结论已纳入本次评估。'
+                    : step.status === 'blocked'
+                      ? '规则检查已阻断后续执行，请先处理阻断项。'
+                      : `${ruleResults[name]}，本环节使用规则结果。`}
               </li>
             ))}
           </ul>
         </div>
       )}
       {result?.failure_code && (
-        <p className="message error">执行失败：{result.failure_code}。请重新生成方案。</p>
+        <p className="message error">
+          本次流程未完成，已返回的各环节结果保留。请查看下方原因与处理建议。
+        </p>
       )}
-      <details className="workflow-details decision-accordion" ref={detailsRef}>
+      {result &&
+        stages.map((stage) => {
+          const report = result.results[stage.name];
+          if (assessment && stage.name === 'scheduling') return null;
+          if (!report || !['blocked', 'failed'].includes(report.status)) return null;
+          return (
+            <section key={stage.name} aria-label={`${stage.label}未完成原因`}>
+              <h3>
+                {stage.label}：
+                {report.status === 'blocked' ? '当前条件下未取得可用结果' : '系统执行失败'}
+              </h3>
+              <WorkflowNotices result={result} notices={report.errors} />
+              {!report.errors.length && <p>本环节未返回具体原因，请联系维护人员查看执行记录。</p>}
+              <p className="hint">本环节未提供可供后续使用的结果；其他环节以各自执行记录为准。</p>
+            </section>
+          );
+        })}
+      {assessment && (
+        <section aria-label="本次评估结论">
+          <h3>评估结论</h3>
+          <p>{assessment.summary}</p>
+          <ul>
+            {assessment.findings.map((item, i) => (
+              <li key={i}>{format(item.text)}</li>
+            ))}
+          </ul>
+          <ul>
+            {assessment.recommendations.map((text) => (
+              <li key={text}>{format(text)}</li>
+            ))}
+          </ul>
+          {assessment.limitations.map((text) => (
+            <p className="hint" key={text}>
+              {text}
+            </p>
+          ))}
+        </section>
+      )}
+      <details
+        className="workflow-details decision-accordion"
+        ref={detailsRef}
+        open={expanded || undefined}
+      >
         <summary>
           <h3 id="section-execution">执行详情</h3>
         </summary>
@@ -321,18 +388,20 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
           }))}
         />
         <p className="hint">查看各环节的问题与处理建议。辅助操作使用已保存的数据。</p>
-        <p className="hint">重新校验会清除本次候选；生成方案时会自动校验。</p>
-        <div className="inline-actions">
-          <WriteButton disabled={disabled} onClick={() => onRun('validate')}>
-            仅校验数据
-          </WriteButton>
-          <WriteButton
-            disabled={disabled || !result?.results.scheduling?.data}
-            onClick={() => onRun('re_evaluate')}
-          >
-            重新评估已有方案
-          </WriteButton>
-        </div>
+        {!readOnly && <p className="hint">重新校验会清除本次候选；生成方案时会自动校验。</p>}
+        {!readOnly && (
+          <div className="inline-actions">
+            <WriteButton disabled={disabled} onClick={() => onRun('validate')}>
+              仅校验数据
+            </WriteButton>
+            <WriteButton
+              disabled={disabled || !result?.results.scheduling?.data}
+              onClick={() => onRun('re_evaluate')}
+            >
+              重新评估已有方案
+            </WriteButton>
+          </div>
+        )}
         {result && (
           <div className="workflow-detail-list">
             {stages.map((stage) => {
@@ -357,7 +426,9 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                       className="workflow-agent-status"
                       data-status={step?.status ?? report?.status ?? 'failed'}
                     >
-                      {labels[step?.status ?? report?.status ?? 'failed']}
+                      {assessment && stage.name === 'scheduling'
+                        ? '未生成方案，已纳入评估'
+                        : labels[step?.status ?? report?.status ?? 'failed']}
                     </span>
                   </header>
                   <p>{stageSummary(stage.name, report)}</p>
@@ -422,7 +493,7 @@ export function WorkflowPanel({ running, disabled, result: finalResult, progress
                 </article>
               );
             })}
-            <details>
+            <details open={expanded || undefined}>
               <summary>
                 <h4>调用记录</h4>
               </summary>

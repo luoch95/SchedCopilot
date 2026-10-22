@@ -141,12 +141,28 @@ def test_duplicate_record_identifiers_are_not_silently_overwritten(request_data,
     assert "DUPLICATE_ID" in codes(run)
 
 
-def test_duplicate_windows_and_multiple_failures_are_explicit(request_data):
+def test_duplicate_failure_windows_are_explicit(request_data):
     duplicate = copy.deepcopy(request_data["case_data"]["failures"][0])
     duplicate["event_id"] = "F2"
     request_data["case_data"]["failures"].append(duplicate)
     run = ValidationAgent().run(request(request_data))
-    assert {"DUPLICATE_EVENT", "MULTIPLE_FAILURES_UNSUPPORTED"} <= codes(run)
+    assert "DUPLICATE_EVENT" in codes(run)
+    assert "MULTIPLE_FAILURES_UNSUPPORTED" not in codes(run)
+
+
+def test_independent_failure_windows_are_supported(request_data):
+    second = copy.deepcopy(request_data["case_data"]["failures"][0])
+    second.update(
+        event_id="F2",
+        machine_id="M2",
+        started_at="2026-10-19T13:00:00+08:00",
+        estimated_recovery_at="2026-10-19T15:00:00+08:00",
+        received_at="2026-10-19T13:00:00+08:00",
+    )
+    request_data["case_data"]["failures"].append(second)
+    run = ValidationAgent().run(request(request_data))
+    assert "DUPLICATE_EVENT" not in codes(run)
+    assert "MULTIPLE_FAILURES_UNSUPPORTED" not in codes(run)
 
 
 @pytest.mark.parametrize(

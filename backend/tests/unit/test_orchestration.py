@@ -37,6 +37,29 @@ def actions(run):
     return [t.action for t in run.trace]
 
 
+def test_workflow_orders_active_failure_before_other_outages():
+    active = MachineFailure("M2", EVENT_TIME, EVENT_TIME + timedelta(hours=2), "active", EVENT_TIME)
+    m3 = MachineFailure("M3", EVENT_TIME, EVENT_TIME + timedelta(hours=4), "other", EVENT_TIME)
+    engine = WorkflowEngine(failure_provider=lambda: (m3, active))
+
+    ordered = engine._ordered_failures(active)
+
+    assert ordered == (active, m3)
+
+
+def test_workflow_snapshot_invalidates_when_another_outage_changes():
+    active = MachineFailure("M2", EVENT_TIME, EVENT_TIME + timedelta(hours=2), "active", EVENT_TIME)
+    m3 = MachineFailure("M3", EVENT_TIME, EVENT_TIME + timedelta(hours=4), "other", EVENT_TIME)
+    windows = [active, m3]
+    engine = WorkflowEngine(failure_provider=lambda: tuple(windows))
+    args = (demo_schedule(), active, demo_machines(), demo_orders(), EVENT_TIME, 3)
+    fingerprint = engine._fingerprint(*args, None, engine._ordered_failures(active))
+    payload = {"context": {"input_fingerprint": fingerprint}}
+    assert engine.matches_snapshot(payload, *args)
+    windows.pop()
+    assert not engine.matches_snapshot(payload, *args)
+
+
 def test_evaluation_tool_failure_preserves_error_and_stops_explanation(state):
     def broken(*args):
         raise RuntimeError("private detail")
