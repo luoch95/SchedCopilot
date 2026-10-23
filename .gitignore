@@ -1,5 +1,6 @@
 # Temporary tools and generated inspection artifacts
 /tmp/
+/.tmp/
 /.data/
 /.uv-cache/
 /build/
@@ -18,6 +19,7 @@ htmlcov/
 # Frontend
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Local configuration and runtime data
 .env

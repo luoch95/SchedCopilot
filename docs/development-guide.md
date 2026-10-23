@@ -18,6 +18,16 @@
 6. 更新相关文档，整理为便于审查的提交和 PR。
 7. 检查通过后合并，形成可复现的阶段成果。
 
+## Agent 开发约束
+
+当前四 Agent 开发基线为需求 V1.1、Prompt 1.1.0，详见 [实现需求第 16 节](agent-implementation-requirements.md)。调用前使用 `validate_request` 校验结构化输入，调用后使用 `validate_result` 校验结果；通过后才可用于下游，不能只依靠 Prompt 约束。
+
+Agent 之间使用 Agent Orchestrator 和结构化共享状态通信。禁止在 Agent 内部直接调用其他 Agent，也禁止把自然语言回复作为下游事实来源。
+
+每个 Agent 的输出必须包含状态、计划指纹、事件版本、结构化事实或结果、证据引用和失败信息。候选方案通过后端保存的批次 ID 传递，正式计划发布只能由人工决策用例完成。
+
+新增 Agent 时，先更新 [Agent 定义文档](agent-definitions.md)，再实现输入输出契约、编排条件、失败处理和测试。
+
 GitHub 发布前先确认仓库根目录、许可证和公开内容。没有远程仓库时，先在本地记录任务和验收结果。
 
 ## 仓库与提交
@@ -44,6 +54,8 @@ GitHub 发布前先确认仓库根目录、许可证和公开内容。没有远�
 
 指标必须写明样本、基线、运行环境与测量方式。不得将个人仿真结果包装为企业生产收益。
 
-## 下一项任务：M0
+## 当前开发入口
 
-交付最小车间案例、数据字典及手工可核对的正常计划与故障结果。通过这个案例确认业务语义，再确定接口与数据库结构。
+主界面已迁移为 React + FastAPI，见 [ADR 0003](decisions/0003-react-fastapi.md) 和根目录 README 的双终端启动方式。前端项目在 `frontend/`，后端项目在 `backend/`，API 工厂为 `backend/src/sched_copilot/api/__init__.py`。内部依赖、职责和新增功能位置见 [代码结构与扩展规则](code-structure.md)。旧 Streamlit 已从当前实现移除，Git 保留历史。
+
+在根目录运行前端命令 `npm --prefix frontend run format:check`、`npm --prefix frontend run lint:architecture`、`npm --prefix frontend test` 和 `npm --prefix frontend run build`；后端命令使用 `uv --directory backend run ruff check .`、`uv --directory backend run pytest` 和 `uv --directory backend build`。也可进入 `backend/` 后直接运行 uv 命令。CI 分别执行两组检查。业务规则不得搬到前端作为唯一校验，人工发布必须经过后端版本与约束校验。

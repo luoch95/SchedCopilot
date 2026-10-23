@@ -1,0 +1,206 @@
+.leader-dashboard {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 24px var(--workspace-gutter);
+  background: #f4f7f9;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.leader-dashboard .page-header {
+  margin-bottom: 0;
+}
+.leader-dashboard .demo-access-bar {
+  padding: 8px 12px;
+  border-radius: 7px;
+}
+.leader-dashboard .demo-access-bar.is-collapsed {
+  padding: 0;
+}
+.leader-ticker {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 16px;
+  padding: 10px 14px;
+  border: 1px solid #e0e7ed;
+  border-radius: 7px;
+  background: #eaf0f4;
+  color: #536b7c;
+  font-size: 12px;
+}
+.leader-ticker > strong {
+  flex-shrink: 0;
+  color: #173b50;
+}
+.leader-ticker-viewport {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.leader-ticker-track {
+  display: flex;
+  width: max-content;
+  animation: leader-ticker-scroll 42s linear infinite;
+}
+.leader-ticker-track > span {
+  padding-right: 64px;
+  white-space: nowrap;
+}
+.leader-ticker:hover .leader-ticker-track {
+  animation-play-state: paused;
+}
+.leader-dashboard .workshop-line-danger button {
+  color: #a33e33;
+  background: #fff0ed;
+  border-color: #eac1b9;
+}
+@keyframes leader-ticker-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.leader-dashboard .workshop-overview {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.leader-dashboard .workshop-overview > .section-heading {
+  margin-bottom: 10px;
+}
+.leader-dashboard .workshop-overview > .section-heading h2 {
+  font-size: 13px;
+  color: var(--muted);
+}
+.leader-dashboard .workshop-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.leader-dashboard .workshop-metric {
+  background: #fff;
+  box-shadow: 0 3px 14px #173b500c;
+  border-radius: 8px;
+  padding: 18px 20px;
+}
+.leader-dashboard .workshop-value {
+  font-size: 34px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+.leader-dashboard .workshop-value small {
+  font-size: 12px;
+}
+.leader-task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: stretch;
+}
+.leader-task-grid > .pending-requests,
+.leader-task-grid > .leader-alerts {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 3px 14px #173b500c;
+}
+.leader-task-grid .sales-section-heading {
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+.leader-task-grid h2,
+.leader-task-grid > .pending-requests > .sales-section-heading h3 {
+  font-size: 16px;
+}
+.leader-task-grid .table-scroll {
+  max-height: 250px;
+  overflow-y: auto;
+}
+.leader-task-grid .table-scroll table {
+  min-width: 0;
+}
+.leader-task-grid .sales-muted {
+  font-size: 12px;
+}
+.leader-dashboard .leader-alerts .dashboard-alerts-body {
+  height: auto;
+  max-height: calc(var(--fault-card-height) * 2 + var(--fault-card-gap));
+  overflow-y: auto;
+}
+.leader-plan-accordion {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 0;
+}
+.leader-dashboard .leader-plan-accordion > summary {
+  padding: 16px 20px;
+  color: #173b50;
+  font-weight: 600;
+  font-size: 14px;
+}
+.leader-plan-content {
+  min-width: 0;
+}
+.leader-plan-accordion[open] .leader-plan-content {
+  padding: 0 20px 20px;
+  animation: leader-plan-reveal 180ms ease-out;
+}
+.leader-plan-content .current-plan-card {
+  margin: 0;
+}
+.leader-plan-content .section-heading {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.leader-plan-content .chart-controls {
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+@keyframes leader-plan-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 1100px) {
+  .leader-dashboard .workshop-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 800px) {
+  .leader-dashboard {
+    padding: 16px var(--workspace-gutter);
+  }
+  .leader-task-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .leader-ticker-track,
+  .leader-plan-accordion[open] .leader-plan-content {
+    animation: none;
+  }
+  .leader-ticker-track {
+    width: auto;
+  }
+  .leader-ticker-track > span {
+    white-space: normal;
+    padding: 0;
+  }
+  .leader-ticker-track > span[aria-hidden] {
+    display: none;
+  }
+}

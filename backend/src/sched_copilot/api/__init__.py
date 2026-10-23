@@ -1,0 +1,52 @@
+"""FastAPI app factory. Run uvicorn sched_copilot.api:create_app --factory."""
+
+from dataclasses import replace
+from pathlib import Path
+from threading import Lock
+
+from fastapi import Depends, FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from ..bootstrap import build_sales, build_workbench
+from ..config import Settings
+from ..observability import configure_logging
+from .demo_access import require_write_access
+from .errors import register_errors
+from .routes import router
+
+
+def create_app(
+    db_path: str | Path | None = None,
+    frontend_dir: Path | None = None,
+    settings: Settings | None = None,
+) -> FastAPI:
+    settings = settings or Settings.from_env()
+    if db_path is not None:
+        settings = replace(settings, database_path=Path(db_path))
+    if frontend_dir is not None:
+        settings = replace(settings, frontend_dir=frontend_dir)
+    configure_logging(settings.log_level)
+    app = FastAPI(
+        title="Schedule Copilot API", version="0.2.0", dependencies=[Depends(require_write_access)]
+    )
+    app.state.settings = settings
+    app.state.demo_sessions = {}
+    app.state.demo_write_lock = Lock()
+    if settings.demo_mode:
+        from ..demo_preview import reset_demo
+
+        reset_demo(settings)
+    # Normalize persisted business numbers before restoring formal-plan display metadata.
+    app.state.sales, app.state.sales_requests = build_sales(settings)
+    app.state.workbench = build_workbench(settings)
+    register_errors(app)
+    app.include_router(router)
+    if (settings.frontend_dir / "index.html").exists():
+        app.mount("/assets", StaticFiles(directory=settings.frontend_dir / "assets"), name="assets")
+
+        @app.get("/", include_in_schema=False)
+        def index():
+            return FileResponse(settings.frontend_dir / "index.html")
+
+    return app

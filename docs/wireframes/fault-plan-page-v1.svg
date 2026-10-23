@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1120" viewBox="0 0 1800 1120">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#173346" flood-opacity="0.08"/>
+    </filter>
+    <style>
+      .font { font-family: Inter, "Microsoft YaHei", Arial, sans-serif; }
+      .title { font-size: 27px; font-weight: 700; fill: #173346; }
+      .h2 { font-size: 18px; font-weight: 700; fill: #203d4c; }
+      .body { font-size: 13px; fill: #667d89; }
+      .label { font-size: 11px; fill: #78909c; }
+      .value { font-size: 17px; font-weight: 700; fill: #244452; }
+      .outline { font-size: 13px; fill: #718792; }
+    </style>
+  </defs>
+  <rect width="1800" height="1120" fill="#edf3f6"/>
+  <text x="50" y="42" class="font" font-size="25" font-weight="700" fill="#173346">故障影响与方案决策 · 页面结构视觉稿 v1</text>
+  <text x="50" y="70" class="font body">按页面状态拆分内容，只让用户看到当前阶段需要处理的卡片</text>
+  <rect x="1530" y="25" width="220" height="32" rx="16" fill="#fff1d6"/>
+  <text x="1640" y="46" text-anchor="middle" class="font" font-size="12" font-weight="700" fill="#966617">等待确认后再改前端</text>
+
+  <!-- left state -->
+  <rect x="40" y="102" width="850" height="970" rx="16" fill="#f8fbfc" stroke="#d7e3e8"/>
+  <rect x="40" y="102" width="850" height="62" rx="16" fill="#fff"/>
+  <rect x="40" y="144" width="850" height="20" fill="#fff"/>
+  <text x="66" y="128" class="font label">选择角色　/　工作台总览　/　故障影响与方案决策</text>
+  <line x1="40" y1="164" x2="890" y2="164" stroke="#e2ebef"/>
+  <text x="66" y="211" class="font title">故障影响与方案决策</text>
+  <text x="66" y="239" class="font body">先确认故障影响和当前正式计划，再生成候选排产方案。</text>
+  <rect x="66" y="255" width="112" height="27" rx="14" fill="#fff1d6"/>
+  <text x="122" y="273" text-anchor="middle" class="font" font-size="12" font-weight="700" fill="#966617">方案待生成</text>
+  <text x="840" y="273" text-anchor="end" class="font body">排产计划员　·　仿真数据</text>
+
+  <!-- left content -->
+  <rect x="66" y="310" width="630" height="145" rx="12" fill="#fff" stroke="#e0e9ed" filter="url(#shadow)"/>
+  <text x="88" y="344" class="font h2">1　故障概览</text>
+  <rect x="88" y="361" width="176" height="63" rx="8" fill="#f6f9fa"/>
+  <text x="103" y="382" class="font label">故障设备</text><text x="103" y="409" class="font value">M3</text>
+  <rect x="282" y="361" width="176" height="63" rx="8" fill="#f6f9fa"/>
+  <text x="297" y="382" class="font label">故障时段</text><text x="297" y="409" class="font value">13:00 — 17:00</text>
+  <rect x="476" y="361" width="194" height="63" rx="8" fill="#f6f9fa"/>
+  <text x="491" y="382" class="font label">直接影响</text><text x="491" y="409" class="font value">2 道工序</text>
+
+  <rect x="66" y="475" width="630" height="362" rx="12" fill="#fff" stroke="#e0e9ed" filter="url(#shadow)"/>
+  <text x="88" y="510" class="font h2">2　当前正式排产计划</text>
+  <text x="674" y="510" text-anchor="end" class="font body">未生成方案时唯一的计划视图</text>
+  <line x1="88" y1="528" x2="674" y2="528" stroke="#e6eef1"/>
+  <text x="196" y="556" class="font label">08:00</text><text x="314" y="556" class="font label">12:00</text><text x="432" y="556" class="font label">16:00</text><text x="550" y="556" class="font label">20:00</text><text x="650" y="556" class="font label">24:00</text>
+  <line x1="196" y1="565" x2="196" y2="775" stroke="#e6eef1"/><line x1="314" y1="565" x2="314" y2="775" stroke="#e6eef1"/><line x1="432" y1="565" x2="432" y2="775" stroke="#e6eef1"/><line x1="550" y1="565" x2="550" y2="775" stroke="#e6eef1"/><line x1="650" y1="565" x2="650" y2="775" stroke="#e6eef1"/>
+  <text x="101" y="599" class="font" font-size="12" font-weight="700" fill="#617b88">M1</text><rect x="140" y="578" width="530" height="42" rx="5" fill="#f5f8f9"/><rect x="160" y="586" width="110" height="26" rx="5" fill="#7baebb"/><text x="215" y="604" text-anchor="middle" class="font" font-size="10" font-weight="700" fill="#fff">O1001-OP1</text><rect x="390" y="586" width="180" height="26" rx="5" fill="#287b91"/><text x="480" y="604" text-anchor="middle" class="font" font-size="10" font-weight="700" fill="#fff">当前计划</text>
+  <text x="101" y="663" class="font" font-size="12" font-weight="700" fill="#617b88">M2</text><rect x="140" y="642" width="530" height="42" rx="5" fill="#f5f8f9"/><rect x="152" y="650" width="170" height="26" rx="5" fill="#c8ae8e"/><text x="237" y="668" text-anchor="middle" class="font" font-size="10" font-weight="700" fill="#fff">O1003-OP1/2</text><rect x="345" y="650" width="125" height="26" rx="5" fill="#c77565"/><text x="407" y="668" text-anchor="middle" class="font" font-size="10" font-weight="700" fill="#fff">O1005-OP1</text>
+  <text x="101" y="727" class="font" font-size="12" font-weight="700" fill="#617b88">M3</text><rect x="140" y="706" width="530" height="42" rx="5" fill="#f5f8f9"/><rect x="245" y="714" width="140" height="26" rx="5" fill="#7baebb"/><text x="315" y="732" text-anchor="middle" class="font" font-size="10" font-weight="700" fill="#fff">O1001-OP2</text><rect x="420" y="714" width="120" height="26" rx="5" fill="#e7b9ae" stroke="#d27b6b" stroke-dasharray="4 3"/><text x="480" y="732" text-anchor="middle" class="font" font-size="10" font-weight="700" fill="#a4554c">故障时段</text>
+  <text x="88" y="798" class="font body">当前只展示事实，不提前显示候选方案、比较结论或确认按钮。</text>
+
+  <rect x="66" y="857" width="630" height="175" rx="12" fill="#fff" stroke="#e0e9ed" filter="url(#shadow)"/>
+  <text x="88" y="892" class="font h2">3　生成候选方案</text>
+  <text x="88" y="918" class="font body">系统按故障、换型和设备资源约束生成可比较的候选计划。</text>
+  <rect x="88" y="944" width="178" height="44" rx="8" fill="#126c7b"/><text x="177" y="972" text-anchor="middle" class="font" font-size="14" font-weight="700" fill="#fff">生成候选方案</text>
+  <text x="288" y="971" class="font" font-size="13" font-weight="600" fill="#176e7f">查看本次 Agent 链路 →</text>
+  <text x="88" y="1012" class="font label">点击后在此卡片内显示“等待结果中……”和各 Agent 状态。</text>
+
+  <!-- left outline -->
+  <line x1="726" y1="310" x2="726" y2="1032" stroke="#e1eaee"/>
+  <text x="755" y="344" class="font" font-size="14" font-weight="700" fill="#536d7d">本页提纲</text>
+  <rect x="746" y="365" width="116" height="32" rx="8" fill="#e7f3f5"/><text x="760" y="386" class="font outline" font-weight="700" fill="#146b7b">故障概览</text>
+  <text x="760" y="436" class="font outline">当前正式计划</text>
+  <text x="760" y="486" class="font outline">生成候选方案</text>
+
+  <!-- right state -->
+  <rect x="910" y="102" width="850" height="970" rx="16" fill="#f8fbfc" stroke="#d7e3e8"/>
+  <rect x="910" y="102" width="850" height="62" rx="16" fill="#fff"/><rect x="910" y="144" width="850" height="20" fill="#fff"/>
+  <text x="936" y="128" class="font label">选择角色　/　工作台总览　/　故障影响与方案决策</text>
+  <line x1="910" y1="164" x2="1760" y2="164" stroke="#e2ebef"/>
+  <text x="936" y="211" class="font title">故障影响与方案决策</text>
+  <text x="936" y="239" class="font body">候选方案已生成，请比较差异并确认是否发布。</text>
+  <rect x="936" y="255" width="132" height="27" rx="14" fill="#e7f4ee"/><text x="1002" y="273" text-anchor="middle" class="font" font-size="12" font-weight="700" fill="#24734c">待计划员确认</text>
+  <text x="1710" y="273" text-anchor="end" class="font body">排产计划员　·　仿真数据</text>
+
+  <rect x="936" y="310" width="630" height="145" rx="12" fill="#fff" stroke="#e0e9ed" filter="url(#shadow)"/>
+  <text x="958" y="344" class="font h2">1　方案结论</text>
+  <rect x="1374" y="326" width="166" height="27" rx="14" fill="#e7f4ee"/><text x="1457" y="344" text-anchor="middle" class="font" font-size="12" font-weight="700" fill="#24734c">可执行 · 待确认</text>
+  <text x="958" y="376" class="font" font-size="15" font-weight="700" fill="#203d4c">建议采用候选方案，将受影响工序转移至可用设备。</text>
+  <text x="958" y="404" class="font body">结论基于已校验事实，并提供依据和风险供计划员审核。</text>
+  <text x="958" y="432" class="font" font-size="12" font-weight="600" fill="#176e7f">查看关键变化　·　查看依据</text>
+
+  <rect x="936" y="475" width="630" height="165" rx="12" fill="#fff" stroke="#e0e9ed" filter="url(#shadow)"/>
+  <text x="958" y="509" class="font h2">2　方案对比</text><text x="1544" y="509" text-anchor="end" class="font body">同一时间轴对照变化</text>
+  <rect x="958" y="529" width="280" height="86" rx="8" fill="#f7fafb" stroke="#e5ecef"/><rect x="974" y="542" width="4" height="18" rx="2" fill="#7b9aa7"/><text x="989" y="557" class="font" font-size="13" font-weight="700" fill="#435d6b">当前正式计划</text><text x="989" y="587" class="font body">受影响 2 道工序</text><text x="989" y="606" class="font body">保持原设备与原时间</text>
+  <rect x="1255" y="529" width="280" height="86" rx="8" fill="#f7fafb" stroke="#e5ecef"/><rect x="1271" y="542" width="4" height="18" rx="2" fill="#219078"/><text x="1286" y="557" class="font" font-size="13" font-weight="700" fill="#435d6b">候选排产方案</text><text x="1286" y="587" class="font body">转移 1 道工序</text><text x="1286" y="606" class="font body">提前 15 分钟开工</text>
+
+  <rect x="936" y="660" width="630" height="210" rx="12" fill="#fff" stroke="#e0e9ed" filter="url(#shadow)"/>
+  <text x="958" y="694" class="font h2">3　候选排产计划</text><text x="1544" y="694" text-anchor="end" class="font body">设备 · 时间 · 工序</text>
+  <text x="1045" y="721" class="font label">08:00</text><text x="1155" y="721" class="font label">12:00</text><text x="1265" y="721" class="font label">16:00</text><text x="1375" y="721" class="font label">20:00</text><text x="1475" y="721" class="font label">24:00</text>
+  <line x1="1045" y1="730" x2="1045" y2="835" stroke="#e6eef1"/><line x1="1155" y1="730" x2="1155" y2="835" stroke="#e6eef1"/><line x1="1265" y1="730" x2="1265" y2="835" stroke="#e6eef1"/><line x1="1375" y1="730" x2="1375" y2="835" stroke="#e6eef1"/><line x1="1475" y1="730" x2="1475" y2="835" stroke="#e6eef1"/>
+  <text x="958" y="758" class="font" font-size="12" font-weight="700" fill="#617b88">M1</text><rect x="995" y="742" width="540" height="26" rx="5" fill="#f5f8f9"/><rect x="1020" y="747" width="105" height="16" rx="4" fill="#7baebb"/><rect x="1240" y="747" width="190" height="16" rx="4" fill="#287b91"/>
+  <text x="958" y="793" class="font" font-size="12" font-weight="700" fill="#617b88">M2</text><rect x="995" y="777" width="540" height="26" rx="5" fill="#f5f8f9"/><rect x="1010" y="782" width="155" height="16" rx="4" fill="#c8ae8e"/><rect x="1185" y="782" width="120" height="16" rx="4" fill="#c77565"/>
+  <text x="958" y="828" class="font" font-size="12" font-weight="700" fill="#617b88">M3</text><rect x="995" y="812" width="540" height="26" rx="5" fill="#f5f8f9"/><rect x="1260" y="817" width="130" height="16" rx="4" fill="#219078"/><text x="1325" y="830" text-anchor="middle" class="font" font-size="9" font-weight="700" fill="#fff">O1002-OP2</text>
+
+  <rect x="936" y="890" width="630" height="92" rx="12" fill="#fff" stroke="#e0e9ed" filter="url(#shadow)"/>
+  <text x="958" y="923" class="font h2">4　依据与风险</text><text x="958" y="951" class="font body">换型、设备约束、影响链和未满足条件集中查看。</text><text x="1544" y="951" text-anchor="end" class="font" font-size="12" font-weight="600" fill="#176e7f">展开查看依据　→</text>
+  <rect x="936" y="1002" width="630" height="55" rx="12" fill="#fff" stroke="#e0e9ed" filter="url(#shadow)"/>
+  <text x="958" y="1035" class="font h2" font-size="16">5　人工确认</text><rect x="1320" y="1015" width="100" height="34" rx="8" fill="#fff" stroke="#cbd8df"/><text x="1370" y="1037" text-anchor="middle" class="font" font-size="12" font-weight="600" fill="#4c6876">返回调整</text><rect x="1430" y="1015" width="115" height="34" rx="8" fill="#126c7b"/><text x="1487" y="1037" text-anchor="middle" class="font" font-size="12" font-weight="700" fill="#fff">确认并发布</text>
+
+  <line x1="1596" y1="310" x2="1596" y2="1057" stroke="#e1eaee"/>
+  <text x="1620" y="344" class="font" font-size="14" font-weight="700" fill="#536d7d">本页提纲</text>
+  <rect x="1610" y="365" width="125" height="32" rx="8" fill="#e7f3f5"/><text x="1624" y="386" class="font outline" font-weight="700" fill="#146b7b">方案结论</text>
+  <text x="1624" y="436" class="font outline">方案对比</text><text x="1624" y="486" class="font outline">候选排产计划</text><text x="1624" y="536" class="font outline">依据与风险</text><text x="1624" y="586" class="font outline">人工确认</text>
+
+  <text x="50" y="1100" class="font" font-size="13" fill="#5d7480">视觉原则：标题只保留一个主标题；卡片按用户决策顺序排列；状态未到达的内容不提前出现；右侧提纲跟随状态切换。</text>
+</svg>
