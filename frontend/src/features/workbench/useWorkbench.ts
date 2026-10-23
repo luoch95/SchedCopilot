@@ -7,6 +7,7 @@ import type {
   WorkflowIntent,
   WorkflowResult,
   WorkflowProgress,
+  WorkflowResponse,
 } from '../../shared/api/contracts';
 import { draftFingerprint, draftFor, type EventDraft } from '../events';
 import { workbenchApi } from './api';
@@ -87,6 +88,14 @@ export function useWorkbench() {
     setPan(0);
   }
 
+  function matchesSimulation(value: Workbench, saved: WorkflowResponse) {
+    return (
+      !saved.simulation ||
+      (saved.simulation.event_revision === value.event_revision &&
+        saved.simulation.baseline_fingerprint === value.baseline.fingerprint)
+    );
+  }
+
   useEffect(() => {
     let active = true;
     initialLoad.current ??= workbenchApi.load();
@@ -98,7 +107,14 @@ export function useWorkbench() {
           void workbenchApi
             .latestWorkflow()
             .then((saved) => {
-              if (!active || inFlight.current || epoch !== recoveryEpoch.current || !saved) return;
+              if (
+                !active ||
+                inFlight.current ||
+                epoch !== recoveryEpoch.current ||
+                !saved ||
+                !matchesSimulation(value, saved)
+              )
+                return;
               setWorkflow(saved.workflow);
               setSimulation(saved.simulation);
               setSelected(
@@ -185,7 +201,7 @@ export function useWorkbench() {
       const value = await workbenchApi.load();
       accept(value);
       const saved = await workbenchApi.latestWorkflow();
-      if (saved) {
+      if (saved && matchesSimulation(value, saved)) {
         setWorkflow(saved.workflow);
         setSimulation(saved.simulation);
         setSelected(
@@ -300,6 +316,20 @@ export function useWorkbench() {
             setDemoRetryAt(
               result.workflow.demo.retry_at ? Date.parse(result.workflow.demo.retry_at) : 0,
             );
+          }
+          // Refresh the authoritative plan before exposing a completed analysis.
+          const latest = await workbenchApi.load();
+          controller.signal.throwIfAborted();
+          setState(latest);
+          setDraft(draftFor(latest));
+          if (
+            latest.event_revision !== state.event_revision ||
+            latest.baseline.fingerprint !== state.baseline.fingerprint ||
+            !matchesSimulation(latest, result)
+          ) {
+            clearResults();
+            setNotice('计划或故障已更新，已刷新工作台，请基于最新数据重新评估。');
+            return;
           }
           setWorkflow(result.workflow);
           setProgress(null);

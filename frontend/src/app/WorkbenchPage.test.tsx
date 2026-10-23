@@ -698,14 +698,14 @@ describe('Schedule Copilot workflow', () => {
     fireEvent(window, new Event('focus'));
     expect(screen.getByRole('heading', { name: '2　方案对比' })).toBeTruthy();
     expect((screen.getByLabelText('解释问题') as HTMLTextAreaElement).value).toBe(question);
-    expect(calls.filter((call) => call.path === '/api/workbench')).toHaveLength(1);
+    expect(calls.filter((call) => call.path === '/api/workbench')).toHaveLength(2);
     expect(calls.filter((call) => call.path === '/api/workflow')).toHaveLength(1);
     await openFaultEditor();
     expect(screen.queryByRole('button', { name: '重新载入已保存事件' })).toBeNull();
     expect(screen.queryByRole('button', { name: '恢复上次可试算事件' })).toBeNull();
     expect(screen.getByRole('button', { name: '保存故障事件' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '关闭' }));
-    expect(calls.filter((call) => call.path === '/api/workbench')).toHaveLength(1);
+    expect(calls.filter((call) => call.path === '/api/workbench')).toHaveLength(2);
   });
 
   it('identifies the exact model fallback and completed Agents without implying total failure', async () => {

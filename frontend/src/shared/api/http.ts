@@ -7,7 +7,7 @@ export async function api<T>(path: string, body?: unknown, method = 'POST'): Pro
     response = await fetch(
       `/api${path}`,
       body === undefined
-        ? { method: 'GET' }
+        ? { method: 'GET', cache: 'no-store' }
         : {
             method,
             headers: { 'Content-Type': 'application/json', 'X-Demo-Write': '1' },

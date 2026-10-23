@@ -26,36 +26,25 @@ export function CurrentPlan({
   actions,
 }: Props) {
   const publication = state.plan_publication;
-  const events = [
-    { ...state.event, revision: state.event_revision },
-    ...(state.event_history ?? []),
-  ];
-  const seen = new Set<string>();
-  const faults = events
-    .filter((event) => {
-      const key = `${event.machine_id}-${event.started_at}-${event.recovered_at}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .map((event) => {
-      const analysis =
-        publication?.version === state.baseline.version &&
-        publication.fault_analysis?.event_revision === event.revision
-          ? publication.fault_analysis
-          : null;
-      return {
-        failure: event,
-        faultTrace: analysis
-          ? {
-              version: publication!.version,
-              affectedOperations:
-                analysis.baseline?.operations.filter((op) => analysis.affected?.includes(op.id)) ??
-                [],
-            }
-          : undefined,
-      };
-    });
+  // History belongs in the history list, never in the active fault overlay.
+  const faults = [{ ...state.event, revision: state.event_revision }].map((event) => {
+    const analysis =
+      publication?.version === state.baseline.version &&
+      publication.fault_analysis?.event_revision === event.revision
+        ? publication.fault_analysis
+        : null;
+    return {
+      failure: event,
+      faultTrace: analysis
+        ? {
+            version: publication!.version,
+            affectedOperations:
+              analysis.baseline?.operations.filter((op) => analysis.affected?.includes(op.id)) ??
+              [],
+          }
+        : undefined,
+    };
+  });
   const originalById = new Map(state.baseline.operations.map((op) => [op.id, op]));
   const affected = state.affected.map((id) => originalById.get(id)!);
   const planTimes = state.baseline.operations
@@ -161,7 +150,7 @@ export function CurrentPlan({
           aria-label={compact ? '执行计划图表内容' : undefined}
         >
           <Gantt
-            key={`fault-${state.event_revision}-${state.event.machine_id}-${state.event.started_at}-${state.event.recovered_at}`}
+            key={`plan-${state.baseline.fingerprint}-fault-${state.event_revision}-${state.event.machine_id}-${state.event.started_at}-${state.event.recovered_at}`}
             schedule={state.baseline}
             failure={state.event}
             faults={faults}
