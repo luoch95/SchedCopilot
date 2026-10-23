@@ -55,14 +55,17 @@ class WorkbenchService:
                 if self.repository.active_event() is None:
                     raise
 
-    def checked_snapshot(self, version: SnapshotVersion):
+    def checked_snapshot(self, version: SnapshotVersion, *, allow_cancelled=False):
         baseline, event, revision = self.repository.snapshot()
         if version != SnapshotVersion(revision, baseline.fingerprint):
             raise SnapshotConflict("事件或计划已更新，请重新载入后操作")
+        if not allow_cancelled and self.repository.event_cancelled(revision):
+            raise InvalidInput("故障已撤销，请先录入新的故障")
         return baseline, event, revision
 
     def workbench(self) -> WorkbenchSnapshot:
         baseline, event, revision = self.repository.snapshot()
+        cancelled = self.repository.event_cancelled(revision)
         return WorkbenchSnapshot(
             baseline,
             event,
@@ -70,17 +73,30 @@ class WorkbenchService:
             self.snapshot_time,
             self.machines,
             self.orders,
-            tuple(op.id for op in affected_operations(baseline, event)),
-            failure_issues(baseline, event, self.machines),
+            () if cancelled else tuple(op.id for op in affected_operations(baseline, event)),
+            () if cancelled else failure_issues(baseline, event, self.machines),
             self.repository.history(),
             self.repository.plan_metadata(baseline.version),
             self.repository.operation_labels(baseline),
             self.repository.event_history(),
             self.repository.fault_review(revision, baseline.fingerprint),
+            cancelled,
         )
 
+    def cancel_event(
+        self, version: SnapshotVersion, target_revision: int | None = None
+    ) -> WorkbenchSnapshot:
+        self.checked_snapshot(version, allow_cancelled=True)
+        self.repository.cancel_event(
+            version.event_revision, version.baseline_fingerprint, target_revision
+        )
+        invalidate = getattr(self.workflow_runner, "invalidate_sessions", None)
+        if invalidate:
+            invalidate()
+        return self.workbench()
+
     def save_event(self, command: SaveEvent) -> WorkbenchSnapshot:
-        self.checked_snapshot(command.version)
+        self.checked_snapshot(command.version, allow_cancelled=True)
         if command.machine_id not in {machine.id for machine in self.machines}:
             raise InvalidInput("故障设备不存在")
         event = MachineFailure(
@@ -96,7 +112,15 @@ class WorkbenchService:
     def _choose_recovery(
         self, baseline: Schedule, history: tuple[MachineFailure, ...]
     ) -> MachineFailure:
-        for event in (*history, self.example):
+        deleted = getattr(self.repository, "has_deleted_events", lambda: False)()
+        example_cancelled = any(
+            item.get("cancelled")
+            and item["machine_id"] == self.example.machine_id
+            and datetime.fromisoformat(item["started_at"]) == self.example.started_at
+            for item in self.repository.event_history()
+        )
+        examples = () if deleted or example_cancelled else (self.example,)
+        for event in (*history, *examples):
             try:
                 generate_candidates(baseline, event, self.machines, self.orders)
             except RuleViolation:
@@ -138,12 +162,15 @@ class WorkbenchService:
         )
 
     def submit_fault_review(self, simulation_id, candidate_id, reason, request_id):
+        self.manual_faults.check_simulation(simulation_id)
         self.repository.submit_fault_review(simulation_id, candidate_id, reason, request_id)
         return self.workbench()
 
     def review_fault(self, review_id, action, reason):
         baseline, _, revision = self.repository.snapshot()
         current = self.repository.fault_review(revision, baseline.fingerprint)
+        if current and current["id"] == review_id:
+            self.manual_faults.check_simulation(current["simulation_id"])
         if current and current["id"] == review_id and current.get("kind") == "assessment":
             latest = self.latest_workflow()
             if not latest or latest[0]["id"] != current["workflow_id"]:
@@ -168,6 +195,7 @@ class WorkbenchService:
             raise ResourceNotFound("该批次没有此候选方案")
         if command.action == "publish" and candidate.metrics.moved_operations == 0:
             raise RuleViolation("该候选与当前计划相同，无需重复发布")
+        self.manual_faults.check_simulation(command.simulation_id)
         result = self.repository.decide(
             candidate,
             event,
@@ -241,6 +269,8 @@ class WorkbenchService:
             return None
         payload, simulation_id = saved
         baseline, event, revision = self.repository.snapshot()
+        if self.repository.event_cancelled(revision):
+            return None
         if not self.workflow_runner.matches_snapshot(
             payload, baseline, event, self.machines, self.orders, self.snapshot_time, revision
         ):

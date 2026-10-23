@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../shared/api/errors';
 import type {
+  CopilotAnswer,
+  ManualFaultDraft,
   Simulation,
   SnapshotVersion,
   Workbench,
@@ -19,6 +21,7 @@ export function useWorkbench() {
   const [state, setState] = useState<Workbench | null>(null);
   const [draft, setDraft] = useState<EventDraft | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
+  const [manualDraft, setManualDraft] = useState<ManualFaultDraft | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -26,6 +29,10 @@ export function useWorkbench() {
   const [selected, setSelected] = useState('');
   const [reason, setReason] = useState('');
   const [action, setAction] = useState('reject');
+  const [answer, setAnswer] = useState<CopilotAnswer | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState('');
+  const askingRef = useRef(false);
   const [question, setQuestion] = useState('设备故障后，应该如何比较方案？');
   const [workflow, setWorkflow] = useState<WorkflowResult | null>(null);
   const [activeIntent, setActiveIntent] = useState<WorkflowIntent | null>(null);
@@ -71,6 +78,9 @@ export function useWorkbench() {
   }
 
   function clearResults() {
+    setAnswer(null);
+    setAskError('');
+    setManualDraft(null);
     recoveryEpoch.current += 1;
     setSimulation(null);
     setWorkflow(null);
@@ -90,9 +100,10 @@ export function useWorkbench() {
 
   function matchesSimulation(value: Workbench, saved: WorkflowResponse) {
     return (
-      !saved.simulation ||
-      (saved.simulation.event_revision === value.event_revision &&
-        saved.simulation.baseline_fingerprint === value.baseline.fingerprint)
+      !value.event_cancelled &&
+      (!saved.simulation ||
+        (saved.simulation.event_revision === value.event_revision &&
+          saved.simulation.baseline_fingerprint === value.baseline.fingerprint))
     );
   }
 
@@ -150,7 +161,11 @@ export function useWorkbench() {
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作未完成，请重试。');
-      if (err instanceof ApiError && err.status === 409) {
+      if (
+        err instanceof ApiError &&
+        err.status === 409 &&
+        !(label.includes('人工') && err.code === 'rule_violation')
+      ) {
         clearResults();
         if (err.code === 'snapshot_conflict' || /更新|版本|变化/.test(err.message)) setStale(true);
       }
@@ -177,8 +192,14 @@ export function useWorkbench() {
     (!draft.unknown &&
       (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(draft.recovered_at) ||
         draft.recovered_at <= draft.started_at));
-  const blocked = !state || dirty || stale || !!state.issues.length || !state.event.recovered_at;
-  const currentSimulation =
+  const blocked =
+    !state ||
+    !!state.event_cancelled ||
+    dirty ||
+    stale ||
+    !!state.issues.length ||
+    !state.event.recovered_at;
+  const validSimulation =
     simulation &&
     state &&
     !dirty &&
@@ -187,6 +208,11 @@ export function useWorkbench() {
     simulation.baseline_fingerprint === state.baseline.fingerprint
       ? simulation
       : null;
+  const currentSimulation = manualDraft
+    ? manualDraft.status === 'ready_for_review'
+      ? manualDraft.simulation
+      : null
+    : validSimulation;
   const candidate = currentSimulation?.candidates.find((item) => item.id === selected);
 
   function edit(value: Partial<EventDraft>) {
@@ -232,6 +258,16 @@ export function useWorkbench() {
       setNotice('故障事件已保存。请重新生成候选方案，执行计划未改变。');
     });
 
+  const cancelEvent = (revision?: number) =>
+    run('撤销误录故障', async () => {
+      accept(
+        await (revision === undefined
+          ? workbenchApi.cancelEvent(version())
+          : workbenchApi.cancelEvent(version(), revision)),
+      );
+      setNotice('故障及关联分析、候选和审批数据已永久删除，不再参与后续排产；已发布计划未改变。');
+    });
+
   const recover = () =>
     run('恢复事件', async () => {
       accept(await workbenchApi.recoverEvent(version()));
@@ -247,7 +283,7 @@ export function useWorkbench() {
         explain: '重新解释',
       }[intent],
       async () => {
-        if (!state || dirty || stale) return;
+        if (!state || state.event_cancelled || dirty || stale) return;
         if (intent === 'generate_candidates' && blocked) return;
         if ((intent === 'explain' || intent === 're_evaluate') && !workflow) return;
         if (intent === 'generate_candidates' || intent === 'validate') clearResults();
@@ -375,7 +411,11 @@ export function useWorkbench() {
 
   const submitReview = () =>
     run('提交管理者审批', async () => {
-      if (workflow?.status === 'completed' && workflow.results.evaluation?.data?.assessment) {
+      if (
+        !manualDraft &&
+        workflow?.status === 'completed' &&
+        workflow.results.evaluation?.data?.assessment
+      ) {
         if (blocked || !reason.trim()) return;
         const key = JSON.stringify(['assessment', workflow.id, reason.trim()]);
         if (decisionRequest.current.key !== key)
@@ -431,11 +471,115 @@ export function useWorkbench() {
       );
     });
 
+  async function askQuestion() {
+    if (
+      !state ||
+      !workflow ||
+      dirty ||
+      stale ||
+      state.event_cancelled ||
+      busy ||
+      askingRef.current ||
+      !question.trim()
+    )
+      return;
+    const epoch = recoveryEpoch.current;
+    askingRef.current = true;
+    setAsking(true);
+    setAskError('');
+    setAnswer(null);
+    try {
+      const response = await workbenchApi.ask({
+        ...version(),
+        workflow_id: workflow.id,
+        question: question.trim(),
+      });
+      if (epoch === recoveryEpoch.current && response.workflow_id === workflow.id)
+        setAnswer(response);
+    } catch (err) {
+      if (epoch === recoveryEpoch.current)
+        setAskError(err instanceof Error ? err.message : '解答暂不可用，请重试。');
+    } finally {
+      askingRef.current = false;
+      setAsking(false);
+    }
+  }
+
   function changeQuestion(value: string) {
     setQuestion(value);
   }
 
+  useEffect(() => {
+    if (!workflow || workflow.status !== 'completed') return;
+    let active = true;
+    const epoch = recoveryEpoch.current;
+    void workbenchApi
+      .manualDraft()
+      .then((saved) => {
+        if (
+          !active ||
+          inFlight.current ||
+          epoch !== recoveryEpoch.current ||
+          !saved ||
+          saved.event_revision !== state?.event_revision ||
+          saved.baseline_fingerprint !== state?.baseline.fingerprint ||
+          (saved.workflow_id !== workflow.id &&
+            !(
+              workflow.intent !== 'generate_candidates' &&
+              saved.source_simulation_id &&
+              saved.source_simulation_id === simulation?.id
+            ))
+        )
+          return;
+        setManualDraft(saved);
+        if (saved.simulation) setSelected(saved.simulation.candidates[0]?.id ?? '');
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [workflow?.id, state?.event_revision, state?.baseline.fingerprint]);
+
+  const startManual = () =>
+    run('创建人工草案', async () => {
+      if (!workflow || workflow.status !== 'completed' || dirty || stale) return;
+      const saved = await workbenchApi.createManualDraft(
+        workflow.id,
+        validSimulation?.id,
+        candidate?.id,
+      );
+      setManualDraft(saved);
+      setState(await workbenchApi.load());
+      setNotice('已进入人工调整；拖拽只修改草案，确认评估后才能提交审批。');
+    });
+  const moveManual = (operation_id: string, machine_id: string, start: string, reason: string) =>
+    run('保存人工调整', async () => {
+      if (!manualDraft || dirty || stale) return;
+      const saved = await workbenchApi.saveManualDraft(
+        manualDraft.id,
+        manualDraft.revision,
+        [{ operation_id, machine_id, start }],
+        reason,
+      );
+      setManualDraft(saved);
+      setState(await workbenchApi.load());
+      setNotice('草案已保存；需确认评估并重新提交审批。');
+    });
+  const confirmManual = () =>
+    run('评估人工草案', async () => {
+      if (!manualDraft || dirty || stale) return;
+      const saved = await workbenchApi.confirmManualDraft(manualDraft.id, manualDraft.revision);
+      setManualDraft(saved);
+      setSelected(saved.simulation?.candidates[0]?.id ?? '');
+      setReason('');
+      setNotice('人工调整草案报告已生成，待提交管理者审批。');
+    });
+
   return {
+    manualDraft,
+    startManual,
+    moveManual,
+    confirmManual,
     state,
     draft,
     busy,
@@ -450,6 +594,10 @@ export function useWorkbench() {
     reason,
     action,
     question,
+    answer,
+    asking,
+    askError,
+    askQuestion,
     activeIntent,
     workflow,
     progress,
@@ -462,6 +610,7 @@ export function useWorkbench() {
     reload,
     save,
     recover,
+    cancelEvent,
     generate,
     demoEnabled,
     demoRemaining,

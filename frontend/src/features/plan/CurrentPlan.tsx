@@ -12,6 +12,7 @@ interface Props {
   onZoom: (value: number) => void;
   onPan: (value: number) => void;
   compact?: boolean;
+  headingLevel?: 2 | 3;
   actions?: ReactNode;
 }
 
@@ -23,28 +24,17 @@ export function CurrentPlan({
   onZoom,
   onPan,
   compact = false,
+  headingLevel,
   actions,
 }: Props) {
+  const Heading = (headingLevel ?? (compact ? 2 : 3)) === 2 ? 'h2' : 'h3';
   const publication = state.plan_publication;
-  // History belongs in the history list, never in the active fault overlay.
-  const faults = [{ ...state.event, revision: state.event_revision }].map((event) => {
-    const analysis =
-      publication?.version === state.baseline.version &&
-      publication.fault_analysis?.event_revision === event.revision
-        ? publication.fault_analysis
-        : null;
-    return {
-      failure: event,
-      faultTrace: analysis
-        ? {
-            version: publication!.version,
-            affectedOperations:
-              analysis.baseline?.operations.filter((op) => analysis.affected?.includes(op.id)) ??
-              [],
-          }
-        : undefined,
-    };
-  });
+  const faults = (
+    publication?.version === state.baseline.version ? (publication.fault_traces ?? []) : []
+  ).map((trace) => ({
+    failure: trace.failure,
+    faultTrace: { version: trace.version, affectedOperations: trace.affected_operations },
+  }));
   const originalById = new Map(state.baseline.operations.map((op) => [op.id, op]));
   const affected = state.affected.map((id) => originalById.get(id)!);
   const planTimes = state.baseline.operations
@@ -84,7 +74,9 @@ export function CurrentPlan({
             <span className="event-revision-tag">第 {state.event_revision} 版</span>
           </div>
           <div className="event-stat">
-            <span>已保存故障 · {state.event.machine_id}</span>
+            <span>
+              {state.event_cancelled ? '故障已撤销' : `已保存故障 · ${state.event.machine_id}`}
+            </span>
             <strong>
               {stamp(state.event.started_at)} →{' '}
               {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复未知'}
@@ -100,7 +92,7 @@ export function CurrentPlan({
       >
         <div className="section-heading">
           <div>
-            {compact ? <h2>当前执行计划</h2> : <h3 id="section-current-plan">当前执行计划</h3>}
+            <Heading id="section-current-plan">当前执行计划</Heading>
             {compact && (
               <div className="hint plan-metadata-row">
                 <PlanVersionTag
@@ -108,10 +100,6 @@ export function CurrentPlan({
                   publication={state.plan_publication}
                 />
                 <span className="plan-execution-date">执行日期：{executionDate}</span>
-                <span className="plan-fault-context">
-                  已保存故障 {state.event.machine_id} · {stamp(state.event.started_at)} →{' '}
-                  {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复时间未知'}
-                </span>
               </div>
             )}
           </div>
@@ -150,7 +138,7 @@ export function CurrentPlan({
           aria-label={compact ? '执行计划图表内容' : undefined}
         >
           <Gantt
-            key={`plan-${state.baseline.fingerprint}-fault-${state.event_revision}-${state.event.machine_id}-${state.event.started_at}-${state.event.recovered_at}`}
+            key={`plan-${state.baseline.fingerprint}`}
             schedule={state.baseline}
             failure={state.event}
             faults={faults}

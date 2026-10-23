@@ -46,6 +46,11 @@ class WorkflowEngine:
         self.session_store = session_store
         self.failure_provider = failure_provider or (lambda: ())
 
+    def invalidate_sessions(self):
+        """Discard cached snapshots after a physical fault deletion."""
+        with self._lock:
+            self._sessions.clear()
+
     @staticmethod
     def _fingerprint(
         baseline, event, machines, orders, snapshot_time, revision, supplemental, failures=()
@@ -248,6 +253,19 @@ class WorkflowEngine:
                     )
                 )
         if self.session_store:
+            live = [t for t in payload["trace"] if (t.get("execution") or {}).get("mode") == "live"]
+            payload["contribution_report"] = {
+                "title": "分析工作与人工贡献",
+                "rules_work": "规则系统按实际完成节点提供数据校验、候选生成、指标与风险计算；"
+                "失败与未检查项见链路记录。",
+                "model_work": "大模型完成证据重点选择与解释组织；各节点模式与降级见链路记录。"
+                if live
+                else "本次使用规则分析，未完成大模型总结。",
+                "manual_summary": "尚未进行人工排程调整或采纳决策。",
+                "edits": [],
+                "risks": [],
+                "decision": "分析完成不代表审批通过或计划已发布。",
+            }
             self.session_store.record_workflow(payload, result.model_dump(mode="json"))
         return WorkflowOutcome(payload, tuple(candidates))
 

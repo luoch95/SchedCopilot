@@ -2,15 +2,17 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from ..application.contracts import Analyze, Decide, SaveEvent
+from ..application.metrics import read_metrics
 from ..application.workbench import WorkbenchService
 from .demo_access import COOKIE, SESSION_SECONDS, LoginRequest, is_admin, new_session
 from .presenters import simulation_view, workbench_view
 from .schemas import (
     AnalysisRequest,
     AssessmentReviewSubmit,
+    CopilotQuestionRequest,
     DecisionRequest,
     EventRequest,
     FaultReviewAction,
@@ -25,6 +27,11 @@ from .schemas import (
 from .workflow_stream import workflow_stream
 
 router = APIRouter(prefix="/api")
+
+
+@router.get("/visits", status_code=204)
+def visit(response: Response):
+    response.headers["Cache-Control"] = "no-store"
 
 
 @router.get("/demo/session")
@@ -82,6 +89,20 @@ def health(request: Request):
     }
 
 
+@router.get("/admin/metrics")
+def admin_metrics(request: Request, response: Response):
+    if not is_admin(request):
+        raise HTTPException(status_code=403, detail="请先登录研发后台（演示权限）")
+    response.headers["Cache-Control"] = "no-store"
+    return read_metrics(request.app.state.metric_records())
+
+
+@router.get("/reports/weekly")
+def weekly_metrics(request: Request, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return read_metrics(request.app.state.metric_records(), weekly=True)
+
+
 @router.get("/workbench")
 def workbench(service: Service):
     return workbench_view(service.workbench())
@@ -102,6 +123,16 @@ def save_event(request: EventRequest, service: Service):
     )
 
 
+@router.post("/events/{revision}/cancel")
+def cancel_historical_event(revision: int, request: SnapshotRequest, service: Service):
+    return workbench_view(service.cancel_event(request.version(), revision))
+
+
+@router.post("/event/cancel")
+def cancel_event(request: SnapshotRequest, service: Service):
+    return workbench_view(service.cancel_event(request.version()))
+
+
 @router.post("/event/recover")
 def recover_event(request: SnapshotRequest, service: Service):
     return workbench_view(service.recover_event(request.version()))
@@ -116,6 +147,13 @@ def simulate(request: SnapshotRequest, service: Service):
 def decide(request: DecisionRequest, service: Service):
     version, snapshot = service.decide(Decide(**request.model_dump()))
     return {"plan_version": version, "workbench": workbench_view(snapshot)}
+
+
+@router.post("/copilot/ask")
+def copilot_ask(payload: CopilotQuestionRequest, service: Service):
+    from ..application.copilot import answer_question
+
+    return answer_question(service, payload.version(), payload.workflow_id, payload.question)
 
 
 @router.post("/analysis")

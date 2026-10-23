@@ -141,7 +141,7 @@ def test_published_fault_preserves_analysis_and_original_impact_after_reload(cli
     assert client.get(f"/api/events/{analysis['event_revision']}/analysis").json() == analysis
 
 
-def test_unknown_recovery_explains_block_and_creates_no_candidates(client):
+def test_unknown_recovery_stops_at_validation_and_creates_no_candidates(client):
     before = client.get("/api/workbench").json()
     unknown = client.put(
         "/api/event",
@@ -155,8 +155,11 @@ def test_unknown_recovery_explains_block_and_creates_no_candidates(client):
     assert result.status_code == 200, result.text
     data = result.json()
     assert data["workflow"]["status"] == "blocked"
-    assert [t["action"] for t in data["workflow"]["trace"]] == ["validate", "explain"]
-    assert data["workflow"]["results"]["explanation"]["data"]
+    assert [t["action"] for t in data["workflow"]["trace"]] == ["validate"]
+    assert data["workflow"]["results"].get("explanation") is None
+    validation = data["workflow"]["results"]["validation"]
+    assert validation["quality"]["score"] == 0
+    assert validation["errors"][0]["code"] == "RECOVERY_TIME_UNKNOWN"
     assert data["simulation"] is None
     assert not client.get("/api/workbench").json()["history"]
 
@@ -334,3 +337,134 @@ def test_single_candidate_continues_evaluation_explanation_and_followups(client)
         assert all(s["requires_human_confirmation"] for s in explanation["next_steps"])
         assert any("全局唯一最优解" in item for item in explanation["limitations"])
     assert client.get("/api/workbench").json()["baseline"] == before["baseline"]
+
+
+def test_copilot_answers_without_rerunning_or_mutating_workflow(client, monkeypatch):
+    before = client.get("/api/workbench").json()
+    generated = client.post(
+        "/api/workflow", json={**token(before), "intent": "generate_candidates"}
+    ).json()
+    latest = client.get("/api/workflow/latest").json()
+    service = client.app.state.workbench
+    monkeypatch.setattr(service.copilot_agent, "unavailable_code", "MODEL_NOT_CONFIGURED")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("QA must not generate or write")
+
+    monkeypatch.setattr(service, "run_workflow", forbidden)
+    monkeypatch.setattr(service.repository, "record_simulation", forbidden)
+    monkeypatch.setattr(service.repository, "record_workflow", forbidden)
+    response = client.post(
+        "/api/copilot/ask",
+        json={
+            **token(before),
+            "workflow_id": generated["workflow"]["id"],
+            "question": "如果不转移会怎样？",
+        },
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()
+    assert answer["mode"] == "fallback"
+    assert answer["execution"]["calls"] == 0
+    assert "延期" in answer["answer"]
+    assert answer["knowledge"]["status"] == "matched"
+    assert client.get("/api/workbench").json() == before
+    assert client.get("/api/workflow/latest").json() == latest
+
+
+def test_copilot_rejects_stale_and_unknown_results(client):
+    before = client.get("/api/workbench").json()
+    generated = client.post(
+        "/api/workflow", json={**token(before), "intent": "generate_candidates"}
+    ).json()
+    request = {
+        **token(before),
+        "workflow_id": generated["workflow"]["id"],
+        "question": "延期风险？",
+    }
+    assert (
+        client.post("/api/copilot/ask", json={**request, "workflow_id": "missing"}).status_code
+        == 409
+    )
+    assert client.post("/api/copilot/ask", json={**request, "question": "  "}).status_code == 422
+    assert (
+        client.post(
+            "/api/copilot/ask", json={**request, "intent": "generate_candidates"}
+        ).status_code
+        == 422
+    )
+    changed = client.put(
+        "/api/event",
+        json={
+            **token(before),
+            "machine_id": before["event"]["machine_id"],
+            "started_at": before["event"]["started_at"],
+            "recovered_at": before["event"]["recovered_at"],
+            "source": "已变更",
+        },
+    )
+    assert changed.status_code == 200
+    assert client.post("/api/copilot/ask", json=request).status_code == 409
+
+
+def test_copilot_live_answer_uses_only_selected_server_facts(client, monkeypatch):
+    from langchain_core.messages import AIMessage
+
+    before = client.get("/api/workbench").json()
+    generated = client.post(
+        "/api/workflow", json={**token(before), "intent": "generate_candidates"}
+    ).json()
+
+    class Model:
+        def bind_tools(self, *args, **kwargs):
+            return self
+
+        def invoke(self, messages):
+            return AIMessage(
+                content="伪造已发布和收益99999",
+                tool_calls=[{"id": "qa", "name": "submit_focus", "args": {"focus_ids": ["B1"]}}],
+            )
+
+    agent = client.app.state.workbench.copilot_agent
+    monkeypatch.setattr(agent, "unavailable_code", None)
+    monkeypatch.setattr(agent, "model_factory", lambda: Model())
+    response = client.post(
+        "/api/copilot/ask",
+        json={
+            **token(before),
+            "workflow_id": generated["workflow"]["id"],
+            "question": "方案影响？",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mode"] == "live"
+    assert data["execution"]["calls"] == 1
+    assert "99999" not in str(data)
+    assert "延期订单" in data["answer"]
+
+
+def test_copilot_discards_answer_if_snapshot_changes_during_model_call(client, monkeypatch):
+    before = client.get("/api/workbench").json()
+    generated = client.post(
+        "/api/workflow", json={**token(before), "intent": "generate_candidates"}
+    ).json()
+    service = client.app.state.workbench
+    run = service.copilot_agent.run
+
+    def changing(*args, **kwargs):
+        result = run(*args, **kwargs)
+        _, event, revision = service.repository.snapshot()
+        service.repository.record_event(replace(event, source="问答期间改变"), revision)
+        return result
+
+    monkeypatch.setattr(service.copilot_agent, "run", changing)
+    response = client.post(
+        "/api/copilot/ask",
+        json={
+            **token(before),
+            "workflow_id": generated["workflow"]["id"],
+            "question": "方案影响？",
+        },
+    )
+    assert response.status_code == 409

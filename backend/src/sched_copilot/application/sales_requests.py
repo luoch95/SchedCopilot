@@ -153,7 +153,7 @@ class SalesRequestService:
             estimate["planned_minutes"],
             steps,
             resources,
-            snapshot.event,
+            None if snapshot.event_cancelled else snapshot.event,
         )
         result["details"]["processing_estimate"] = estimate
         result["details"]["resource_snapshot"] = dict(

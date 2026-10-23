@@ -144,7 +144,7 @@ class ExplanationAgent:
                 errors=[failure_notice(exc, "explanation", "EXPLANATION_TOOL_FAILED")],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
-        result = finish_quality(result, quality)
+        result = finish_quality(result, quality, checked)
         result = validate_result(result.model_dump_json(), checked, prompt)
         knowledge = None
         if self.knowledge_tool and result.data and result.status not in {"failed", "blocked"}:

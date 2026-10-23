@@ -1,3 +1,4 @@
+import { evidenceEntries } from './FaultDecisionEvidence';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -193,7 +194,7 @@ it('returns through planner pages before role selection and preserves explicit r
   act(() => history.forward());
   await screen.findByRole('heading', { name: '当前执行计划' });
   await analyzeFault();
-  fireEvent.click(screen.getByRole('button', { name: '切换角色' }));
+  fireEvent.click(screen.getByRole('button', { name: '选择角色' }));
   await screen.findByRole('heading', { name: '选择你的工作角色' });
   fireEvent.click(screen.getByRole('button', { name: /进入排产工作台/ }));
   await screen.findByRole('heading', { name: '排产计划工作台' });
@@ -317,23 +318,18 @@ it('shows the saved analysis time and Trace for the same fault revision as the c
     screen.getByRole('heading', { name: '排产计划工作台' }).closest('header')?.textContent,
   ).not.toContain('当前步骤');
   expect(screen.queryByRole('heading', { name: '本次智能分析链路' })).toBeNull();
-  const hash = location.hash;
   fireEvent.click(screen.getByRole('button', { name: '查看 AI 分析详情' }));
-  const dialog = screen.getByRole('dialog', { name: 'M1故障 R1 · 智能分析明细' });
-  expect(within(dialog).getByText('基线 V1 · 故障 R1')).toBeTruthy();
-  expect(within(dialog).getByText('分析于 10/19 14:30')).toBeTruthy();
-  expect(within(dialog).getAllByText('TRC-SAVED-FAULT').length).toBeGreaterThan(0);
-  expect(within(dialog).getByRole('region', { name: '四个智能环节执行状态' })).toBeTruthy();
-  expect(dialog.classList.contains('console-drawer')).toBe(true);
-  expect((dialog as HTMLDialogElement).style.width).toBe('min(1120px, 100vw)');
-  for (const stage of ['数据校验', '排产执行', '方案评估', '结果解释']) {
-    expect(within(dialog).getByText(stage)).toBeTruthy();
-  }
-  expect(location.hash).toBe('#/planner/assessment-details');
-  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(location.hash).toBe(hash);
-  expect(screen.queryByRole('heading', { name: '本次智能分析链路' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '故障影响与方案决策', level: 1 })).toBeTruthy();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByText('分析于 10/19 14:30')).toBeTruthy();
+  expect(screen.getAllByText('TRC-SAVED-FAULT').length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: '采纳此方案（等待恢复）' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '采纳此方案（转移设备）' })).toBeTruthy();
+  expect(location.hash).toBe('#/planner/fault-decision');
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/workflow')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+  await screen.findByRole('heading', { name: '排产计划工作台' });
+  expect(location.hash).toBe('#/planner');
 });
 
 it('sorts both task lists newest first and filters each card independently without refetching or hiding the plan', async () => {
@@ -453,7 +449,7 @@ it('opens a selected request in full-screen details with its own trace and plan 
   expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
 });
 
-it('saves fault edits in the dialog, closes it on success and refreshes the fault shadow', async () => {
+it('saves fault edits in the dialog, closes it without changing the published fault shadow', async () => {
   render(<WorkbenchPage />);
   await screen.findByRole('heading', { name: '当前执行计划' });
   fireEvent.click(screen.getByRole('button', { name: '+ 录入设备故障' }));
@@ -464,8 +460,7 @@ it('saves fault edits in the dialog, closes it on success and refreshes the faul
   await screen.findByText('故障事件已保存。请重新生成候选方案，执行计划未改变。');
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(screen.getByRole('button', { name: '查看执行计划 V1 发布信息' })).toBeTruthy();
-  expect(screen.getByText(/已保存故障 M2/)).toBeTruthy();
-  expect(within(screen.getByRole('img')).getByRole('group', { name: 'M2 停机留痕' })).toBeTruthy();
+  expect(within(screen.getByRole('img')).queryByRole('group', { name: 'M2 停机留痕' })).toBeNull();
   expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
   expect(location.hash).toBe('#/planner');
   const banner = screen.getByRole('region', { name: '已登记设备故障' });
@@ -624,26 +619,58 @@ it('starts one workflow only on explicit analysis and presents the returned cand
   await screen.findByRole('heading', { name: '2　方案对比' });
   expect(screen.getByRole('heading', { name: '本次智能分析链路' })).toBeTruthy();
   expect(screen.getAllByRole('img')).toHaveLength(2);
-  for (const title of ['工序调整对照', '订单交付对照', '历史记录']) {
-    const heading = screen.getByRole('heading', { name: new RegExp(title) });
-    const accordion = heading.closest('details')!;
-    expect(accordion.open).toBe(false);
-    fireEvent.click(heading.closest('summary')!);
-    expect(accordion.open).toBe(true);
-    fireEvent.click(heading.closest('summary')!);
-    expect(accordion.open).toBe(false);
+  for (const title of ['4.4 工序调整对照', '4.5 订单交付对照']) {
+    fireEvent.click(screen.getByRole('tab', { name: title }));
+    const heading = screen.getByRole('heading', { name: title, level: 3 });
+    expect(heading.closest('details')).toBeNull();
+    expect(heading.parentElement?.querySelector('table')).toBeTruthy();
   }
-  expect(screen.getByRole('heading', { name: '执行详情' }).closest('details')?.open).toBe(false);
+  expect(screen.getByRole('heading', { name: '6　历史记录' }).closest('details')).toBeNull();
+  expect(screen.getByRole('heading', { name: '4.11 执行详情' }).closest('details')?.open).toBe(
+    false,
+  );
+  expect(screen.queryByLabelText('确认理由（必填）')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '采纳此方案（转移设备）' }));
   expect(screen.getByRole('heading', { name: '人工确认' }).closest('details')).toBeNull();
   expect(screen.getByLabelText('确认理由（必填）')).toBeTruthy();
+  expect((screen.getByLabelText('本次处理的方案') as HTMLSelectElement).value).toBe('transfer');
+  expect((screen.getByLabelText('处理方式') as HTMLSelectElement).value).toBe('publish');
+  expect(
+    screen
+      .getByRole('article', { name: '允许合格设备转移排产图' })
+      .classList.contains('is-selected'),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '采纳此方案（等待恢复）' }));
+  expect((screen.getByLabelText('本次处理的方案') as HTMLSelectElement).value).toBe('wait');
+  expect(
+    screen.getByRole('button', { name: '采纳此方案（等待恢复）' }).getAttribute('aria-pressed'),
+  ).toBe('true');
+  expect(
+    screen.getByRole('button', { name: '采纳此方案（转移设备）' }).getAttribute('aria-pressed'),
+  ).toBe('false');
+  expect(screen.getByRole('button', { name: '提交管理者审批' }).hasAttribute('disabled')).toBe(
+    true,
+  );
+  expect(screen.queryByRole('button', { name: '确认发布执行计划' })).toBeNull();
+  expect(screen.getByRole('button', { name: '都不满意，转人工手动排产' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '采纳方案' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '不采纳，人工调整' })).toBeNull();
   expect(screen.getByRole('heading', { name: '2　方案对比' }).closest('details')).toBeNull();
-  const outline = screen.getByRole('navigation', { name: '本页提纲' });
+  const outline = screen.getByRole('navigation', { name: '本页大纲' });
   expect(
     within(outline)
       .getAllByRole('link')
       .map((link) => link.textContent),
-  ).toEqual(['方案结论', '方案对比', '候选排产计划', '依据与风险', '人工确认']);
-  const detailLink = within(outline).getByRole('link', { name: '依据与风险' });
+  ).toEqual([
+    '1 方案结论',
+    '2 方案对比',
+    '3 候选排产计划',
+    '4 依据与风险',
+    ...evidenceEntries.map(([, title]) => title),
+    '5 人工确认',
+    '6 历史记录',
+  ]);
+  const detailLink = within(outline).getByRole('link', { name: '4 依据与风险' });
   const detailHeading = document.getElementById('fault-evidence')!;
   const scroll = vi.fn();
   detailHeading.scrollIntoView = scroll;
@@ -694,7 +721,7 @@ it.each([1000, 5000])(
     fireEvent.click(analyze);
     const back = screen.getByRole('button', { name: '← 返回工作台总览' }) as HTMLButtonElement;
     expect(back.disabled).toBe(false);
-    expect(back.classList.contains('primary')).toBe(true);
+    expect(back.classList.contains('primary')).toBe(false);
     expect(
       (screen.getByRole('button', { name: 'AI 正在分析并生成候选方案' }) as HTMLButtonElement)
         .disabled,
@@ -731,9 +758,9 @@ it.each([1000, 5000])(
       await act(() => vi.advanceTimersByTimeAsync(4000 - duration));
     }
     fireEvent.click(screen.getByRole('button', { name: '查看 AI 分析详情' }));
-    expect(screen.getByRole('dialog', { name: 'M1故障 R1 · 智能分析明细' })).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(location.hash).toBe('#/planner/fault-decision');
     expect(screen.getByRole('heading', { name: '本次智能分析链路' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '查看结果与提交审批' }));
     expect(screen.getByRole('heading', { name: '2　方案对比' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '本次智能分析链路' })).toBeTruthy();
     expect(screen.getAllByRole('img')).toHaveLength(2);
@@ -814,8 +841,120 @@ it.each(['failed', 'blocked'])(
       ),
     );
     if (status === 'blocked') {
-      fireEvent.click(screen.getByRole('button', { name: '查看结果与提交审批' }));
     }
     expect(screen.getByRole('heading', { name: '2　方案对比' })).toBeTruthy();
+  },
+);
+
+it('requires confirmation to cancel a mistaken fault and removes it from active alerts', async () => {
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (url === '/api/event/cancel')
+      return new Response(
+        JSON.stringify({
+          ...workbench,
+          event_cancelled: true,
+          event_revision: workbench.event_revision + 1,
+          affected: [],
+          issues: [],
+          event_history: [
+            {
+              ...workbench.event,
+              revision: workbench.event_revision,
+              created_at: workbench.event.received_at,
+              cancelled: true,
+            },
+          ],
+        }),
+      );
+    return originalFetch(url, options);
+  });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  render(<WorkbenchPage />);
+  const button = await screen.findByRole('button', { name: '撤销' });
+  fireEvent.click(button);
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/event/cancel')).toBe(false);
+  confirm.mockReturnValue(true);
+  fireEvent.click(button);
+  await screen.findByText(/故障及关联分析、候选和审批数据已永久删除/);
+  expect(screen.queryByRole('region', { name: '已登记设备故障' })).toBeNull();
+  expect(screen.getByText('所选时间范围内暂无故障预警。')).toBeTruthy();
+  const request = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/event/cancel');
+  expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+    event_revision: workbench.event_revision,
+    baseline_fingerprint: workbench.baseline.fingerprint,
+  });
+  confirm.mockRestore();
+});
+
+it('shows conflict guidance without an impact conclusion for an invalid fault', async () => {
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (url === '/api/workbench')
+      return new Response(
+        JSON.stringify({ ...workbench, issues: ['execution state conflicts with failure'] }),
+      );
+    return originalFetch(url, options);
+  });
+  render(<WorkbenchPage />);
+  const fault = await screen.findByRole('region', { name: '已登记设备故障' });
+  expect(within(fault).getByText('故障信息与执行记录不一致，暂不能分析')).toBeTruthy();
+  expect(within(fault).queryByText('结论简要：')).toBeNull();
+  expect(within(fault).getByRole('button', { name: '撤销' })).toBeTruthy();
+  expect(
+    within(fault).getByRole('button', { name: '开始 AI 分析并生成方案' }).hasAttribute('disabled'),
+  ).toBe(true);
+});
+
+it.each([
+  ['wait', '采纳此方案（等待恢复）'],
+  ['transfer', '采纳此方案（转移设备）'],
+])(
+  'submits the card-selected %s candidate for approval without publishing',
+  async (candidateId, buttonLabel) => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, options) =>
+      url === '/api/workflow'
+        ? Promise.resolve(
+            new Response(
+              JSON.stringify({
+                workflow: {
+                  id: 'card-workflow',
+                  status: 'completed',
+                  results: {},
+                  trace: [],
+                  evidence_catalog: {},
+                },
+                simulation,
+              }),
+            ),
+          )
+        : original(url, options),
+    );
+    render(<WorkbenchPage />);
+    await screen.findByRole('button', { name: '开始 AI 分析并生成方案' });
+    await analyzeFault();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: candidateId === 'wait' ? '采纳此方案（转移设备）' : '采纳此方案（等待恢复）',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: buttonLabel }));
+    fireEvent.change(screen.getByLabelText('确认理由（必填）'), {
+      target: { value: '已核实方案与延期风险，提交审批' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
+    await waitFor(() => {
+      const reviewCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => url === '/api/fault-reviews');
+      expect(reviewCalls).toHaveLength(1);
+      expect(JSON.parse(String(reviewCalls[0][1]?.body))).toMatchObject({
+        simulation_id: simulation.id,
+        candidate_id: candidateId,
+        operator_role: 'planner',
+      });
+    });
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/decisions')).toBe(false);
   },
 );

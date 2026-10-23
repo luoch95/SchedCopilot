@@ -1,16 +1,17 @@
 import { stamp } from '../../shared/lib/time';
 import type { Candidate, Operation, Workbench } from '../../shared/api/contracts';
 import { DecisionText } from '../../shared/ui/DecisionText';
-import { Accordion } from '../../shared/ui/Accordion';
 import { businessText } from '../../shared/lib/businessLabels';
 const slot = (op: Operation) => `${op.machine_id} · ${stamp(op.start)} → ${stamp(op.end)}`;
 const differs = (values: (string | number)[]) => new Set(values).size > 1;
 export function OperationComparison({
   state,
   candidates,
+  showHeading = true,
 }: {
   state: Workbench;
   candidates: Candidate[];
+  showHeading?: boolean;
 }) {
   const operations = state.baseline.operations.filter((op) =>
     candidates.some((item) => {
@@ -19,7 +20,8 @@ export function OperationComparison({
     }),
   );
   return (
-    <Accordion title="工序调整对照">
+    <section className="comparison-detail-section" aria-label="工序调整对照">
+      {showHeading && <h3>工序调整对照</h3>}
       <p className="hint">黄色框标出方案间不同的安排</p>
       <div className="table-wrap">
         <table>
@@ -86,6 +88,6 @@ export function OperationComparison({
           </tbody>
         </table>
       </div>
-    </Accordion>
+    </section>
   );
 }

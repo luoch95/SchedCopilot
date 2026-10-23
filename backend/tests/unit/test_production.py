@@ -67,3 +67,16 @@ def test_invalid_shift_configuration_is_rejected(resources):
 
     invalid = replace(resources, shifts={"unknown": ((at(60), at(30)),)})
     assert invalid.configuration_errors(demo_schedule(), demo_machines())
+
+
+def test_overtime_policy_keeps_other_hard_constraints(resources, failure):
+    allowed = replace(resources, allow_overtime=True)
+    op = operation("b", "M1", 350)
+    assert allowed.place(op, "M1", at(350), {}, failure) == at(350)
+    assert allowed.check(Schedule(1, (op,)), failure) == []
+    assert resources.check(Schedule(1, (op,)), failure) == ["加工或换型超出班次"]
+    assert allowed.overtime_risks(Schedule(1, (op,)))
+    assert allowed.check(Schedule(1, (operation("b", "M1", 40),)), failure)
+    assert allowed.check(
+        Schedule(1, (operation("b", "M1", 350), operation("c", "M2", 360))), failure
+    )

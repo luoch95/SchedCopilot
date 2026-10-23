@@ -283,6 +283,17 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
         summary = "候选变更及其依据如下；尚无可用于候选比较的取舍说明。"
     else:
         summary = "已有校验或执行结果说明如下，请按证据与修复建议处理。"
+    if validation and validation.data:
+        missing = production_condition_labels(validation.data.unchecked_items)
+        warning_messages = [i.message for i in validation.data.issues if i.severity == "warning"]
+        if missing or warning_messages:
+            risk = (
+                "⚠️ 风险提示：缺少或尚未核验的数据条件："
+                + "；".join([*missing, *warning_messages])
+                + "。请人工核实后再决定执行。"
+            )
+            summary += " " + risk
+            risks.insert(0, statement(risk, [request.validation_result_ref]))
     return ExplanationData(
         summary=summary,
         facts=facts,

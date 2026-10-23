@@ -1,0 +1,208 @@
+.copilot-assist {
+  border: 1px solid #bfdbfe;
+  border-radius: 16px;
+  background: #eff6ff;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.6;
+  box-shadow:
+    0 0 0 3px rgb(59 130 246 / 3%),
+    0 6px 24px rgb(30 64 175 / 5%);
+}
+.copilot-assist .section-heading h2,
+.fault-decision-layout .copilot-assist .section-heading h2 {
+  color: #1e3a8a;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+  margin: 0;
+}
+.copilot-assist .section-heading {
+  margin-bottom: 24px;
+}
+.fault-evidence-details > .copilot-assist {
+  margin-top: 16px;
+  padding: 24px;
+}
+.copilot-assist :is(.explanation-group, .knowledge-panel, .copilot-markdown) h3,
+.copilot-assist .block-title,
+.fault-decision-layout .fault-stage-card .copilot-assist .block-title {
+  margin: 24px 0 16px;
+  color: #334155;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+.copilot-assist .knowledge-heading h3 {
+  margin: 0;
+}
+.copilot-assist :is(.explanation-group, .knowledge-facts, .copilot-markdown) {
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.6;
+}
+.copilot-assist :is(ul, ol) {
+  margin-top: 12px;
+  margin-bottom: 16px;
+  padding-left: 24px;
+}
+.copilot-assist li {
+  margin-top: 8px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.copilot-assist li + li {
+  margin-top: 8px;
+}
+.copilot-assist .knowledge-panel {
+  margin: 24px 0;
+  padding: 20px;
+  border-color: #dbeafe;
+  background: #f8fbff;
+}
+.copilot-assist .knowledge-heading .tag {
+  padding: 2px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.copilot-assist .decision-accordion > summary {
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #334155;
+}
+.copilot-assist .decision-accordion > summary h3,
+.fault-decision-layout .copilot-assist .decision-accordion > summary h3 {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.copilot-assist .decision-accordion > summary::before {
+  color: #64748b;
+  font-size: 18px;
+}
+.copilot-conversation {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #dbeafe;
+}
+.copilot-conversation fieldset {
+  border: 0;
+  padding: 0;
+  margin: 16px 0 0;
+  min-width: 0;
+}
+.copilot-conversation label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 600;
+  color: #334155;
+}
+.copilot-conversation textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  padding: 18px;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(30 64 175 / 5%);
+  font: inherit;
+  line-height: 1.7;
+  color: #334155;
+}
+.copilot-conversation textarea:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 3px;
+}
+.copilot-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.copilot-prompts button {
+  padding: 7px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 20px;
+  background: #f8fbff;
+  color: #35609b;
+  font-size: 12px;
+  box-shadow: none;
+}
+.copilot-prompts button:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.copilot-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+.copilot-submit-row > span,
+.copilot-answer header > span {
+  font-size: 12px;
+  color: #64748b;
+}
+.copilot-answer {
+  margin-top: 24px;
+  padding: 22px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #fff;
+}
+.copilot-answer header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #1e3a8a;
+}
+.copilot-answer-status {
+  margin-top: 20px;
+  color: #2563eb;
+}
+.copilot-markdown {
+  overflow-wrap: anywhere;
+  color: #475569;
+  line-height: 1.6;
+}
+.copilot-markdown :is(h1, h2, h3),
+.fault-decision-layout .copilot-assist .copilot-markdown :is(h1, h2, h3) {
+  margin-top: 18px;
+  font-size: 16px;
+}
+.copilot-markdown pre {
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+.copilot-answer blockquote {
+  margin: 14px 0;
+  padding: 4px 16px;
+  border-left: 2px solid #93c5fd;
+  color: #64748b;
+}
+@media (max-width: 600px) {
+  .fault-evidence-details > .copilot-assist {
+    padding: 16px;
+  }
+  .copilot-answer {
+    padding: 16px;
+  }
+  .copilot-submit-row .primary {
+    width: 100%;
+  }
+}

@@ -10,6 +10,7 @@ from ..tools.validation import ValidationToolOutput, validate_data
 from .contracts.common import AgentContext, Notice
 from .contracts.inputs import SchedulingCase, ValidationInput
 from .contracts.results import ValidationResult
+from .contracts.scoring import validation_status
 from .quality import (
     QualityFailure,
     checked_execute,
@@ -132,7 +133,7 @@ class ValidationAgent:
                 for i in data.issues
                 if i.severity == "blocking"
             ]
-            status = "blocked" if errors else "warning" if warnings else "success"
+            status = validation_status(data)
             result = ValidationResult(
                 agent_name="validation",
                 prompt_version=prompt.role_metadata.prompt_version,
@@ -163,6 +164,6 @@ class ValidationAgent:
                 errors=[failure_notice(exc, "validation", "VALIDATION_TOOL_FAILED")],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
-        result = finish_quality(result, quality)
+        result = finish_quality(result, quality, checked)
         result = validate_result(result.model_dump_json(), checked, prompt)
         return ValidationRun(checked, result, prompt.content_sha256)

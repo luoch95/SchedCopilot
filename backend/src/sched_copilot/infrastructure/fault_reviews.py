@@ -10,6 +10,7 @@ from uuid import uuid4
 from ..domain.errors import RuleViolation
 from ..domain.models import digest
 from .fault_publication import fault_publication
+from .manual_faults import gate as manual_gate
 from .serialization import parse_candidates, parse_schedule
 
 SCHEMA = """
@@ -73,6 +74,7 @@ def submit(conn, simulation_id, candidate_id, reason, request_id):
     if candidate is None:
         raise RuleViolation("候选方案不存在，请重新生成")
     check_snapshot(conn, candidate)
+    manual_gate(conn, simulation_id, candidate)
     if not candidate.metrics.moved_operations:
         raise RuleViolation("方案与当前计划相同，无需提交审批")
     old = current_review(conn, candidate.event_revision, candidate.baseline_fingerprint)
@@ -133,6 +135,7 @@ def review(conn, review_id, action, reason):
     ).fetchone()
     candidate = next(c for c in parse_candidates(raw[0]) if c.id == payload["candidate_id"])
     check_snapshot(conn, candidate)
+    manual_gate(conn, payload["simulation_id"], candidate)
     return finish_review(conn, payload, action, reason)
 
 

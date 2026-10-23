@@ -54,6 +54,9 @@ class QualityReport(Contract):
     issues: list[QualityIssue] = Field(default_factory=list)
     stop_reason: Text | None = None
     history: list[QualityRound] = Field(default_factory=list)
+    score: Annotated[float, Field(ge=0, le=100)] | None = None
+    score_version: Literal["rules-v1"] | None = None
+    score_reasons: list[Text] = Field(default_factory=list)
 
 
 class Statement(Contract):

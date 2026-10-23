@@ -275,3 +275,45 @@ def test_parallel_publications_only_advance_one_version(tmp_path):
             )
         assert sorted(r.status_code for r in responses) == [200, 409]
         assert client.get("/api/workbench").json()["baseline"]["version"] == 2
+
+
+def test_published_traces_survive_new_fault_and_cancellation(tmp_path):
+    path = tmp_path / "published-traces.sqlite3"
+    with TestClient(create_app(path)) as client:
+        original = client.get("/api/workbench").json()
+        assert original["plan_publication"]["fault_traces"] == []
+        simulation = generate(client)
+        command = decision(simulation)
+        approve_fault(client, simulation["id"], command["candidate_id"])
+        published = client.post("/api/decisions", json=command).json()["workbench"]
+        traces = published["plan_publication"]["fault_traces"]
+        assert len(traces) == 1
+        assert traces[0]["failure"] == original["event"]
+        assert traces[0]["event_revision"] == original["event_revision"]
+        assert traces[0]["version"] == published["baseline"]["version"]
+        response = client.put(
+            "/api/event",
+            json={
+                "event_revision": published["event_revision"],
+                "baseline_fingerprint": published["baseline"]["fingerprint"],
+                "machine_id": "M2",
+                "started_at": "2026-10-20T16:00:00+08:00",
+                "recovered_at": "2026-10-20T17:00:00+08:00",
+                "source": "new fault",
+            },
+        )
+        assert response.status_code == 200, response.text
+        changed = response.json()
+        assert changed["baseline"] == published["baseline"]
+        assert changed["plan_publication"]["fault_traces"] == traces
+        response = client.post(
+            "/api/event/cancel",
+            json={
+                "event_revision": changed["event_revision"],
+                "baseline_fingerprint": changed["baseline"]["fingerprint"],
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["plan_publication"]["fault_traces"] == traces
+    with TestClient(create_app(path)) as client:
+        assert client.get("/api/workbench").json()["plan_publication"]["fault_traces"] == traces

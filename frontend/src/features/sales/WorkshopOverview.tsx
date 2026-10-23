@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 
 function AffectedLine({ line, detail }: { line: string; detail: string }) {
   const id = useId();
@@ -31,12 +31,15 @@ function AffectedLine({ line, detail }: { line: string; detail: string }) {
 }
 
 /** Static showcase only; deliberately independent from live approval and plan data. */
-export function WorkshopOverview() {
+export function WorkshopOverview({ headerActions }: { headerActions?: ReactNode }) {
   return (
     <section className="section workshop-overview" aria-label="生产车间概况">
       <div className="section-heading">
-        <h2>生产车间概况</h2>
-        <span className="tag">静态演示数据</span>
+        <div className="workshop-overview-title">
+          <h2>生产车间概况</h2>
+          <span className="tag">静态演示数据</span>
+        </div>
+        {headerActions}
       </div>
       <div className="workshop-metrics">
         <article className="workshop-metric">

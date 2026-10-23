@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..agents.contracts.artifacts import (
     CandidateChanges,
@@ -12,14 +12,19 @@ from ..agents.contracts.artifacts import (
 )
 from ..agents.contracts.common import Evidence, Notice, Statement
 from ..agents.contracts.results import CandidateReference, SchedulingData
-from ..domain.errors import RuleViolation
+from ..domain.errors import RuleViolation, ShiftCapacityExceeded
 from ..domain.impact import operation_changes
 from ..domain.models import MachineFailure, Schedule, TaskStatus
-from ..domain.scheduling import ASSUMPTIONS, generate_candidates, validate_schedule
+from ..domain.scheduling import (
+    ASSUMPTIONS,
+    affected_operations,
+    generate_candidates,
+    validate_schedule,
+)
 from .case_mapping import to_validation_case
 from .scheduling_context import SchedulingBlocked, SchedulingSource
 
-RULESET_VERSION = "1.2.1"
+RULESET_VERSION = "1.3.0"
 
 
 @dataclass(frozen=True)
@@ -45,7 +50,7 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
             "合格设备加工时长相同；规则方案不保证最优，正式发布仍需人工确认。",
         ]
     assumptions.append(
-        "原计划对照保留原设备及加工顺序，按故障和生产约束顺延；"
+        "原计划对照保留原设备及加工顺序顺延；班次容纳不下时，将受影响工序及后续工序排到原线队尾，允许超班但必须人工确认；"
         "允许转移方案比较全部待加工工序的合格设备，优先最早开工，"
         "同一开工时间优先原设备，因此也可能主动转移未在故障设备上的工序。"
     )
@@ -104,18 +109,40 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
     strategy_failures = []
     refs = [request.current_plan_ref, request.validation_result_ref, rules_ref]
     for strategy in request.allowed_strategies:
+        queue_policy = "preserve"
         try:
-            candidate = generate_candidates(
-                domain.schedule,
-                event,
-                domain.machines,
-                orders,
-                request.context.event_version,
+            arguments = dict(
                 strategies=(strategy.strategy_id,),
                 eligible_machine_ids=source.eligible_machine_ids,
                 production=domain.production,
                 additional_failures=additional_failures,
-            )[0]
+            )
+            try:
+                candidate = generate_candidates(
+                    domain.schedule,
+                    event,
+                    domain.machines,
+                    orders,
+                    request.context.event_version,
+                    **arguments,
+                )[0]
+            except ShiftCapacityExceeded:
+                if strategy.strategy_id != "wait-recovery" or not domain.production:
+                    raise
+                queue_policy = "append_tail"
+                arguments.update(
+                    production=replace(domain.production, allow_overtime=True),
+                    append_tail=True,
+                )
+                candidate = generate_candidates(
+                    domain.schedule,
+                    event,
+                    domain.machines,
+                    orders,
+                    request.context.event_version,
+                    **arguments,
+                )[0]
+                candidate = replace(candidate, label="原线排尾顺延（需确认超班）")
             _check_schedule(source, candidate.schedule, event)
         except RuleViolation as exc:
             label = {"wait-recovery": "等待恢复", "allow-transfer": "允许合格设备转移"}[
@@ -133,6 +160,17 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
             )
             limitations.append(reason)
             continue
+        overtime = domain.production.overtime_risks(candidate.schedule) if domain.production else []
+        for risk in overtime:
+            limitations.append(risk)
+            warnings.append(
+                Notice(
+                    code="SHIFT_OVERRUN_REQUIRES_REVIEW",
+                    message=risk,
+                    repair_hint="采纳后提交管理者审批；不采纳则进入人工调整。",
+                    evidence_refs=refs,
+                )
+            )
         fingerprint = candidate.schedule.fingerprint
         if fingerprint in fingerprints:
             warnings.append(
@@ -196,8 +234,11 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
         if all(op.mold_id is not None for op in case.operations):
             checked.append("physical_mold_compatibility")
         if domain.production:
-            checked.extend(["shift_calendar", "changeover_duration", "physical_mold_occupancy"])
+            checked.extend(["changeover_duration", "physical_mold_occupancy"])
+            if not overtime:
+                checked.append("shift_calendar")
         check = CandidateConstraintCheck(
+            queue_policy=queue_policy,
             candidate_id=candidate_id,
             passed=True,
             checked_items=checked,
@@ -248,7 +289,9 @@ def generate_schedule(source: SchedulingSource) -> SchedulingToolOutput:
     )
 
 
-def _check_schedule(source: SchedulingSource, schedule: Schedule, event: MachineFailure) -> None:
+def _check_schedule(
+    source: SchedulingSource, schedule: Schedule, event: MachineFailure
+) -> list[str]:
     """独立复核候选，防止生成过程遗漏约束或错误转移。"""
     domain = to_validation_case(source.case)
     failures = tuple(
@@ -263,7 +306,7 @@ def _check_schedule(source: SchedulingSource, schedule: Schedule, event: Machine
     )
     issues = validate_schedule(schedule, domain.machines, event, domain.schedule, failures)
     if domain.production:
-        issues += tuple(domain.production.check(schedule, event))
+        issues += tuple(replace(domain.production, allow_overtime=True).check(schedule, event))
     if issues:
         raise RuleViolation("候选未通过独立约束检查：" + "；".join(issues))
     original = {op.id: op for op in domain.schedule.operations}
@@ -277,6 +320,8 @@ def _check_schedule(source: SchedulingSource, schedule: Schedule, event: Machine
                     f"工序 {op.id} 的候选设备 {op.machine_id} 不在合格设备清单内，"
                     "或开工时间早于原计划；该候选不能使用。"
                 )
+
+    return domain.production.overtime_risks(schedule) if domain.production else []
 
 
 def verify_tool_output(source: SchedulingSource, output: SchedulingToolOutput) -> None:
@@ -348,7 +393,59 @@ def verify_tool_output(source: SchedulingSource, output: SchedulingToolOutput) -
             op.machine_id != original[op.operation_id].machine_id for op in snapshot.operations
         ):
             raise ValueError("等待恢复策略不允许设备转移")
-        if candidate.strategy_id == "wait-recovery":
+        if check.queue_policy == "append_tail" and (
+            candidate.strategy_id != "wait-recovery" or not domain.production
+        ):
+            raise ValueError("排尾兜底仅适用于原线等待策略")
+        if check.queue_policy == "append_tail":
+            baseline = to_validation_case(source.case)
+            tail = {
+                op.id
+                for blocked in (
+                    MachineFailure(
+                        item.machine_id,
+                        item.started_at,
+                        item.estimated_recovery_at,
+                        item.source,
+                        item.received_at,
+                    )
+                    for item in source.case.failures
+                )
+                for op in affected_operations(baseline.schedule, blocked)
+            }
+            while True:
+                expanded = tail | {
+                    op.id
+                    for op in baseline.schedule.operations
+                    if op.status == TaskStatus.PLANNED
+                    and any(
+                        prev.id in tail
+                        and prev.order_id == op.order_id
+                        and prev.sequence < op.sequence
+                        for prev in baseline.schedule.operations
+                    )
+                }
+                if expanded == tail:
+                    break
+                tail = expanded
+            for machine in domain.machines:
+                regular = [
+                    op
+                    for op in schedule.operations
+                    if op.machine_id == machine.id and op.id not in tail
+                ]
+                deferred = [
+                    op
+                    for op in schedule.operations
+                    if op.machine_id == machine.id and op.id in tail
+                ]
+                if (
+                    regular
+                    and deferred
+                    and max(op.end for op in regular) > min(op.start for op in deferred)
+                ):
+                    raise ValueError("排尾兜底必须将受影响工序及后续工序排到原设备队尾")
+        if candidate.strategy_id == "wait-recovery" and check.queue_policy == "preserve":
             for machine in domain.machines:
                 before_queue = [
                     op.id

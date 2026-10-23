@@ -295,3 +295,91 @@ describe('Gantt time axis label spacing', () => {
     expect(labels.at(-1)?.textContent).toBe('23:08');
   });
 });
+
+it('only moves planned operations when an explicit editing callback is enabled', () => {
+  const onMove = vi.fn();
+  const operation = {
+    ...workbench.baseline.operations[0],
+    status: 'planned' as const,
+    machine_id: workbench.machines[0].id,
+    start: '2026-10-19T14:00:00+08:00',
+    end: '2026-10-19T15:00:00+08:00',
+  };
+  const props = {
+    schedule: { ...workbench.baseline, operations: [operation] },
+    failure: workbench.event,
+    machines: workbench.machines,
+    range,
+  };
+  const { rerender } = render(<Gantt {...props} />);
+  fireEvent.keyDown(screen.getByRole('graphics-symbol'), { key: 'ArrowRight' });
+  expect(onMove).not.toHaveBeenCalled();
+  rerender(<Gantt {...props} onMove={onMove} />);
+  fireEvent.keyDown(screen.getByRole('graphics-symbol'), { key: 'ArrowRight' });
+  expect(onMove).toHaveBeenLastCalledWith(
+    operation.id,
+    operation.machine_id,
+    new Date(Date.parse(operation.start) + 300000).toISOString(),
+  );
+  fireEvent.keyDown(screen.getByRole('graphics-symbol'), { key: 'ArrowDown' });
+  expect(onMove).toHaveBeenLastCalledWith(
+    operation.id,
+    workbench.machines[1].id,
+    new Date(operation.start).toISOString(),
+  );
+  onMove.mockClear();
+  for (const status of ['in_progress', 'completed'] as const) {
+    rerender(
+      <Gantt
+        {...props}
+        schedule={{ ...props.schedule, operations: [{ ...operation, status }] }}
+        onMove={onMove}
+      />,
+    );
+    fireEvent.keyDown(screen.getByRole('graphics-symbol'), { key: 'ArrowRight' });
+    expect(onMove).not.toHaveBeenCalled();
+  }
+});
+
+it('saves pointer drags in five minute increments and ignores cancelled drags', () => {
+  vi.stubGlobal('PointerEvent', MouseEvent);
+  const measure = vi
+    .spyOn(SVGSVGElement.prototype, 'getBoundingClientRect')
+    .mockReturnValue({ width: 920 } as DOMRect);
+  const onMove = vi.fn();
+  const operation = {
+    ...workbench.baseline.operations[0],
+    status: 'planned' as const,
+    machine_id: workbench.machines[0].id,
+    start: '2026-10-19T14:00:00+08:00',
+    end: '2026-10-19T15:00:00+08:00',
+  };
+  try {
+    const { container } = render(
+      <Gantt
+        schedule={{ ...workbench.baseline, operations: [operation] }}
+        failure={workbench.event}
+        machines={workbench.machines}
+        range={range}
+        onMove={onMove}
+      />,
+    );
+    const block = container.querySelector('[data-operation-id]')!;
+    fireEvent.pointerDown(block, { button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(block, { clientX: 184, clientY: 166 });
+    fireEvent.pointerUp(block, { clientX: 184, clientY: 166 });
+    expect(onMove).toHaveBeenCalledWith(
+      operation.id,
+      workbench.machines[1].id,
+      new Date(Date.parse(operation.start) + 30 * 60000).toISOString(),
+    );
+    onMove.mockClear();
+    fireEvent.pointerDown(block, { button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerCancel(block);
+    fireEvent.pointerUp(block, { clientX: 184, clientY: 166 });
+    expect(onMove).not.toHaveBeenCalled();
+  } finally {
+    measure.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});

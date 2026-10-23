@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from .errors import RuleViolation
+from .errors import ShiftCapacityExceeded
 from .models import MachineFailure, Operation, Schedule
 from .scheduling import overlaps
 from .time_display import production_time
@@ -17,6 +17,7 @@ class ProductionResources:
     initial_molds: dict[str, str]
     changeover_minutes: int
     failures: tuple[MachineFailure, ...] = ()
+    allow_overtime: bool = False
 
     def configuration_errors(self, schedule, machines):
         ids = {m.id for m in machines}
@@ -60,7 +61,8 @@ class ProductionResources:
         if last:
             earliest = max(earliest, last.end + timedelta(minutes=setup))
         attempts = []
-        for left, right in self.windows(machine_id):
+        windows = self.windows(machine_id)
+        for index, (left, right) in enumerate(windows):
             start = max(earliest, left + timedelta(minutes=setup))
             blocked_windows = {
                 (item.machine_id, item.started_at): item for item in (failure,) + self.failures
@@ -73,11 +75,15 @@ class ProductionResources:
                     blocked.recovered_at or right,
                 ):
                     start = max(start, (blocked.recovered_at or right) + timedelta(minutes=setup))
-            if start + timedelta(minutes=op.duration_minutes) <= right:
+            if (
+                start + timedelta(minutes=op.duration_minutes) <= right
+                or self.allow_overtime
+                and index == len(windows) - 1
+            ):
                 return start
             attempts.append((start, start + timedelta(minutes=op.duration_minutes), right))
         start, end, shift_end = attempts[-1]
-        raise RuleViolation(
+        raise ShiftCapacityExceeded(
             f"工序 {op.id} 使用模具 {mold} 在设备 {machine_id} 加工需 "
             f"{op.duration_minutes} 分钟，换型准备需 {setup} 分钟。"
             f"按本策略安排，最早可在 {production_time(start)} 开工，"
@@ -99,11 +105,13 @@ class ProductionResources:
                 setup_start = op.start - timedelta(minutes=setup)
                 if previous_end and setup_start < previous_end:
                     errors.append("换型准备时间与前道加工冲突")
-                if not any(
+                if not self.allow_overtime and not any(
                     left <= setup_start and op.end <= right
                     for left, right in self.windows(machine_id)
                 ):
                     errors.append("加工或换型超出班次")
+                if self.allow_overtime and setup_start < self.windows(machine_id)[0][0]:
+                    errors.append("加工或换型早于登记班次开始")
                 blocked_windows = {
                     (item.machine_id, item.started_at): item for item in (failure,) + self.failures
                 }
@@ -121,6 +129,27 @@ class ProductionResources:
             if any(a.end > b.start for a, b in zip(operations, operations[1:])):
                 errors.append("实体模具同时被多道工序占用")
         return errors
+
+    def overtime_risks(self, schedule):
+        risks = []
+        for machine_id in self.shifts:
+            previous = self.initial_molds[machine_id]
+            for op in sorted(
+                (o for o in schedule.operations if o.machine_id == machine_id),
+                key=lambda o: (o.start, o.id),
+            ):
+                mold = self.operation_molds[op.id]
+                start = op.start - timedelta(minutes=self.setup(previous, mold))
+                if not any(
+                    left <= start and op.end <= right for left, right in self.windows(machine_id)
+                ):
+                    risks.append(
+                        f"⚠️ 超班风险：工序 {op.id} 在设备 {machine_id} 排至 "
+                        f"{production_time(op.end)}，加工或换型超出登记班次；"
+                        "这是顺延草案，未确认加班人员与班次，需人工调整或审批确认。"
+                    )
+                previous = mold
+        return risks
 
     def placement_causes(self, op, machine_id, earliest, placed, failure):
         """Explain resource bounds using the same already-placed snapshot as placement."""

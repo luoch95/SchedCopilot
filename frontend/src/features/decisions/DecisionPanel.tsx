@@ -2,6 +2,7 @@ import type { Candidate, Simulation, Workbench } from '../../shared/api/contract
 import { WriteButton } from '../../shared/ui/WriteButton';
 import { useDemoAccess } from '../../shared/lib/demoAccess';
 interface Props {
+  embedded?: boolean;
   state: Workbench;
   currentSimulation: Simulation;
   candidate: Candidate | undefined;
@@ -17,6 +18,7 @@ interface Props {
   onSubmitReview: () => void;
 }
 export function DecisionPanel({
+  embedded = false,
   state,
   currentSimulation,
   candidate,
@@ -31,6 +33,7 @@ export function DecisionPanel({
   onDecide,
   onSubmitReview,
 }: Props) {
+  const Heading = embedded ? 'h3' : 'h2';
   const { readOnly } = useDemoAccess();
   const review = state.fault_review;
   const matches =
@@ -42,7 +45,7 @@ export function DecisionPanel({
       <div className="section-heading">
         <div>
           <p className="eyebrow">HUMAN IN THE LOOP</p>
-          <h2 id="section-confirm">人工确认</h2>
+          <Heading id="section-confirm">人工确认</Heading>
         </div>
         <span className="tag">当前执行计划 V{state.baseline.version}</span>
       </div>

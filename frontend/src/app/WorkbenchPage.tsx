@@ -14,8 +14,8 @@ import {
   usePlannerNavigation,
 } from '../features/session';
 import { FaultAnalysisDetails, FaultProgress } from '../features/analysis';
-import { EventEditor } from '../features/events';
-import { CurrentPlan, timelineRange } from '../features/plan';
+import { EventEditor, EventIssues } from '../features/events';
+import { CurrentPlan, timelineRange, publishedPlanRange } from '../features/plan';
 import { publishedFault, useWorkbench, useHistoricalFaultAnalysis } from '../features/workbench';
 import { WriteButton } from '../shared/ui/WriteButton';
 import { BusinessLabelProvider } from '../shared/lib/BusinessLabelProvider';
@@ -145,14 +145,20 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
   const eventLabel = `${state.event.machine_id}故障 R${state.event_revision}`;
   const analysisTime = analysisWorkflow?.created_at;
   const visibleEvents = [
-    ...(state.event_history ?? []).filter((event) => event.revision !== state.event_revision),
-    {
-      ...state.event,
-      revision: state.event_revision,
-      created_at:
-        state.event_history?.find((event) => event.revision === state.event_revision)?.created_at ??
-        state.event.received_at,
-    },
+    ...(state.event_history ?? []).filter(
+      (event) => event.revision !== state.event_revision && !event.cancelled,
+    ),
+    ...(state.event_cancelled
+      ? []
+      : [
+          {
+            ...state.event,
+            revision: state.event_revision,
+            created_at:
+              state.event_history?.find((event) => event.revision === state.event_revision)
+                ?.created_at ?? state.event.received_at,
+          },
+        ]),
   ]
     .filter((event) => inDateRange(event.started_at, dateRange))
     .sort(
@@ -175,6 +181,21 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
             </p>
           </div>
           <div className="fault-task-actions">
+            <WriteButton
+              className="secondary"
+              disabled={!!controller.busy || controller.dirty || controller.stale}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    '永久删除这条故障及关联分析、候选、人工草案和审批数据？删除后无法恢复，不再参与后续排产；已发布计划不会回滚。',
+                  )
+                ) {
+                  void controller.cancelEvent();
+                }
+              }}
+            >
+              撤销
+            </WriteButton>
             {backgroundPending ? (
               <>
                 <p role="status" className="fault-task-status">
@@ -183,10 +204,10 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                 <button onClick={navigation.openFault}>查看生成进度</button>
               </>
             ) : analysisWorkflow?.status === 'blocked' || assessment ? (
-              <AiAnalysisButton label="查看AI评估详情" onClick={navigation.openAnalysis} />
+              <AiAnalysisButton label="查看AI评估详情" onClick={navigation.openFault} />
             ) : generated ? (
               <div className="ai-analysis-action">
-                <AiAnalysisButton onClick={navigation.openAnalysis} />
+                <AiAnalysisButton onClick={navigation.openFault} />
                 <WriteButton
                   className="secondary"
                   disabled={!!controller.busy || controller.dirty || controller.stale}
@@ -234,23 +255,27 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                   ? '请刷新页面获取最新记录后再分析。'
                   : !state.event.recovered_at
                     ? '请补充预计恢复时间并保存后再分析。'
-                    : '事件与执行记录冲突，请修正故障信息后再分析。'}
+                    : '暂不能分析，具体原因与处理方式见下方。'}
             </p>
           )}
+          <EventIssues state={state} />
         </div>
-        <p className="fault-impact-summary">
-          <strong>结论简要：</strong>
-          <strong>
-            {publication
-              ? `${publication.affected ? `本次故障原影响 ${publication.affected.length} 道工序；` : ''}发布后当前计划剩余 ${state.affected.length} 道工序受故障影响。`
-              : `当前计划有 ${state.affected.length} 道工序受故障影响。`}
-          </strong>
-        </p>
+        {!controller.blocked && (
+          <p className="fault-impact-summary">
+            <strong>结论简要：</strong>
+            <strong>
+              {publication
+                ? `${publication.affected ? `本次故障原影响 ${publication.affected.length} 道工序；` : ''}发布后当前计划剩余 ${state.affected.length} 道工序受故障影响。`
+                : `当前计划有 ${state.affected.length} 道工序受故障影响。`}
+            </strong>
+          </p>
+        )}
       </section>
     </>
   );
   const currentPlan = (
     <CurrentPlan
+      headingLevel={view === 'fault' ? 3 : 2}
       compact
       actions={
         view === 'dashboard' && (
@@ -266,7 +291,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
         )
       }
       state={state}
-      range={range}
+      range={publishedPlanRange(state, controller.zoom, controller.pan)}
       zoom={controller.zoom}
       pan={controller.pan}
       onZoom={controller.setZoom}
@@ -286,7 +311,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       >
         <main className="workspace">
           <div className="planner-topbar">
-            {view === 'fault' && <div className="planner-navigation-row">{breadcrumb}</div>}
+            {view === 'fault' && <div className="fault-page-breadcrumb">{breadcrumb}</div>}
             {view === 'dashboard' && (
               <header className="page-header">
                 <div>
@@ -306,7 +331,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                 </div>
               </header>
             )}
-            <DemoAccessBar />
+            {view === 'dashboard' && <DemoAccessBar />}
           </div>
           <div className="planner-notifications" aria-live="polite">
             {controller.busy && !(view === 'fault' && generating) && (
@@ -390,6 +415,21 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                               分析窗口：{stamp(event.started_at)} —{' '}
                               {event.recovered_at ? stamp(event.recovered_at) : '恢复时间未知'}
                             </p>
+                            <WriteButton
+                              className="secondary"
+                              disabled={!!controller.busy || controller.dirty || controller.stale}
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    '永久删除这条故障及关联分析、候选、人工草案和审批数据？删除后无法恢复；已发布计划不会回滚。',
+                                  )
+                                ) {
+                                  void controller.cancelEvent(event.revision);
+                                }
+                              }}
+                            >
+                              撤销
+                            </WriteButton>
                             <AiAnalysisButton
                               label="查看历史 AI 分析"
                               onClick={() => setHistoricalEvent(event)}
@@ -405,22 +445,13 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
             </>
           ) : (
             <>
-              <div className="fault-page-navigation">
-                {navigation.fromAnalysis && (
-                  <button className="console-back primary" onClick={navigation.back}>
-                    ← 返回评估详情
-                  </button>
-                )}
-                <button className="console-back primary" onClick={navigation.home}>
-                  ← 返回工作台总览
-                </button>
-              </div>
               <FaultPlanPage
                 controller={controller}
                 state={state}
                 range={range}
                 currentPlan={currentPlan}
-                roleControl={roleControl}
+                onBack={navigation.home}
+                onBackToAnalysis={navigation.fromAnalysis ? navigation.back : undefined}
                 onAdjust={navigation.openEvent}
                 showApproval={navigation.approvalOpen}
               />

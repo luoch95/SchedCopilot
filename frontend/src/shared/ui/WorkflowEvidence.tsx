@@ -1,3 +1,4 @@
+import { DetailSurface } from './DetailSurface';
 import type { WorkflowNotice, WorkflowResult, WorkflowStatement } from '../api/contracts';
 import { DecisionText } from './DecisionText';
 import { useBusinessText } from '../lib/BusinessLabelProvider';
@@ -5,19 +6,18 @@ import { useBusinessText } from '../lib/BusinessLabelProvider';
 export function WorkflowDebugDetails({
   data,
   headingLevel = 5,
+  flat = false,
 }: {
   data: unknown;
   headingLevel?: 4 | 5;
+  flat?: boolean;
 }) {
   const format = useBusinessText();
   const Heading = headingLevel === 4 ? 'h4' : 'h5';
   return (
-    <details className="workflow-evidence">
-      <summary>
-        <Heading>调试详情</Heading>
-      </summary>
+    <DetailSurface flat={flat} className="workflow-evidence" title={<Heading>调试详情</Heading>}>
       <pre>{format(JSON.stringify(data, null, 2) ?? '')}</pre>
-    </details>
+    </DetailSurface>
   );
 }
 

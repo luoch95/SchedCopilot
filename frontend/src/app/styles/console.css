@@ -92,8 +92,7 @@
 .console-modal-body {
   padding: 24px;
 }
-.assessment-detail-actions,
-.fault-page-navigation {
+.assessment-detail-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;

@@ -190,3 +190,40 @@
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.candidate-card {
+  display: flex;
+  flex-direction: column;
+}
+.candidate-card.is-selected {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgb(59 130 246 / 15%);
+}
+.candidate-header-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.candidate-card header .candidate-recommendation {
+  padding: 4px 8px;
+  border-radius: 5px;
+  color: #1d4ed8;
+  background: #eaf2ff;
+  font-weight: 600;
+}
+.candidate-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+}
+.candidate-selected {
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 600;
+}

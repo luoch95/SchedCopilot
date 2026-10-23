@@ -21,6 +21,50 @@ def fault_publication(connection, evidence):
         "affected": evidence.get("affected"),
         "workflow": None,
     }
+    manual = (
+        connection.execute(
+            "SELECT payload FROM manual_fault_revisions WHERE "
+            "json_extract(payload,'$.report') IS NOT NULL "
+            "AND json_extract(payload,'$.report.draft_id')=? AND "
+            "json_extract(payload,'$.revision')=?",
+            (candidate.id.split(":")[1], int(candidate.id.split(":")[2])),
+        ).fetchone()
+        if candidate.id.startswith("manual:")
+        else None
+    )
+    if manual:
+        draft = json.loads(manual[0])
+        report = draft["report"]
+        result.update(
+            report=report,
+            baseline=draft["baseline"],
+            affected=[c["工序"] for c in report["changes"]],
+            simulation={
+                "id": draft["simulation_id"],
+                "event_revision": candidate.event_revision,
+                "baseline_fingerprint": candidate.baseline_fingerprint,
+                "candidates": [
+                    {
+                        **asdict(candidate),
+                        "schedule": draft["schedule"],
+                        "changes": report["changes"],
+                        "order_impacts": report["order_impacts"],
+                    }
+                ],
+            },
+        )
+        review = connection.execute(
+            "SELECT payload FROM fault_reviews WHERE simulation_id=? ORDER "
+            "BY sequence DESC LIMIT 1",
+            (draft["simulation_id"],),
+        ).fetchone()
+        if review:
+            reviewed = json.loads(review[0])
+            result["decisions"] = {
+                k: reviewed.get(k)
+                for k in ("status", "reason", "review_reason", "created_at", "reviewed_at")
+            }
+        return result
     rows = connection.execute(
         "SELECT w.payload,w.state,s.candidates,w.created_at,s.id FROM workflow_runs w "
         "JOIN simulations s ON s.id=w.simulation_id ORDER BY w.sequence DESC"
@@ -31,8 +75,24 @@ def fault_publication(connection, evidence):
             continue
         if not any(digest(item) == digest(candidate) for item in parse_candidates(candidates)):
             continue
+        review = connection.execute(
+            "SELECT payload FROM fault_reviews WHERE simulation_id=? "
+            "ORDER BY sequence DESC LIMIT 1",
+            (simulation_id,),
+        ).fetchone()
+        if review:
+            reviewed = json.loads(review[0])
+            result["decisions"] = {
+                k: reviewed.get(k)
+                for k in ("status", "reason", "review_reason", "created_at", "reviewed_at")
+            }
         payload.setdefault("created_at", created_at)
         result["workflow"] = payload
+        result["report"] = {
+            **payload.get("contribution_report", {}),
+            "manual_summary": "未进行人工排程调整，采用系统生成方案。",
+            "decision": "采纳、审批与发布以实际操作记录为准。",
+        }
         # Older publications did not persist the original impact count. Recover it
         # from the exact workflow input, never from the already-adjusted plan.
         case = json.loads(state)["validation_input"]["case_data"]

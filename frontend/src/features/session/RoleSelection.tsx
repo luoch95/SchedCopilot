@@ -139,6 +139,9 @@ export function RoleSelection({ onSelect }: { onSelect: (role: DemoRole) => void
         </div>
         <footer className="role-note">
           演示模式：无需账号密码，点击角色卡片进入对应工作空间。
+          <a className="entry-admin-link" href="/admin">
+            研发后台 <span aria-hidden="true">↗</span>
+          </a>
         </footer>
       </section>
     </main>

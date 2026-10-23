@@ -27,6 +27,7 @@ export default function Gantt({
   tone,
   faultTrace,
   faults,
+  onMove,
 }: {
   schedule: Schedule;
   baseline?: Schedule;
@@ -37,7 +38,17 @@ export default function Gantt({
   tone?: 'red' | 'green';
   faultTrace?: { version: number; affectedOperations: Operation[] };
   faults?: FaultOverlay[];
+  onMove?: (operationId: string, machineId: string, start: string) => unknown;
 }) {
+  const drag = useRef<{
+    id: string;
+    x: number;
+    y: number;
+    start: number;
+    row: number;
+    scale: number;
+  } | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ id: string; x: number; y: number } | null>(null);
   const overlays = faults ?? [{ failure, faultTrace }];
   const [hoveredFault, setHoveredFault] = useState(0);
   const activeFault = overlays[hoveredFault] ?? { failure, faultTrace };
@@ -295,6 +306,67 @@ export default function Gantt({
                 className={`gantt-operation${selectedId === op.id ? ' gantt-operation-selected' : ''}`}
                 data-operation-id={op.id}
                 data-selected={selectedId === op.id}
+                style={{
+                  cursor: onMove && op.status === 'planned' ? 'grab' : undefined,
+                  touchAction: onMove ? 'none' : undefined,
+                }}
+                transform={
+                  dragOffset?.id === op.id
+                    ? `translate(${dragOffset.x},${dragOffset.y})`
+                    : undefined
+                }
+                onPointerDown={(event) => {
+                  if (!onMove || op.status !== 'planned' || event.button !== 0) return;
+                  const bounds = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+                  if (!bounds?.width) return;
+                  drag.current = {
+                    id: op.id,
+                    x: event.clientX,
+                    y: event.clientY,
+                    start: Date.parse(op.start),
+                    row,
+                    scale: width / bounds.width,
+                  };
+                  event.currentTarget.setPointerCapture?.(event.pointerId);
+                  event.preventDefault();
+                }}
+                onPointerMove={(event) => {
+                  const active = drag.current;
+                  if (!active || active.id !== op.id || !onMove) return;
+                  setDragOffset({
+                    id: op.id,
+                    x: (event.clientX - active.x) * active.scale,
+                    y: (event.clientY - active.y) * active.scale,
+                  });
+                }}
+                onPointerCancel={() => {
+                  drag.current = null;
+                  setDragOffset(null);
+                }}
+                onPointerUp={(event) => {
+                  const active = drag.current;
+                  drag.current = null;
+                  setDragOffset(null);
+                  if (!active || active.id !== op.id || !onMove) return;
+                  const dx = (event.clientX - active.x) * active.scale;
+                  const dy = (event.clientY - active.y) * active.scale;
+                  if (Math.abs(dx) + Math.abs(dy) < 4) return;
+                  const minutes =
+                    Math.round(((dx / (width - left - right)) * (range[1] - range[0])) / 300000) *
+                    5;
+                  const machine =
+                    machines[
+                      Math.max(
+                        0,
+                        Math.min(machines.length - 1, active.row + Math.round(dy / rowHeight)),
+                      )
+                    ];
+                  void onMove(
+                    op.id,
+                    machine.id,
+                    new Date(active.start + minutes * 60000).toISOString(),
+                  );
+                }}
                 onMouseEnter={() => setHover(op)}
                 onMouseLeave={() => setHover(null)}
                 onClick={() => {
@@ -317,6 +389,32 @@ export default function Gantt({
                   role="graphics-symbol"
                   aria-label={`${op.display_name ?? op.id} ${op.machine_id} ${stamp(op.start)} 至 ${stamp(op.end)}${transfer ? ' 设备转移' : changed ? ' 时间调整' : ''}`}
                   onKeyDown={(event) => {
+                    if (
+                      onMove &&
+                      op.status === 'planned' &&
+                      ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
+                    ) {
+                      event.preventDefault();
+                      const targetRow = Math.max(
+                        0,
+                        Math.min(
+                          machines.length - 1,
+                          row + (event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0),
+                        ),
+                      );
+                      const offset =
+                        event.key === 'ArrowRight'
+                          ? 300000
+                          : event.key === 'ArrowLeft'
+                            ? -300000
+                            : 0;
+                      void onMove(
+                        op.id,
+                        machines[targetRow].id,
+                        new Date(Date.parse(op.start) + offset).toISOString(),
+                      );
+                      return;
+                    }
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
                       select(op.id);

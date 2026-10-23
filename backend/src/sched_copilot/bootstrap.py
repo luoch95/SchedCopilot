@@ -39,7 +39,32 @@ def build_workbench(settings: Settings) -> WorkbenchService:
             failure_provider=store.failure_windows,
         ),
     )
+    from .agents.insertion_analysis import InsertionAnalysisAgent as CopilotAgent
+    from .infrastructure.markdown_knowledge import MarkdownKnowledgeStore
+    from .tools.knowledge import retrieve_knowledge
+
+    service.copilot_search = partial(retrieve_knowledge, MarkdownKnowledgeStore().search)
+    service.copilot_agent = CopilotAgent(
+        build_model_factory(settings),
+        os.getenv("LLM_MODEL") or None,
+        None if model_enabled(settings) and settings.llm_configured else "MODEL_NOT_CONFIGURED",
+    )
     service.initialize()
+    from .agents.insertion_analysis import InsertionAnalysisAgent
+    from .orchestration.manual_faults import ManualFaultService
+    from .tools.scheduling import _check_schedule
+    from .tools.scheduling_context import prepare_scheduling
+
+    service.manual_faults = ManualFaultService(
+        service,
+        InsertionAnalysisAgent(
+            build_model_factory(settings),
+            os.getenv("LLM_MODEL") or None,
+            None if model_enabled(settings) and settings.llm_configured else "MODEL_NOT_CONFIGURED",
+        ),
+        prepare_scheduling,
+        _check_schedule,
+    )
     return service
 
 

@@ -1,15 +1,21 @@
 import { stamp } from '../../shared/lib/time';
-import { Accordion } from '../../shared/ui/Accordion';
+import { DetailSurface } from '../../shared/ui/DetailSurface';
 import type { Decision } from '../../shared/api/contracts';
-export function DecisionHistory({ history }: { history: Decision[] }) {
+export function DecisionHistory({
+  history,
+  flat = false,
+}: {
+  history: Decision[];
+  flat?: boolean;
+}) {
   return (
     <section className="section">
-      <Accordion
-        level={3}
-        headingId="section-history"
+      <DetailSurface
+        flat={flat}
         title={
           <>
-            历史记录 <small>{history.length} 条记录</small>
+            {!flat && '历史记录 '}
+            <small>{history.length} 条记录</small>
           </>
         }
       >
@@ -39,7 +45,7 @@ export function DecisionHistory({ history }: { history: Decision[] }) {
         ) : (
           <p className="empty-state">还没有人工决定。生成并比较方案后，记录你的选择。</p>
         )}
-      </Accordion>
+      </DetailSurface>
     </section>
   );
 }

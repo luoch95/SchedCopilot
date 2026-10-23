@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from ..agents.contracts.common import Notice
 from ..agents.contracts.inputs import SchedulingCase, SchedulingInput
 from ..agents.contracts.results import ValidationResult
+from ..agents.contracts.scoring import VALIDATION_THRESHOLD
 from .validation import RULESET_VERSION, validate_data
 
 SUPPORTED_STRATEGIES = frozenset({"wait-recovery", "allow-transfer"})
@@ -49,6 +50,11 @@ def prepare_scheduling(request: SchedulingInput) -> SchedulingSource:
         or not validation.data.can_generate_candidates
         or validation.errors
         or not validation.evidence_refs
+        or (
+            validation.quality
+            and validation.quality.score is not None
+            and validation.quality.score < VALIDATION_THRESHOLD
+        )
     ):
         block(
             "VALIDATION_BLOCKED",

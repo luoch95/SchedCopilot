@@ -76,9 +76,10 @@ class InsertionAnalysisAgent:
         self.model_name = model_name
         self.unavailable_code = unavailable_code
 
-    def run(self, role, request, result=None, *, skip_code=None):
+    def run(self, role, request, result=None, *, skip_code=None, catalog=None, instructions=None):
         started = monotonic()
-        options = insertion_focus(role, request, result)
+        options = catalog if catalog is not None else insertion_focus(role, request, result)
+        instructions = instructions or INSTRUCTIONS
         error = skip_code or self.unavailable_code
         calls = 0
         usage = {}
@@ -100,7 +101,7 @@ class InsertionAnalysisAgent:
                     ["focus_ids"],
                 )
                 messages = [
-                    SystemMessage(content=INSTRUCTIONS),
+                    SystemMessage(content=instructions),
                     HumanMessage(
                         content=json.dumps(
                             {
@@ -145,6 +146,6 @@ class InsertionAnalysisAgent:
             output_tokens=usage.get("output_tokens"),
             elapsed_ms=round((monotonic() - started) * 1000),
             error_code=error,
-            prompt_sha256=sha256(INSTRUCTIONS.encode()).hexdigest(),
+            prompt_sha256=sha256(instructions.encode()).hexdigest(),
             highlights=highlights,
         )

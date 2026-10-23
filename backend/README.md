@@ -1,19 +1,28 @@
 # Schedule Copilot 后端
 
-FastAPI、规则排程、影响分析、三 Agent 和 SQLite 存储均位于此目录。React 前端独立位于 `../frontend/`。
+FastAPI、规则排程、影响分析、四 Agent 和 SQLite 存储均位于此目录。React 前端独立位于 `../frontend/`。
 
-## 本地开发
+| Agent | 职责 |
+| --- | --- |
+| 校验 `validation` | 校验输入、约束和证据，列出阻断项及未检查项。 |
+| 排产 `scheduling` | 调用确定性规则生成候选，不修改正式计划。 |
+| 评估 `evaluation` | 核验候选指标、差异和风险，无候选时输出评估结论。 |
+| 解释 `explanation` | 基于证据组织结论、限制及建议，不编造数据。 |
 
-在 `backend/` 内执行：
+主入口为 `/api/workflow`，四 Agent 均无审批或发布权限；`/api/analysis` 仅为旧版兼容入口。
+
+## 生产环境后端启动命令
+
+以下命令关闭热重载，本地联调也可使用。在 `backend/` 内执行；生产部署前必须按[部署清单](../skill/deploy_skill.md) 备份并核实配置，显式设置 `SCHED_DEMO_MODE=0` 和绝对路径 `SCHED_DB_PATH`，由 systemd 等服务管理器保持进程运行：
 
 ```powershell
 uv sync --locked --python 3.12
-uv run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000 --reload
+uv run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-API 文档：http://127.0.0.1:8000/docs。完整前端启动与业务说明见[项目 README](../README.md)。
+**Swagger 文档路径为 `/docs`：http://127.0.0.1:8000/docs。** 未配置有效前端产物时，后端根路径 `/` 返回 `404 Not Found` 属于预期行为；请访问 `/docs` 查看接口。`127.0.0.1` 仅供本机或反向代理访问，公网访问使用实际对外开放的后端文档地址。完整前端启动与业务说明见[项目 README](../README.md)。
 
-默认数据库固定在仓库根目录的 `.data/decisions.sqlite3`，不会因启动目录不同而另建空库。`SCHED_DB_PATH` 可覆盖该路径。构建前端后，API 可从仓库根目录 `frontend/dist/` 提供页面；`SCHED_FRONTEND_DIR` 可覆盖前端产物路径。单独安装 wheel 时请显式配置这两个路径。
+默认演示模式使用仓库根目录的 `.data/readonly_demo.sqlite3`，启动时会重置该库；关闭演示模式后默认使用 `.data/injection_molding.sqlite3`。`SCHED_DB_PATH` 可覆盖路径，演示模式开启时指定库同样会被重置。构建前端后，API 可从仓库根目录 `frontend/dist/` 提供页面；`SCHED_FRONTEND_DIR` 可覆盖前端产物路径。单独安装 wheel 时请显式配置数据库与前端产物路径。
 
 环境变量示例见 `.env.example`；应用不会自动载入该文件。模型密钥只配置在后端。
 

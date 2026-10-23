@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Workbench } from '../../shared/api/contracts';
 import { WriteButton } from '../../shared/ui/WriteButton';
+import { ContributionReport } from '../../shared/ui/ContributionReport';
 import { workbenchApi } from '../workbench';
 
 export function FaultReviewPanel({
@@ -38,7 +39,11 @@ export function FaultReviewPanel({
             ? review.kind === 'assessment'
               ? '评估结论已批准'
               : '已批准，待排产员发布'
-            : '已退回'}
+            : review.status === 'published'
+              ? '已发布'
+              : review.status === 'superseded'
+                ? '已失效，需重新提交'
+                : '已退回'}
       </h3>
       <p>
         <strong>{review.candidate_label}</strong>
@@ -69,6 +74,9 @@ export function FaultReviewPanel({
         </>
       )}
       <p>提交理由：{review.reason}</p>
+      <ContributionReport
+        report={review.analysis?.report ?? review.workflow?.contribution_report}
+      />
       {review.review_reason && <p>审批意见：{review.review_reason}</p>}
       {review.status === 'pending' && (
         <fieldset disabled={busy}>

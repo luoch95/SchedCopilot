@@ -20,6 +20,7 @@ from .contracts.results import (
     SchedulingResult,
     ValidationResult,
 )
+from .contracts.scoring import VALIDATION_THRESHOLD, score_result, validation_status
 
 _INPUTS = {
     "validation": ValidationInput,
@@ -169,6 +170,10 @@ def validate_result(raw: str, request: AgentRequest, prompt: LoadedPrompt) -> Ag
 
     completed = result.status in {"success", "warning"}
     if result.quality is not None:
+        if result.quality.score is not None:
+            expected_score = score_result(result, result.quality, request)
+            if any(getattr(result.quality, key) != value for key, value in expected_score.items()):
+                _reject("QUALITY_SCORE_INVALID", "评分与规则依据不一致，不接受模型自报分数。")
         expected = {
             "success": "passed",
             "warning": "warning",
@@ -206,7 +211,7 @@ def _check_validation(result: ValidationResult) -> None:
     if data is None:
         return
     blocking = any(issue.severity == "blocking" for issue in data.issues)
-    if blocking and (data.can_generate_candidates or result.status != "blocked"):
+    if blocking and (data.can_generate_candidates or result.status != validation_status(data)):
         _reject("STATUS_CONFLICT", "校验阻断项不能被降级或允许生成候选。")
     if not data.can_generate_candidates and result.status in {"success", "warning"}:
         _reject("STATUS_CONFLICT", "未允许生成候选的校验应返回阻断状态。")
@@ -249,6 +254,11 @@ def _check_completed(result: AgentResult, request: AgentRequest) -> None:
             or validation.errors
             or not validation.evidence_refs
             or not validation.data.checked_items
+            or (
+                validation.quality
+                and validation.quality.score is not None
+                and validation.quality.score < VALIDATION_THRESHOLD
+            )
         ):
             _reject("VALIDATION_REQUIRED", "生成候选需要当前版本通过校验的结果。")
     elif isinstance(result, EvaluationResult):

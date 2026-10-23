@@ -3,6 +3,7 @@
 from enum import StrEnum
 
 from ..agents.contracts.assessment import is_business_conclusion
+from ..agents.contracts.scoring import VALIDATION_THRESHOLD
 from .state import WorkflowState
 
 
@@ -37,6 +38,15 @@ def route(state: WorkflowState) -> Action:
     ):
         if result is None:
             return action
+        if action is Action.VALIDATE and (
+            result.status == "failed"
+            or (
+                result.quality
+                and result.quality.score is not None
+                and result.quality.score < VALIDATION_THRESHOLD
+            )
+        ):
+            return Action.END
         if result.status in {"blocked", "failed"}:
             if action is Action.SCHEDULE and is_business_conclusion(result):
                 continue

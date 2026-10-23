@@ -16,3 +16,6 @@
 @import './trace.css';
 @import './dashboard.css';
 @import './leader-dashboard.css';
+@import './admin-console.css';
+
+@import './copilot.css';

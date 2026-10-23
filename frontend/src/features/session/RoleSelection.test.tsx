@@ -20,5 +20,6 @@ it('offers three whole-card role buttons in business order with no carousel cont
   expect(onSelect).toHaveBeenLastCalledWith('planner');
   expect(onSelect).toHaveBeenCalledTimes(3);
   expect(screen.queryByLabelText('下一个角色')).toBeNull();
-  expect(screen.getByText('演示模式：无需账号密码，点击角色卡片进入对应工作空间。')).toBeTruthy();
+  expect(screen.getByText(/演示模式：无需账号密码，点击角色卡片进入对应工作空间。/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '研发后台' }).getAttribute('href')).toBe('/admin');
 });

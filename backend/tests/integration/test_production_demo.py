@@ -228,3 +228,127 @@ def test_fault_tradeoff_mock_has_real_delivery_costs_and_is_repeatable(tmp_path)
                     )
         assert client.get("/api/workbench").json()["baseline"] == baseline
         assert result["workflow"]["results"]["explanation"]["data"]["tradeoffs"]
+
+
+@pytest.mark.parametrize("manual", [False, True])
+def test_shift_overflow_has_real_tail_candidate_and_reviewable_report(tmp_path, manual):
+    from datetime import datetime
+
+    from test_manual_faults import approve, confirm, create, publish, submit
+
+    with TestClient(create_app(tmp_path / "tail.sqlite3")) as client:
+        payload = demo_production_inputs()
+        # Registered shifts end at 16:00; the baseline itself is unchanged.
+        payload["production"]["shifts"] = [
+            shift
+            for shift in payload["production"]["shifts"]
+            if datetime.fromisoformat(shift["start_at"]).hour == 8
+        ]
+        client.app.state.workbench.repository.seed_production_inputs(payload)
+        before = client.get("/api/workbench").json()
+        result, _ = run(client)
+        workflow = result["workflow"]
+        assert workflow["status"] == "completed", workflow
+        assert [step["action"] for step in workflow["trace"]] == [
+            "validate",
+            "schedule",
+            "evaluate",
+            "explain",
+        ]
+        simulation = result["simulation"]
+        candidate = simulation["candidates"][0]
+        assert "原线排尾" in candidate["label"]
+        baseline_ops = {op["id"]: op for op in before["baseline"]["operations"]}
+        for op in candidate["schedule"]["operations"]:
+            assert op["machine_id"] == baseline_ops[op["id"]]["machine_id"]
+            if op["status"] != "planned":
+                assert op == baseline_ops[op["id"]]
+        tail = set(before["affected"])
+        while True:
+            expanded = tail | {
+                op["id"]
+                for op in baseline_ops.values()
+                if any(
+                    prev["id"] in tail
+                    and prev["order_id"] == op["order_id"]
+                    and prev["sequence"] < op["sequence"]
+                    for prev in baseline_ops.values()
+                )
+            }
+            if expanded == tail:
+                break
+            tail = expanded
+        for machine in before["machines"]:
+            queue = [
+                op
+                for op in candidate["schedule"]["operations"]
+                if op["machine_id"] == machine["id"] and op["status"] == "planned"
+            ]
+            regular = [op for op in queue if op["id"] not in tail]
+            deferred = [op for op in queue if op["id"] in tail]
+            if regular and deferred:
+                assert max(op["end"] for op in regular) <= min(op["start"] for op in deferred)
+        assert candidate["changes"]
+        assert any(
+            datetime.fromisoformat(op["end"]).hour > 16
+            for op in candidate["schedule"]["operations"]
+        )
+        scheduling = workflow["results"]["scheduling"]
+        assert any(w["code"] == "SHIFT_OVERRUN_REQUIRES_REVIEW" for w in scheduling["warnings"])
+        assert "超班风险" in str(workflow["results"]["explanation"]["data"])
+        checks = [
+            e["content"]
+            for e in workflow["evidence_catalog"].values()
+            if e["kind"] == "candidate_constraints"
+        ]
+        assert all("shift_calendar" not in c["checked_items"] for c in checks)
+        assert all(c["queue_policy"] == "append_tail" for c in checks)
+        assert client.get("/api/workbench").json()["baseline"] == before["baseline"]
+        if manual:
+            draft = create(client, result)
+            # A real human edit keeps all hard constraints, moving the last operation later.
+            last = max(
+                (op for op in draft["schedule"]["operations"] if op["status"] == "planned"),
+                key=lambda op: op["end"],
+            )
+            from datetime import timedelta
+
+            saved = client.put(
+                f"/api/fault-drafts/{draft['id']}",
+                json={
+                    "revision": draft["revision"],
+                    "reason": "人工顺延末尾工序",
+                    "moves": [
+                        {
+                            "operation_id": last["id"],
+                            "machine_id": last["machine_id"],
+                            "start": (
+                                datetime.fromisoformat(last["start"]) + timedelta(minutes=30)
+                            ).isoformat(),
+                        }
+                    ],
+                },
+            )
+            assert saved.status_code == 200, saved.text
+            assert saved.json()["issues"] == []
+            draft = confirm(client, saved.json())
+            assert draft["report"]["edits"]
+            assert "超班风险" in str(draft["report"]["risks"])
+            approve(client, submit(client, draft))
+            published = publish(client, draft)
+        else:
+            approve_fault(client, simulation["id"], candidate["id"])
+            published = client.post(
+                "/api/decisions",
+                json={
+                    "simulation_id": simulation["id"],
+                    "candidate_id": candidate["id"],
+                    "action": "publish",
+                    "reason": "确认超班风险",
+                    "request_id": "tail-publish",
+                },
+            )
+        assert published.status_code == 200, published.text
+        final = published.json()["workbench"]
+        assert final["baseline"]["version"] == before["baseline"]["version"] + 1
+        assert final["plan_publication"]["fault_analysis"]["report"]

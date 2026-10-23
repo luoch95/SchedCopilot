@@ -277,7 +277,7 @@ def test_contract_rejected_before_tool(explanation_request, change):
         )
 
 
-@pytest.mark.parametrize("change", ["empty", "invented", "exception", "mutate", "risks"])
+@pytest.mark.parametrize("change", ["empty", "invented", "exception", "mutate", "risks", "summary"])
 def test_invalid_renderer_repairs_or_stops_without_leaking(explanation_request, change, caplog):
     before = explanation_request.model_dump_json()
 
@@ -292,6 +292,8 @@ def test_invalid_renderer_repairs_or_stops_without_leaking(explanation_request, 
         elif change == "risks":
             data.risks.clear()
             data.limitations.clear()
+        elif change == "summary":
+            data.summary = "当前方案没有任何数据风险。"
         else:
             source.request.question = "不受支持的自由文本"
             return explain_results(source)
@@ -311,6 +313,7 @@ def test_invalid_renderer_repairs_or_stops_without_leaking(explanation_request, 
         assert run.result.quality.history[0].issues
         assert run.result.quality.history[1].repair
         assert not run.result.quality.history[1].issues
+        assert "⚠️ 风险提示" in run.result.data.summary
     assert "secret-api-key" not in run.result.model_dump_json() + caplog.text
     assert explanation_request.model_dump_json() == before
 

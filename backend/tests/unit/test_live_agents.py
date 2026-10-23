@@ -309,7 +309,7 @@ def test_model_cannot_bypass_blocked_validation(state):
     state.validation_input.case_data.failures[0].estimated_recovery_at = None
     result = live(Model()).run(state)
     assert result.state.workflow_status == "blocked"
-    assert [step.action for step in result.trace] == ["validate", "explain"]
+    assert [step.action for step in result.trace] == ["validate"]
     assert result.state.scheduling_result is None
     assert all(step.execution.mode == "live" for step in result.trace)
 

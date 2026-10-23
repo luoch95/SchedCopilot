@@ -133,6 +133,6 @@ class SchedulingAgent:
                 errors=[failure_notice(exc, "scheduling", "SCHEDULING_TOOL_FAILED")],
             )
             result = validate_result(result.model_dump_json(), checked, prompt)
-        result = finish_quality(result, quality)
+        result = finish_quality(result, quality, checked)
         result = validate_result(result.model_dump_json(), checked, prompt)
         return SchedulingRun(checked, result, prompt.content_sha256)

@@ -4,6 +4,8 @@
 
 项目关注现场变化后的影响分析、方案比较、证据追溯和人工决策。当前提供本地设备故障仿真演示，尚未接入真实生产设备。
 
+> **后端 Swagger 文档入口：[`/docs`](http://127.0.0.1:8000/docs)。** 直接访问后端时请打开 `http://后端地址:8000/docs`；未构建前端或未配置前端产物时，根路径 `/` 返回 `404 Not Found` 属于预期行为，不代表 API 启动失败。只有配置了有效前端构建产物时，后端根路径才提供页面。
+
 ## 当前目标与开发范围
 
 当前目标是**公网部署与面试演示**，以固定仿真数据跑通“评估 → 提交审批 → 管理者批准或退回 → 排产员发布”的主流程。
@@ -28,6 +30,7 @@
 ### Agent 分析链路
 
 - 由校验、排产、评估、解释四类 Agent 协作完成一次评估。
+- **校验 Agent** 检查输入完整性、约束和证据；**排产 Agent** 调用确定性规则生成候选；**评估 Agent** 核验指标、差异与风险；**解释 Agent** 基于证据组织结论、限制和下一步建议。四者均无自主审批或发布权限。
 - Agent 通过结构化工具读取事实，不直接修改正式计划、不绕过业务规则、不直接发布方案。
 - 支持规则模式、模型辅助模式和模型异常回退；没有模型密钥也可以完整运行演示。
 - 记录每个角色的输入摘要、工具调用、执行耗时、请求状态、证据引用、风险和假设。
@@ -102,10 +105,10 @@ uv --directory backend sync --locked --python 3.12
 npm --prefix frontend ci
 ```
 
-开发时打开两个终端。终端一运行后端：
+本地联调打开两个终端。终端一使用以下**生产环境后端启动命令**（关闭热重载，本地同样适用）：
 
 ```powershell
-uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000 --reload
+uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
 终端二运行前端：
@@ -135,7 +138,7 @@ uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host
 
 ### 公网演示：最简单的手动部署
 
-在已安装 Python 3.12、uv 和 Node.js 的服务器上，上传完整项目源码，在项目根目录执行：
+以下为**生产环境部署命令**，不启用热重载。在已安装 Python 3.12、uv 和 Node.js 的服务器上，先按 [部署清单](skill/deploy_skill.md) 核实真实数据库路径、完成备份，并设置 `SCHED_DEMO_MODE=0` 和绝对路径 `SCHED_DB_PATH`；随后在项目根目录执行：
 
 ```sh
 uv --directory backend sync --locked --python 3.12
@@ -146,7 +149,7 @@ uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host
 
 放行服务器的 TCP 8000 端口，通过 `http://服务器公网IP:8000` 访问；同一个服务提供页面与 API，不需要启动 Vite。保持启动终端运行，停止服务使用 Ctrl+C。
 
-默认演示模式每次启动重置独立演示库，适合重复演示。保留前端“解锁”口令 `admin123`，它是演示操作开关，不是正式账号权限。无需模型密钥即可运行规则演示；使用真实模型时，在服务器项目根目录配置 `.env`，不要把密钥写入前端。
+默认演示模式每次启动会重置演示库，生产环境必须显式关闭；仅在使用可丢弃的独立演示数据库时才启用。保留前端“解锁”口令 `admin123`，它是演示操作开关，不是正式账号权限。无需模型密钥即可运行规则演示；使用真实模型时，在服务器项目根目录配置 `.env`，不要把密钥写入前端。Swagger 文档访问 `http://服务器公网IP:8000/docs`；反向代理部署时使用实际对外开放的后端文档地址。
 
 本轮仅准备部署产物与命令，尚未执行公网部署或公网验收。
 
@@ -154,7 +157,7 @@ uv --directory backend run uvicorn sched_copilot.api:create_app --factory --host
 
 ## 四 Agent 与真实模型
 
-“生成候选方案”调用 `/api/workflow`：数据校验 → 排产执行 → 方案评估 → 结果解释。也支持仅校验、重新评估和针对已有结果提问。四个角色均可接入真实模型，旧 `/api/analysis` 三角色接口仅保留兼容，前端不再使用。
+“生成候选方案”调用 `/api/workflow`：数据校验 → 排产执行 → 方案评估 → 结果解释。也支持仅校验、重新评估和针对已有结果提问。四个角色均可接入真实模型，旧 `/api/analysis` 接口仅保留兼容，前端不再使用；它不属于四 Agent 主链路。
 
 将 `backend/.env.example` 复制为项目根目录 `.env`，配置后重启后端：
 
@@ -226,7 +229,7 @@ docs/                       业务说明、开发流程和架构决策
 | `POST /api/event/recover` | 恢复最近可试算事件 |
 | `POST /api/simulations` | 生成并持久化候选批次、变化与影响证据 |
 | `POST /api/workflow` | 当前前端主入口：四 Agent 校验、排产、评估和解释，支持真实模型及回退 |
-| `POST /api/analysis` | 离线脚本或 API 三 Agent 分析 |
+| `POST /api/analysis` | 旧版分析兼容入口；当前四 Agent 主链路使用 `/api/workflow` |
 | `POST /api/decisions` | 按后端候选 ID 人工发布或暂不发布 |
 
 候选批次与已完成工作流保存在后端，页面重新载入后可恢复最新分析结果。非演示重置模式下，服务重启不删除已有批次和审计记录；默认演示模式启动会重置演示库。运行中分析不支持断线续接。发布接口不接收客户端排程，始终重新校验正式计划指纹、事件递增版本和硬约束；重复请求通过请求 ID 去重。

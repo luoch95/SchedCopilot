@@ -35,6 +35,7 @@ def require_write_access(request: Request):
         "/api/demo/login",
         "/api/demo/logout",
         "/api/sales/processing-estimate",
+        "/api/copilot/ask",
     }:
         yield
         return

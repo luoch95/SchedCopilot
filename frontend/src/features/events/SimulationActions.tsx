@@ -1,8 +1,7 @@
 import type { Workbench, WorkflowResult } from '../../shared/api/contracts';
 import { AiAnalysisButton } from '../../shared/ui/AiAnalysisButton';
 import { useDemoAccess } from '../../shared/lib/demoAccess';
-import { explainIssue } from './model';
-import { businessText } from '../../shared/lib/businessLabels';
+import { EventIssues } from './EventIssues';
 
 export function SimulationActions({
   state,
@@ -34,18 +33,22 @@ export function SimulationActions({
   return (
     <section className="simulation-actions">
       <div>
-        <h2 id="section-generation">智能分析链路</h2>
+        <h3 id="section-generation">智能分析链路</h3>
         <p>对比原计划顺延与允许合格设备转移，不会修改执行计划。</p>
       </div>
       <div className="simulation-action-buttons">
-        {(!hasAlert || running) && (
-          <AiAnalysisButton
-            label={running ? 'AI 正在分析并生成候选方案' : '开始 AI 分析并生成候选方案'}
-            disabled={blocked || !!busy || demoLoading}
-            onClick={onGenerate}
-            write
-          />
-        )}
+        <AiAnalysisButton
+          label={
+            running
+              ? 'AI 正在分析并生成候选方案'
+              : hasAlert
+                ? '重新生成评估'
+                : '开始 AI 分析并生成候选方案'
+          }
+          disabled={blocked || !!busy || demoLoading}
+          onClick={onGenerate}
+          write
+        />
         {running && (
           <button className="cancel-workflow" onClick={onCancel} aria-label="取消">
             取消
@@ -71,15 +74,7 @@ export function SimulationActions({
               : '规则排产仍会执行，结果明确标注为模拟。触发后冷却 20 分钟。'}
         </p>
       </details>
-      {!!state.issues.length && (
-        <div className="blockers" role="alert">
-          <strong>当前事件与执行记录冲突</strong>
-          {state.issues.map((issue) => (
-            <p key={issue}>{businessText(explainIssue(state, issue), state.baseline.operations)}</p>
-          ))}
-          <p>更改故障时间不会自动推进或回退工序状态。</p>
-        </div>
-      )}
+      <EventIssues state={state} />
       {!state.event.recovered_at && (
         <div className="blockers">已保存事件的恢复时间未知，请补充恢复时间并保存。</div>
       )}

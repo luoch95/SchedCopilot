@@ -17,6 +17,7 @@ export async function api<T>(path: string, body?: unknown, method = 'POST'): Pro
   } catch {
     throw new ApiError('无法连接后端。请确认 FastAPI 已在 8000 端口启动。', 0);
   }
+  if (response.status === 204) return undefined as T;
   const data = await response.json();
   if (!response.ok) {
     const detail = data.detail;

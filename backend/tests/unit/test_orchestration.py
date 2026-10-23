@@ -116,16 +116,18 @@ def test_progress_does_not_start_skipped_agents_after_validation_block(state):
     events = []
     run = DynamicOrchestrator().run(state, on_progress=events.append)
     assert run.state.workflow_status == "blocked"
-    assert [e["action"] for e in events if e["type"] == "stage_started"] == ["validate", "explain"]
+    assert [e["action"] for e in events if e["type"] == "stage_started"] == ["validate"]
 
 
-def test_blocked_validation_explains_once_and_preserves_blocked(state):
+def test_blocked_validation_stops_and_preserves_specific_reason(state):
     state.validation_input.case_data.failures[0].estimated_recovery_at = None
     run = DynamicOrchestrator().run(state)
-    assert actions(run) == ["validate", "explain"]
+    assert actions(run) == ["validate"]
     assert run.state.workflow_status == "blocked"
     assert run.state.scheduling_result is None
-    assert run.state.explanation_result.data
+    assert run.state.explanation_result is None
+    assert run.state.validation_result.errors[0].code == "RECOVERY_TIME_UNKNOWN"
+    assert run.state.validation_result.quality.score == 0
 
 
 @pytest.mark.parametrize(
@@ -275,3 +277,64 @@ def test_agent_without_quality_report_cannot_handoff(state):
     assert run.state.validation_result is None
     assert run.state.scheduling_result is None
     assert actions(run) == ["validate"]
+
+
+def test_fatal_missing_machine_stops_with_explicit_reason(state):
+    state.validation_input.case_data.failures[0].machine_id = "UNKNOWN"
+    run = DynamicOrchestrator().run(state)
+    assert actions(run) == ["validate"]
+    assert run.state.workflow_status == "failed"
+    assert run.state.validation_result.quality.score == 0
+    assert any("UNKNOWN" in e.message for e in run.state.validation_result.errors)
+    assert run.state.scheduling_result is None
+
+
+def test_optional_missing_data_continues_with_reduced_scores_and_forced_risk(state):
+    run = DynamicOrchestrator().run(state)
+    assert run.state.workflow_status == "completed"
+    assert run.state.validation_result.status == "warning"
+    assert run.state.validation_result.quality.score == 98
+    for role in ("scheduling", "evaluation", "explanation"):
+        assert getattr(run.state, f"{role}_result").quality.score == 70
+    explanation = run.state.explanation_result.data
+    assert "⚠️ 风险提示" in explanation.summary
+    assert "人员配置" in explanation.summary
+    assert "物料可用性" in explanation.summary
+    assert explanation.risks[0].evidence_refs
+
+
+def test_no_capacity_continues_to_human_review_without_fabricating_plan(state, monkeypatch):
+    from sched_copilot.domain.errors import RuleViolation
+
+    def overloaded(*args, **kwargs):
+        raise RuleViolation("产能超载，当前班次内无可用时段")
+
+    monkeypatch.setattr("sched_copilot.tools.scheduling.generate_candidates", overloaded)
+    run = DynamicOrchestrator().run(state)
+    assert actions(run) == ["validate", "schedule", "evaluate", "explain"]
+    assert run.state.workflow_status == "completed"
+    assert run.state.scheduling_result.data is None
+    assessment = run.state.evaluation_result.data.assessment
+    assert assessment.outcome == "no_feasible_candidate"
+    assert any("加班" in item and "不是可发布计划" in item for item in assessment.recommendations)
+    assert not run.state.evaluation_result.data.evaluations
+    assert any("加班" in step.action for step in run.state.explanation_result.data.next_steps)
+    assert all(s.requires_human_confirmation for s in run.state.explanation_result.data.next_steps)
+
+
+@pytest.mark.parametrize("score", [None, 97.99, 100.0])
+def test_missing_or_forged_new_validation_score_cannot_handoff(state, score):
+    from dataclasses import replace
+
+    from sched_copilot.agents.validation_agent import ValidationAgent
+
+    class Forged:
+        def run(self, request, **kwargs):
+            run = ValidationAgent().run(request, **kwargs)
+            quality = run.result.quality.model_copy(update={"score": score})
+            return replace(run, result=run.result.model_copy(update={"quality": quality}))
+
+    run = DynamicOrchestrator(validation=Forged()).run(state)
+    assert run.state.workflow_status == "failed"
+    assert actions(run) == ["validate"]
+    assert run.state.scheduling_result is None

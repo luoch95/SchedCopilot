@@ -7,7 +7,7 @@ import type {
   WorkflowResult,
 } from '../../shared/api/contracts';
 import { Modal } from '../../shared/ui/Modal';
-import { CurrentPlan, timelineRange } from '../plan';
+import { CurrentPlan, publishedPlanRange } from '../plan';
 import { publishedFault, workbenchApi } from '../workbench';
 import { FaultAnalysisDetails, FaultProgress } from '../analysis';
 import { FaultReviewPanel } from './FaultReviewPanel';
@@ -18,6 +18,7 @@ import { inDateRange, type DateRange } from '../../shared/lib/dateRange';
 import { stamp } from '../../shared/lib/time';
 import { WorkshopOverview } from './WorkshopOverview';
 import { PendingRequestsPanel } from './PendingRequestsPanel';
+import { WeeklyReportButton } from '../admin';
 
 export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   const [selected, setSelected] = useState<InsertionRequestRecord | null>(null);
@@ -70,7 +71,7 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
       active = false;
     };
   }, [planRevision]);
-  const fault = state?.event;
+  const fault = state?.event_cancelled ? undefined : state?.event;
   const publication = publishedFault(state);
   const analysisWorkflow = workflow ?? publication?.workflow ?? null;
   const step = publication
@@ -93,7 +94,9 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
       ? `${fault.machine_id} 停机故障 · ${step}`
       : loading
         ? '正在同步设备故障信息'
-        : '设备故障信息暂不可用',
+        : state?.event_cancelled
+          ? '误录故障已撤销'
+          : '设备故障信息暂不可用',
     'M2 产线有紧急插单需求（演示）',
     '今日整体产线利用率 80%（演示）',
   ].join('　 |　 ');
@@ -123,7 +126,7 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
           </div>
         </div>
       </section>
-      <WorkshopOverview />
+      <WorkshopOverview headerActions={<WeeklyReportButton />} />
       <div className="leader-task-grid">
         <PendingRequestsPanel
           leader
@@ -166,16 +169,21 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
                 <div className="fault-process-row">
                   <FaultProgress state={state!} workflow={workflow} simulation={simulation} />
                 </div>
-                <p className="fault-impact-summary">
-                  <strong>
-                    结论简要：
-                    {publication
-                      ? `${publication.affected ? `本次故障原影响 ${publication.affected.length} 道工序；` : ''}发布后当前计划剩余 ${state!.affected.length} 道工序受故障影响。`
-                      : `当前计划有 ${state!.affected.length} 道工序受故障影响。`}
-                  </strong>
-                </p>
+                {!!fault.recovered_at && !state!.issues.length && (
+                  <p className="fault-impact-summary">
+                    <strong>
+                      结论简要：
+                      {publication
+                        ? `${publication.affected ? `本次故障原影响 ${publication.affected.length} 道工序；` : ''}发布后当前计划剩余 ${state!.affected.length} 道工序受故障影响。`
+                        : `当前计划有 ${state!.affected.length} 道工序受故障影响。`}
+                    </strong>
+                  </p>
+                )}
                 <FaultReviewPanel state={state!} onChange={setState} />
               </section>
+            )}
+            {state?.event_cancelled && (
+              <p className="sales-muted">误录故障已撤销，不参与后续排产。</p>
             )}
             {fault && !inDateRange(fault.started_at, faultRange) && (
               <p className="sales-muted">所选时间范围内暂无故障预警。</p>
@@ -198,7 +206,7 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
                 <CurrentPlan
                   compact
                   state={state}
-                  range={timelineRange(state, null, zoom, pan)}
+                  range={publishedPlanRange(state, zoom, pan)}
                   zoom={zoom}
                   pan={pan}
                   onZoom={setZoom}

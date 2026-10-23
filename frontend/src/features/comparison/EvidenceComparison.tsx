@@ -1,3 +1,4 @@
+import { DetailSurface } from '../../shared/ui/DetailSurface';
 import type { Candidate, WorkflowResult } from '../../shared/api/contracts';
 import { WorkflowDebugDetails } from '../../shared/ui/WorkflowEvidence';
 import { DecisionText } from '../../shared/ui/DecisionText';
@@ -6,13 +7,15 @@ import { businessText } from '../../shared/lib/businessLabels';
 export function EvidenceComparison({
   candidates,
   workflow,
+  flat = false,
 }: {
   candidates: Candidate[];
   workflow: WorkflowResult | null;
+  flat?: boolean;
 }) {
   return (
     <>
-      <h3 className="block-title">方案计算依据</h3>
+      {!flat && <h3 className="block-title">方案计算依据</h3>}
       <div className="candidate-grid">
         {candidates.map((item) => {
           const catalog = workflow?.evidence_catalog ?? {};
@@ -43,8 +46,7 @@ export function EvidenceComparison({
           return (
             <article className="evidence-cell" key={item.id}>
               <h4>{item.label}</h4>
-              <details className="workflow-evidence" aria-label={`${item.label}计算依据`}>
-                <summary>查看计算依据</summary>
+              <DetailSurface flat={flat} className="workflow-evidence" title="查看计算依据">
                 <h5>计算口径</h5>
                 <ul>
                   <li>
@@ -76,16 +78,17 @@ export function EvidenceComparison({
                   ))}
                 </ul>
                 {!item.changes.length && <p>该候选未调整任何工序。</p>}
-                <WorkflowDebugDetails
-                  data={{
-                    candidate: item,
-                    evaluation,
-                    evidence_catalog: Object.fromEntries(
-                      [...refs].map((ref) => [ref, catalog[ref] ?? { error: '证据不可用' }]),
-                    ),
-                  }}
-                />
-              </details>
+              </DetailSurface>
+              <WorkflowDebugDetails
+                flat={flat}
+                data={{
+                  candidate: item,
+                  evaluation,
+                  evidence_catalog: Object.fromEntries(
+                    [...refs].map((ref) => [ref, catalog[ref] ?? { error: '证据不可用' }]),
+                  ),
+                }}
+              />
             </article>
           );
         })}

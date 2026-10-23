@@ -38,6 +38,12 @@ class AnalysisRequest(SnapshotRequest):
     question: str = Field(default="设备故障后，应该如何比较方案？", min_length=1, max_length=2000)
 
 
+class CopilotQuestionRequest(SnapshotRequest):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    workflow_id: str = Field(min_length=1, max_length=100)
+    question: str = Field(min_length=1, max_length=2000)
+
+
 class WorkflowRequest(SnapshotRequest):
     intent: Literal["generate_candidates", "re_evaluate", "explain", "validate"]
     question: str = Field(default="解释候选方案的取舍和风险", min_length=1, max_length=2000)

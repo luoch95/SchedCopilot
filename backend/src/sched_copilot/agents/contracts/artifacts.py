@@ -1,6 +1,6 @@
 """候选方案及其证据的结构，不代表正式生产计划。"""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field
 
@@ -37,6 +37,7 @@ class CandidateChanges(Contract):
 
 
 class CandidateConstraintCheck(Contract):
+    queue_policy: Literal["preserve", "append_tail"] = "preserve"
     candidate_id: Text
     passed: bool
     checked_items: list[Text]
@@ -54,7 +55,8 @@ class MachineLoad(Contract):
     delta_minutes: float
     available_minutes: Nonnegative | None = None
     setup_minutes: Nonnegative | None = None
-    utilization: Annotated[float, Field(ge=0, le=1)] | None = None
+    # Load relative to registered capacity may exceed 100% for reviewed overtime drafts.
+    utilization: Nonnegative | None = None
 
 
 class EvaluationMetrics(Contract):

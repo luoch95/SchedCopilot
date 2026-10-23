@@ -4,11 +4,17 @@ import { businessText } from '../../shared/lib/businessLabels';
 
 const IMPACT_TYPES = ['直接影响', '连锁影响', '策略调整'];
 
-export function ImpactChains({ candidates }: { candidates: Candidate[] }) {
+export function ImpactChains({
+  candidates,
+  showHeading = true,
+}: {
+  candidates: Candidate[];
+  showHeading?: boolean;
+}) {
   return (
     <>
       {' '}
-      <h3 className="block-title">工序变化与影响链</h3>
+      {showHeading && <h3 className="block-title">工序变化与影响链</h3>}
       <div className="impact-type-legend" aria-label="影响类型图例">
         {IMPACT_TYPES.map((type) => (
           <span className="impact-type" key={type}>

@@ -8,6 +8,7 @@ from typing import TypeVar
 
 from ..domain.errors import RuleViolation
 from .contracts.common import Notice, QualityIssue, QualityReport, QualityRound
+from .contracts.scoring import score_result
 from .result_validation import AgentContractError
 
 T = TypeVar("T")
@@ -210,7 +211,7 @@ def checked_execute(
     raise AssertionError("Unreachable")
 
 
-def finish_quality(result, quality):
+def finish_quality(result, quality, request):
     outcome = {"success": "passed", "warning": "warning", "blocked": "blocked", "failed": "failed"}[
         result.status
     ]
@@ -222,7 +223,9 @@ def finish_quality(result, quality):
         )
     elif quality.outcome == "passed" and outcome == "blocked":
         quality = quality.model_copy(update={"stop_reason": "输出检查通过，业务数据存在阻断项"})
-    return result.model_copy(update={"quality": quality.model_copy(update={"outcome": outcome})})
+    quality = quality.model_copy(update={"outcome": outcome})
+    quality = quality.model_copy(update=score_result(result, quality, request))
+    return result.model_copy(update={"quality": quality})
 
 
 def verify_evidence(output, request):
@@ -244,4 +247,6 @@ def validate_handoff(run, role):
     result = validate_result(run.result.model_dump_json(), run.request, PromptLoader().load(role))
     if result.quality is None:
         raise AgentContractError("QUALITY_REPORT_REQUIRED", "Agent 未提供质量检查记录，停止交付。")
+    if result.quality.score is None or result.quality.score_version != "rules-v1":
+        raise AgentContractError("QUALITY_SCORE_REQUIRED", "本轮 Agent 未提供规则评分，停止交付。")
     return result

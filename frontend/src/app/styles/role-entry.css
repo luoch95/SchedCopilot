@@ -116,7 +116,7 @@
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  padding: 72px 0 80px;
+  padding: 72px 0 112px;
   overflow: hidden;
 }
 .entry-access::before,
@@ -309,6 +309,27 @@
   font-size: 10px;
   line-height: 1.8;
   margin: 0;
+}
+.entry-admin-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  min-height: 32px;
+  margin: 10px 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: #718592;
+  font-size: 11px;
+  text-decoration: none;
+}
+.entry-admin-link:hover {
+  color: var(--entry-ink);
+  background: #e8eef2;
+}
+.entry-admin-link:focus-visible {
+  outline: 2px solid var(--entry-blue);
+  outline-offset: 2px;
 }
 @media (max-width: 900px) {
   .role-entry {

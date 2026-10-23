@@ -116,7 +116,7 @@ def test_agent_returns_verified_report_and_new_evidence_without_mutation(request
 def test_fault_input_quality_blocks_candidates(request_data, field, value, code):
     request_data["case_data"]["failures"][0][field] = value
     run = ValidationAgent().run(request(request_data))
-    assert run.result.status == "blocked"
+    assert run.result.status == ("failed" if code == "FAILURE_MACHINE_NOT_FOUND" else "blocked")
     assert not run.result.data.can_generate_candidates
     assert code in codes(run)
     issue = next(i for i in run.result.data.issues if i.code == code)
@@ -125,10 +125,11 @@ def test_fault_input_quality_blocks_candidates(request_data, field, value, code)
 
 
 @pytest.mark.parametrize("field", ["orders", "machines", "operations", "failures"])
-def test_missing_required_data_is_reported_as_business_block(request_data, field):
+def test_missing_required_data_is_fatal(request_data, field):
     request_data["case_data"][field] = []
     run = ValidationAgent().run(request(request_data))
-    assert run.result.status == "blocked"
+    assert run.result.status == "failed"
+    assert run.result.quality.score == 0
     assert "MISSING_DATA" in codes(run)
 
 
@@ -178,7 +179,9 @@ def test_independent_failure_windows_are_supported(request_data):
 def test_operation_references_capability_and_status(request_data, field, value, code):
     request_data["case_data"]["operations"][0][field] = value
     run = ValidationAgent().run(request(request_data))
-    assert run.result.status == "blocked"
+    assert run.result.status == (
+        "failed" if code in {"ORDER_NOT_FOUND", "MOLD_NOT_FOUND"} else "blocked"
+    )
     assert code in codes(run)
 
 

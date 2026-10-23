@@ -3,6 +3,7 @@ import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './WorkbenchPage';
+import { evidenceEntries } from './FaultDecisionEvidence';
 import { localInput } from '../shared/lib/time';
 import { workbench, simulation } from '../test/fixtures';
 import type { WorkflowResponse } from '../shared/api/contracts';
@@ -118,6 +119,14 @@ beforeEach(() => {
           },
         };
 
+      if (url === '/api/copilot/ask')
+        data = {
+          workflow_id: 'workflow-1',
+          question: body.question,
+          answer: '## 风险解答\n\n**转移需要人工确认。**',
+          mode: 'fallback',
+          knowledge: { message: '规则依据', sources: [] },
+        };
       if (url === '/api/workflow') {
         data = workflowFixture;
         if (body.intent === 're_evaluate')
@@ -172,6 +181,94 @@ beforeEach(() => {
 });
 
 describe('Schedule Copilot workflow', () => {
+  it('keeps historical fault reports in a read-only drawer without generating again', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (...args) => {
+      if (args[0] === '/api/workbench')
+        return new Response(
+          JSON.stringify({
+            ...workbench,
+            event_history: [
+              {
+                ...workbench.event,
+                machine_id: 'M2',
+                revision: 0,
+                created_at: workbench.snapshot_time,
+              },
+            ],
+          }),
+        );
+      if (args[0] === '/api/events/0/analysis')
+        return new Response(
+          JSON.stringify({
+            event_revision: 0,
+            baseline_version: 1,
+            baseline: workbench.baseline,
+            affected: workbench.affected,
+            workflow: workflowFixture.workflow,
+            simulation,
+          }),
+        );
+      return original(...args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+    await user.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    await user.click(await screen.findByRole('button', { name: '查看历史 AI 分析' }));
+    const drawer = await screen.findByRole('dialog', { name: 'M2故障 R0 · 历史智能分析明细' });
+    await within(drawer).findByText('工作流：已完成');
+    expect(within(drawer).getAllByRole('img', { name: '设备工序甘特图' })).toHaveLength(2);
+    expect(within(drawer).queryByRole('button', { name: /采纳|发布|生成|提交审批/ })).toBeNull();
+    expect(calls.some((call) => call.path === '/api/workflow')).toBe(false);
+    await user.click(within(drawer).getByRole('button', { name: '关闭' }));
+    expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
+  });
+
+  it('opens AI details when an older published fault has only a legacy report', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (...args) => {
+      if (args[0] === '/api/workbench')
+        return new Response(
+          JSON.stringify({
+            ...workbench,
+            plan_publication: {
+              version: workbench.baseline.version,
+              published_at: null,
+              published_by: null,
+              version_summary: '上一故障已发布',
+              fault_analysis: {
+                event_revision: 0,
+                baseline_version: 0,
+                affected: [],
+                workflow: null,
+                report: { manual_summary: '上一故障历史报告', decision: '已发布' },
+              },
+            },
+          }),
+        );
+      if (args[0] === '/api/workflow/latest') return new Response(JSON.stringify(workflowFixture));
+      return original(...args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+    await user.click(screen.getByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }));
+    await screen.findAllByText('已比较两个候选方案。');
+    await user.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    await user.click(
+      await screen.findByRole('button', { name: '查看 AI 分析详情' }, { timeout: 5000 }),
+    );
+    await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getAllByText('已比较两个候选方案。').length).toBeGreaterThan(0);
+    expect(screen.queryByText('上一故障历史报告')).toBeNull();
+    expect(screen.getAllByRole('img', { name: '设备工序甘特图' }).length).toBeGreaterThanOrEqual(2);
+    expect(calls.filter((c) => c.path === '/api/workflow')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    expect(screen.getByRole('heading', { name: '排产计划工作台' })).toBeTruthy();
+  });
+
   it('returns an approved fault to the planner and publishes from its approval details', async () => {
     const review = {
       id: 'approved-review',
@@ -236,24 +333,32 @@ describe('Schedule Copilot workflow', () => {
     await screen.findByText('排产员已发布计划 V2，流程已完成。');
   });
 
-  it('shows only saved facts before generation and switches to the five decision cards after results arrive', async () => {
+  it('keeps six chapters and links the evidence outline to flat cards, tabs and single disclosures', async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText('方案待生成');
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole('heading', { name: '1　故障概览' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '2　当前正式排产计划' })).toBeTruthy();
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(6);
+    expect(screen.getByRole('heading', { name: '1　方案结论' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '3　候选排产计划' })).toBeTruthy();
     expect(screen.getAllByRole('img', { name: '设备工序甘特图' })).toHaveLength(1);
     expect(screen.queryByLabelText('确认理由（必填）')).toBeNull();
-    expect(screen.queryByRole('heading', { name: '1　方案结论' })).toBeNull();
-    const outline = screen.getByRole('navigation', { name: '本页提纲' });
+    const outline = screen.getByRole('navigation', { name: '本页大纲' });
     expect(
       within(outline)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['故障概览', '当前正式计划', '生成候选方案']);
+    ).toEqual([
+      '1 方案结论',
+      '2 方案对比',
+      '3 候选排产计划',
+      '4 依据与风险',
+      ...evidenceEntries.map(([, title]) => title),
+      '5 人工确认',
+      '6 历史记录',
+    ]);
     expect(
-      screen.getByText('查看本次 Agent 链路', { selector: 'summary' }).closest('details')?.open,
+      screen.getByRole('heading', { name: '4.10 查看本次 Agent 链路' }).closest('details')?.open,
     ).toBe(false);
     expect(calls.some((call) => call.path === '/api/workflow')).toBe(false);
     await user.click(screen.getByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }));
@@ -262,26 +367,59 @@ describe('Schedule Copilot workflow', () => {
     expect(status.closest('.fault-stage-heading')?.querySelector('h1')?.textContent).toBe(
       '故障影响与方案决策',
     );
-    expect(document.querySelector('.fault-stage-meta')?.contains(status)).toBe(false);
-    expect(document.querySelector('.fault-stage-meta')?.textContent).toContain('仿真数据');
+    expect(document.querySelector('.fault-system-tools')).toBeNull();
+    expect(screen.queryByRole('button', { name: '切换角色' })).toBeNull();
     const conclusion = document.getElementById('fault-conclusion')!;
     expect(conclusion.querySelector('h3')?.textContent).toContain('预计整体提前 240 分钟完工');
-    expect(conclusion.lastElementChild?.getAttribute('aria-label')).toBe('方案分析标识');
+    expect(within(conclusion).getByLabelText('方案分析标识')).toBeTruthy();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.queryByRole('heading', { name: '1　故障概览' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: '2　当前正式排产计划' })).toBeNull();
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(6);
     expect(screen.getAllByRole('img', { name: '设备工序甘特图' })).toHaveLength(2);
     expect(screen.getByRole('heading', { name: '1　方案结论' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '3　候选排产计划' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '4　依据与风险' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '5　人工确认' })).toBeTruthy();
     expect(screen.getByLabelText('确认理由（必填）')).toBeTruthy();
-    expect(
-      screen.getByText('展开分析结论、事实与风险', { selector: 'summary' }).closest('details')
-        ?.open,
-    ).toBe(false);
+    expect(screen.getByRole('region', { name: '辅助分析' }).closest('details')).toBeNull();
+    expect(screen.queryByText('展开工序变化、影响链与计算依据')).toBeNull();
+    for (const title of ['4.4 工序调整对照', '4.5 订单交付对照']) {
+      await user.click(screen.getByRole('tab', { name: title }));
+      expect(screen.getByRole('heading', { name: title }).closest('details')).toBeNull();
+    }
+    expect(document.querySelectorAll('.decision-system-panel')).toHaveLength(4);
+    expect(document.querySelectorAll('.decision-system-panel[open]')).toHaveLength(0);
+    expect(document.querySelector('#fault-evidence details details')).toBeNull();
+    expect(document.querySelector('#fault-comparison-details details details')).toBeNull();
     const ids = [...document.querySelectorAll('[id]')].map((element) => element.id);
     expect(new Set(ids).size).toBe(ids.length);
+    const links = within(outline).getAllByRole('link');
+    expect(links).toHaveLength(17);
+    for (const link of links) {
+      expect(document.getElementById(link.getAttribute('href')!.slice(1))).toBeTruthy();
+    }
+    const route = location.href;
+    await user.click(within(outline).getByRole('link', { name: '4.7 方案计算依据' }));
+    await waitFor(() => expect(document.activeElement?.id).toBe('section-evidence'));
+    expect(
+      screen.getByRole('tab', { name: '4.7 方案计算依据' }).getAttribute('aria-selected'),
+    ).toBe('true');
+    expect(screen.queryByRole('heading', { name: '4.5 订单交付对照' })).toBeNull();
+    const evidenceTab = screen.getByRole('tab', { name: '4.7 方案计算依据' });
+    evidenceTab.focus();
+    await user.keyboard('{Home}');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: '4.4 工序调整对照' }));
+    await user.keyboard('{ArrowRight}');
+    expect(
+      screen.getByRole('tab', { name: '4.5 订单交付对照' }).getAttribute('aria-selected'),
+    ).toBe('true');
+    await user.click(within(outline).getByRole('link', { name: '4.11 执行详情' }));
+    await waitFor(() => expect(document.activeElement?.id).toBe('section-execution-details'));
+    expect((document.getElementById('fault-execution-panel') as HTMLDetailsElement).open).toBe(
+      true,
+    );
+    expect(document.querySelectorAll('.decision-system-panel[open]')).toHaveLength(1);
+    expect(document.querySelector('#fault-evidence details details')).toBeNull();
+    expect(location.href).toBe(route);
     expect(calls.filter((call) => call.path === '/api/workflow')).toHaveLength(1);
     expect(calls.some((call) => call.path === '/api/decisions')).toBe(false);
   });
@@ -387,7 +525,10 @@ describe('Schedule Copilot workflow', () => {
       ),
     );
     await screen.findByText('工作流：已取消');
-    expect(screen.queryByRole('heading', { name: '2　方案对比' })).toBeNull();
+    expect(document.getElementById('fault-compare-summary')?.textContent).toMatch(
+      /生成候选后|无可执行候选/,
+    );
+    expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
     await user.click(screen.getByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }));
@@ -471,7 +612,7 @@ describe('Schedule Copilot workflow', () => {
     expect(stages.children[1].getAttribute('data-status')).toBe('running');
     expect(stages.querySelectorAll('[data-status="running"]')).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: '查看数据校验详情' }));
-    expect(document.activeElement?.tagName).toBe('ARTICLE');
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('ARTICLE'));
     expect(document.activeElement?.closest('details')?.open).toBe(true);
     expect(screen.getByRole('heading', { name: '输出质量检查' })).toBeTruthy();
     expect(screen.getByText(/第 1 轮：检查覆盖遗漏/)).toBeTruthy();
@@ -525,7 +666,9 @@ describe('Schedule Copilot workflow', () => {
           mode === 'live' ? '模型辅助' : '规则回退',
         ),
       ).toHaveLength(4);
-      expect(screen.getByText('已比较两个候选方案。')).toBeTruthy();
+      expect(
+        within(document.getElementById('fault-conclusion')!).getByText('已比较两个候选方案。'),
+      ).toBeTruthy();
       expect(screen.getByText('转移方案改变设备。')).toBeTruthy();
       if (mode === 'live') {
         expect(screen.getByRole('heading', { name: '本次分析重点' })).toBeTruthy();
@@ -541,23 +684,25 @@ describe('Schedule Copilot workflow', () => {
     },
   );
 
-  it('groups evidence per candidate and keeps raw data in nested debug details', async () => {
+  it('groups evidence per candidate and keeps raw data in sibling debug details', async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole('heading', { name: '当前执行计划' });
     await user.click(screen.getByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }));
-    await screen.findByRole('heading', { name: '方案计算依据' });
+    await screen.findByRole('tab', { name: '4.7 方案计算依据' });
+    await user.click(screen.getByRole('tab', { name: '4.7 方案计算依据' }));
     expect(screen.queryAllByText(/^查看依据/)).toHaveLength(0);
     expect(screen.getAllByText('查看计算依据')).toHaveLength(2);
-    const basis = screen.getByLabelText('允许合格设备转移计算依据') as HTMLDetailsElement;
-    expect(basis.open).toBe(false);
-    await user.click(within(basis).getByText('查看计算依据'));
-    expect(basis.open).toBe(true);
+    const candidateEvidence = screen
+      .getByRole('heading', { name: '允许合格设备转移', level: 4 })
+      .closest('article')!;
+    const basis = within(candidateEvidence).getByText('查看计算依据').parentElement!;
+    expect(basis.tagName).toBe('DIV');
     expect(within(basis).getByText('计算口径')).toBeTruthy();
-    const debug = within(basis).getByText('调试详情').closest('details')!;
-    expect(debug.open).toBe(false);
-    await user.click(within(basis).getByText('调试详情'));
-    expect(debug.open).toBe(true);
+    const debug = within(candidateEvidence).getByText('调试详情').closest('.workflow-evidence')!;
+    expect(debug.parentElement).toBe(basis.parentElement);
+    expect(basis.contains(debug)).toBe(false);
+    expect(debug.tagName).toBe('DIV');
     expect(debug.querySelector('pre')?.textContent).toContain('metrics-1');
     expect(debug.querySelector('pre')?.textContent).toContain('"extra_changeovers": null');
     const explanation = screen.getByRole('region', { name: '辅助分析' });
@@ -621,28 +766,31 @@ describe('Schedule Copilot workflow', () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
-    await user.click(screen.getByRole('heading', { name: '执行详情' }).closest('summary')!);
+    await user.click(screen.getByRole('heading', { name: '4.11 执行详情' }).closest('summary')!);
     await user.click(screen.getByRole('button', { name: '仅校验数据' }));
     await screen.findByText('工作流：已阻断');
     expect(calls.find((call) => call.path === '/api/workflow')?.body?.intent).toBe('validate');
     expect(screen.getAllByText('请补充预计恢复时间。').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('heading', { name: '2　方案对比' })).toBeNull();
+    expect(document.getElementById('fault-compare-summary')?.textContent).toMatch(
+      /生成候选后|无可执行候选/,
+    );
+    expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
     expect(screen.getByLabelText('智能环节执行顺序').children).toHaveLength(1);
   });
 
-  it('re-explains the same batch without scheduling again or losing comparison', async () => {
+  it('answers separately without replacing the workflow or losing comparison', async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole('heading', { name: '当前执行计划' });
     await user.click(screen.getByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }));
-    await screen.findByRole('heading', { name: '辅助分析' });
-    await user.click(screen.getByText('针对已有结果提问', { exact: true }));
+    await screen.findByRole('heading', { name: '4.9 解释问题' });
+    await user.click(screen.getByRole('heading', { name: '4.9 解释问题' }).closest('summary')!);
     await user.clear(screen.getByLabelText('解释问题'));
     await user.type(screen.getByLabelText('解释问题'), '解释设备转移风险');
-    await user.click(screen.getByRole('button', { name: '重新解释' }));
-    await waitFor(() => expect(calls.filter((c) => c.path === '/api/workflow')).toHaveLength(2));
-    expect(calls.filter((c) => c.path === '/api/workflow')[1].body).toMatchObject({
-      intent: 'explain',
+    await user.click(screen.getByRole('button', { name: '✨ 获取 AI 解答' }));
+    await screen.findByRole('region', { name: 'AI 解答' });
+    expect(calls.filter((c) => c.path === '/api/workflow')).toHaveLength(1);
+    expect(calls.find((c) => c.path === '/api/copilot/ask')?.body).toMatchObject({
       workflow_id: 'workflow-1',
       question: '解释设备转移风险',
     });
@@ -778,7 +926,10 @@ describe('Schedule Copilot workflow', () => {
     const stages = screen.getByLabelText('智能环节执行顺序');
     expect(within(stages).getByText('失败')).toBeTruthy();
     expect(within(stages).getAllByText('未执行（前序阻断或失败）')).toHaveLength(3);
-    expect(screen.queryByRole('heading', { name: '2　方案对比' })).toBeNull();
+    expect(document.getElementById('fault-compare-summary')?.textContent).toMatch(
+      /生成候选后|无可执行候选/,
+    );
+    expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
   });
 
   it('runs four Agents, displays warnings and routes generated candidates to human publication', async () => {
@@ -801,20 +952,24 @@ describe('Schedule Copilot workflow', () => {
     const evaluation = screen.getByRole('table', { name: '方案评估对比表' });
     const missing = within(evaluation).getByRole('row', { name: /缺失指标/ });
     expect(within(missing).getByText('新增换型次数、班次利用率')).toBeTruthy();
-    expect(screen.getByText('已比较两个候选方案。')).toBeTruthy();
+    expect(
+      within(document.getElementById('fault-conclusion')!).getByText('已比较两个候选方案。'),
+    ).toBeTruthy();
     await screen.findByRole('heading', { name: '2　方案对比' });
     expect(calls.find((c) => c.path === '/api/workflow')?.body?.intent).toBe('generate_candidates');
     expect(calls.some((c) => c.path === '/api/decisions')).toBe(false);
     expect(calls.some((c) => ['/api/simulations', '/api/analysis'].includes(c.path))).toBe(false);
     expect(screen.queryByText('启用 API 多 Agent')).toBeNull();
-    expect(screen.getByRole('heading', { name: '辅助分析' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '4.1 事实/假设与风险' })).toBeTruthy();
     await user.selectOptions(screen.getByLabelText('本次处理的方案'), 'transfer');
     await user.selectOptions(screen.getByLabelText('处理方式'), 'publish');
     await user.type(screen.getByLabelText('确认理由（必填）'), '确认发布');
     await user.click(screen.getByRole('button', { name: '确认发布执行计划' }));
     await screen.findByText('已发布方案，执行计划版本 V2。');
-    expect(screen.queryByText('工作流：已完成')).toBeNull();
-    expect(screen.queryByRole('heading', { name: '辅助分析' })).toBeNull();
+    expect(screen.getByLabelText('已发布故障方案存档')).toBeTruthy();
+    expect(screen.getByText('工作流：已完成')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '确认发布执行计划' })).toBeNull();
     await user.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
     await screen.findByLabelText('计划发布：已发布 V2');
     expect(
@@ -831,7 +986,7 @@ describe('Schedule Copilot workflow', () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole('heading', { name: '当前执行计划' });
-    await user.click(screen.getByRole('heading', { name: '执行详情' }).closest('summary')!);
+    await user.click(screen.getByRole('heading', { name: '4.11 执行详情' }).closest('summary')!);
     expect(
       (screen.getByRole('button', { name: '重新评估已有方案' }) as HTMLButtonElement).disabled,
     ).toBe(true);
@@ -843,7 +998,7 @@ describe('Schedule Copilot workflow', () => {
       intent: 're_evaluate',
       workflow_id: 'workflow-1',
     });
-    await screen.findByText('评估已更新，可点击“重新解释”查看最新说明。');
+    await screen.findAllByText('暂无完整解释，已有检查结果可在执行详情中查看。');
     expect(screen.queryByText('已比较两个候选方案。')).toBeNull();
     expect(screen.getByRole('heading', { name: '2　方案对比' })).toBeTruthy();
     await openFaultEditor();
@@ -921,9 +1076,13 @@ describe('Schedule Copilot workflow', () => {
     await user.click(screen.getByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }));
     const conclusion = await screen.findByLabelText('评估结论与审批');
     expect(conclusion.textContent).toContain('00:45');
-    expect(screen.queryByRole('heading', { name: '2　方案对比' })).toBeNull();
-    await user.type(within(conclusion).getByLabelText('提交理由（必填）'), '核对结论');
-    await user.click(within(conclusion).getByRole('button', { name: '提交管理者审批' }));
+    expect(document.getElementById('fault-compare-summary')?.textContent).toMatch(
+      /生成候选后|无可执行候选/,
+    );
+    expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
+    const confirmation = document.getElementById('fault-human-decision')!;
+    await user.type(within(confirmation).getByLabelText('提交理由（必填）'), '核对结论');
+    await user.click(within(confirmation).getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText('评估结论已提交管理者审批；审批通过后不产生排产变更。');
     await user.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
     const alerts = screen.getByRole('heading', { name: '异常与预警' }).closest('section')!;
@@ -932,37 +1091,18 @@ describe('Schedule Copilot workflow', () => {
     await user.click(
       await within(alerts).findByRole('button', { name: '查看AI评估详情' }, { timeout: 5000 }),
     );
-    const drawer = await screen.findByRole('dialog', { name: /智能分析明细/ });
-    expect(within(drawer).getByRole('button', { name: '重新生成评估' })).toBeTruthy();
-    const submitLink = within(drawer).getByRole('button', { name: '查看结果与提交审批' });
-    const body = drawer.querySelector('.console-modal-body')!;
-    body.scrollTop = 420;
-    await user.click(submitLink);
     await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByLabelText('评估结论与审批').textContent).toContain('00:45');
     expect(location.hash).toBe('#/planner/fault-decision');
-
     act(() => history.back());
-    let restored = await screen.findByRole('dialog', { name: /智能分析明细/ });
-    expect(restored.querySelector('.console-modal-body')!.scrollTop).toBe(420);
-    expect(location.hash).toBe('#/planner/assessment-details');
-
-    act(() => history.forward());
-    await screen.findByRole('button', { name: '← 返回评估详情' });
-    await user.click(screen.getByRole('button', { name: '← 返回评估详情' }));
-    restored = await screen.findByRole('dialog', { name: /智能分析明细/ });
-    expect(restored.querySelector('.console-modal-body')!.scrollTop).toBe(420);
-    await user.click(within(restored).getByRole('button', { name: '关闭' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await screen.findByRole('heading', { name: '排产计划工作台' });
     expect(location.hash).toBe('#/planner');
-
     act(() => history.forward());
-    restored = await screen.findByRole('dialog', { name: /智能分析明细/ });
-    await user.click(within(restored).getByRole('button', { name: '查看结果与提交审批' }));
-    await screen.findByRole('button', { name: '← 返回评估详情' });
+    await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+    expect(screen.queryByRole('dialog')).toBeNull();
     await user.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
     await screen.findByRole('heading', { name: '排产计划工作台' });
-    expect(screen.queryByRole('dialog')).toBeNull();
     expect(location.hash).toBe('#/planner');
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(1);
   });
@@ -1000,7 +1140,10 @@ describe('Schedule Copilot workflow', () => {
     await user.click(screen.getByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }));
     await screen.findByText('工作流：已阻断');
     expect(screen.getByText('预计恢复时间未知，请人工补充。')).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: '2　方案对比' })).toBeNull();
+    expect(document.getElementById('fault-compare-summary')?.textContent).toMatch(
+      /生成候选后|无可执行候选/,
+    );
+    expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
     expect(screen.queryByRole('button', { name: '查看AI评估详情' })).toBeNull();
     expect(
       screen.queryByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }),
@@ -1014,9 +1157,11 @@ describe('Schedule Copilot workflow', () => {
     const alertButton = within(alerts).getByRole('button', { name: '查看AI评估详情' });
     expect(alertButton.querySelector('.ai-bot-icon')).toBeTruthy();
     await user.click(alertButton);
-    const drawer = await screen.findByRole('dialog', { name: /智能分析明细/ });
+    await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByText('预计恢复时间未知，请人工补充。')).toBeTruthy();
     expect(generationRequests()).toBe(1);
-    await user.click(within(drawer).getByRole('button', { name: '重新生成评估' }));
+    await user.click(screen.getByRole('button', { name: '重新生成评估' }));
     await waitFor(() => expect(generationRequests()).toBe(2));
   });
 
@@ -1046,7 +1191,10 @@ describe('Schedule Copilot workflow', () => {
     expect(decision.candidate_id).toBe('transfer');
     expect(decision.simulation_id).toBe('batch-1');
     expect(decision).not.toHaveProperty('schedule');
-    expect(screen.queryByRole('heading', { name: '2　方案对比' })).toBeNull();
+    expect(document.getElementById('fault-compare-summary')?.textContent).toMatch(
+      /生成候选后|无可执行候选/,
+    );
+    expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
   });
 
   it('invalidates visible candidates immediately on unsaved event edits', async () => {
@@ -1058,6 +1206,7 @@ describe('Schedule Copilot workflow', () => {
     await openFaultEditor();
     fireEvent.change(screen.getByLabelText('恢复时间'), { target: { value: '18:00' } });
     expect(screen.queryByRole('heading', { name: '2　方案对比' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
     expect(
       (
         screen.getByRole('button', {
@@ -1208,4 +1357,26 @@ describe('Schedule Copilot workflow', () => {
     expect(decisions).toHaveLength(2);
     expect(decisions[0].body!.request_id).toBe(decisions[1].body!.request_id);
   });
+});
+
+it('requires confirmation before permanently deleting a fault', async () => {
+  const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  try {
+    render(<App />);
+    await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+    fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    await screen.findByRole('heading', { name: '排产计划工作台' });
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    expect(confirmation).toHaveBeenCalledWith(expect.stringContaining('永久删除'));
+    expect(calls.some((call) => call.path === '/api/event/cancel')).toBe(false);
+    confirmation.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    await waitFor(() => expect(calls.some((call) => call.path === '/api/event/cancel')).toBe(true));
+    expect(calls.find((call) => call.path === '/api/event/cancel')?.body).toEqual({
+      event_revision: workbench.event_revision,
+      baseline_fingerprint: workbench.baseline.fingerprint,
+    });
+  } finally {
+    confirmation.mockRestore();
+  }
 });

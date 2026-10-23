@@ -39,6 +39,12 @@ export interface Decision {
   created_at: string;
 }
 export interface PlanPublication {
+  fault_traces?: {
+    version: number;
+    event_revision: number;
+    failure: Failure;
+    affected_operations: Operation[];
+  }[];
   history?: {
     version: number;
     published_at: string | null;
@@ -51,6 +57,13 @@ export interface PlanPublication {
   published_by: string | null;
   version_summary: string;
   fault_analysis?: {
+    report?: ContributionReport;
+    decisions?: {
+      status: string;
+      reason: string;
+      review_reason: string;
+      reviewed_at: string | null;
+    };
     event_revision: number;
     baseline_version: number;
     affected: string[] | null;
@@ -61,7 +74,8 @@ export interface PlanPublication {
 }
 export interface Workbench {
   fault_review?: FaultReview | null;
-  event_history?: (Failure & { revision: number; created_at: string })[];
+  event_cancelled?: boolean;
+  event_history?: (Failure & { revision: number; created_at: string; cancelled?: boolean })[];
   plan_publication?: PlanPublication;
   baseline: Schedule;
   event: Failure;
@@ -216,6 +230,9 @@ export interface QualityIssue {
   repairable: boolean;
 }
 export interface QualityReport {
+  score?: number | null;
+  score_version?: 'rules-v1' | null;
+  score_reasons?: string[];
   version: string;
   outcome: 'passed' | 'warning' | 'blocked' | 'failed';
   round: number;
@@ -258,6 +275,7 @@ export interface WorkflowReport {
   } | null;
 }
 export interface WorkflowResult {
+  contribution_report?: ContributionReport;
   trace_id?: string;
   created_at?: string;
   demo?: DemoFallbackStatus;
@@ -293,6 +311,45 @@ export interface WorkflowResult {
     Record<'validation' | 'scheduling' | 'evaluation' | 'explanation', WorkflowReport>
   >;
   evidence_catalog: Record<string, { kind: string; content: unknown }>;
+}
+
+export interface ManualEdit {
+  operation_id: string;
+  order_id: string;
+  before: { machine_id: string; start: string; end: string };
+  after: { machine_id: string; start: string; end: string };
+  operator: string;
+  at: string;
+  reason: string;
+}
+export interface ContributionReport {
+  title?: string;
+  revision?: number;
+  rules_work?: string;
+  model_work?: string;
+  manual_summary: string;
+  edits?: ManualEdit[];
+  risks?: string[];
+  decision: string;
+  comparison?: string;
+  order_impacts?: OrderImpact[];
+  model?: { mode: 'live' | 'fallback'; error_code: string | null; highlights: WorkflowStatement[] };
+}
+export interface ManualFaultDraft {
+  source_simulation_id: string | null;
+  source_candidate_id: string | null;
+  id: string;
+  revision: number;
+  status: 'editing' | 'ready_for_review';
+  workflow_id: string;
+  event_revision: number;
+  baseline_fingerprint: string;
+  schedule: Schedule;
+  origin: Schedule;
+  edits: ManualEdit[];
+  issues: string[];
+  report: ContributionReport | null;
+  simulation: Simulation | null;
 }
 export interface WorkflowResponse {
   workflow: WorkflowResult;
@@ -490,4 +547,13 @@ export interface InsertionAssessment {
   };
   assumptions: string[];
   baseline_resource_issues: string[];
+}
+
+export interface CopilotAnswer {
+  workflow_id: string;
+  question: string;
+  answer: string;
+  mode: 'live' | 'fallback';
+  execution: { calls: number; error_code: string | null };
+  knowledge: { status: string; message: string; sources: KnowledgeReport['sources'] };
 }

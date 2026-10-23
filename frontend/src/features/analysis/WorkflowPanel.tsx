@@ -1,3 +1,4 @@
+import { DetailSurface } from '../../shared/ui/DetailSurface';
 import { TraceTree, TraceBadge } from '../../shared/ui/TraceTree';
 import { useId, useRef } from 'react';
 import { useBusinessText } from '../../shared/lib/BusinessLabelProvider';
@@ -22,6 +23,7 @@ interface Props {
   onRun: (intent: WorkflowIntent) => void;
   expanded?: boolean;
   readOnly?: boolean;
+  view?: 'full' | 'chain' | 'execution';
 }
 
 const stages = [
@@ -115,7 +117,9 @@ export function WorkflowPanel({
   onRun,
   expanded = false,
   readOnly = false,
+  view = 'full',
 }: Props) {
+  const ExecutionSurface = view === 'execution' ? 'div' : 'details';
   const format = useBusinessText();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const detailRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -147,6 +151,16 @@ export function WorkflowPanel({
       : stages.map((stage) => stage.action));
   const visibleStages = stages.filter((stage) => planned.includes(stage.action));
   function showDetails(name: string) {
+    if (view === 'chain') {
+      const panel = document.getElementById('fault-execution-panel') as HTMLDetailsElement | null;
+      if (panel) panel.open = true;
+      requestAnimationFrame(() => {
+        const target = document.getElementById(`fault-execution-${name}`);
+        target?.focus({ preventScroll: true });
+        target?.scrollIntoView?.({ block: 'nearest' });
+      });
+      return;
+    }
     if (detailsRef.current) detailsRef.current.open = true;
     const target = detailRefs.current[name];
     target?.focus({ preventScroll: true });
@@ -165,369 +179,407 @@ export function WorkflowPanel({
   );
   return (
     <section className="workflow-progress" aria-label="四个智能环节执行状态" aria-busy={running}>
-      <div className="workflow-caption">
-        <div className="workflow-title">
-          <h3 id="section-workflow">本次智能分析链路</h3>
-          <TraceBadge traceId={result?.trace_id} />
-        </div>
-        <span role="status">
-          {running ? (
-            <WaitingResult />
-          ) : progress?.cancelled ? (
-            '工作流：已取消'
-          ) : progress?.interrupted ? (
-            '执行进度已中断'
-          ) : result ? (
-            `工作流：${labels[result.status]}`
-          ) : (
-            '生成候选方案后，按以下流程执行'
-          )}
-        </span>
-      </div>
-      <ol
-        className="workflow-stages"
-        aria-label="智能环节执行顺序"
-        style={{ '--stage-count': visibleStages.length } as React.CSSProperties}
-      >
-        {visibleStages.map((stage, index) => {
-          const report = result?.results[stage.name];
-          const execution = result?.trace.find((step) => step.action === stage.action);
-          const assessed = assessment && stage.name === 'scheduling';
-          const status = assessed
-            ? 'warning'
-            : (execution?.status ??
-              (partial ? undefined : report?.status) ??
-              (running && progress?.active === stage.action ? 'running' : 'pending'));
-          const wasSkipped =
-            running &&
-            !!progress?.active &&
-            planned.indexOf(stage.action) < planned.indexOf(progress.active) &&
-            !execution;
-          const isStopped = progress?.interrupted && status === 'pending';
-          const pendingText = isStopped
-            ? progress?.cancelled
-              ? '已取消（未完成）'
-              : '状态未确认'
-            : wasSkipped || (result && !running)
-              ? '未执行（前序阻断或失败）'
-              : index === 0
-                ? '等待后台开始'
-                : '等待前序环节';
-          return (
-            <li
-              key={stage.name}
-              data-status={wasSkipped ? 'skipped' : status}
-              aria-current={status === 'running' ? 'step' : undefined}
-            >
-              <span className="workflow-node-title">
-                <span className="workflow-node-marker" aria-hidden="true">
-                  {['success', 'warning'].includes(status)
-                    ? '✓'
-                    : status === 'blocked' || status === 'failed'
-                      ? '!'
-                      : index + 1}
-                </span>
-                {stage.label}
-              </span>
-              <small>
-                {status === 'running'
-                  ? progress?.quality?.action === stage.action
-                    ? `${phaseLabels[progress.quality.phase]} · 第 ${progress.quality.round}/3 轮`
-                    : '执行中'
-                  : status !== 'pending'
-                    ? assessed
-                      ? '条件检查完成，未生成方案'
-                      : labels[status]
-                    : intent
-                      ? pendingText
-                      : '待执行'}
-              </small>
-              {execution && (
-                <p className="workflow-node-summary">{stageSummary(stage.name, report)}</p>
+      {view !== 'execution' && (
+        <>
+          <div className="workflow-caption">
+            <div className="workflow-title">
+              <h3 id="section-workflow">本次智能分析链路</h3>
+              <TraceBadge traceId={result?.trace_id} />
+            </div>
+            <span role="status">
+              {running ? (
+                <WaitingResult />
+              ) : progress?.cancelled ? (
+                '工作流：已取消'
+              ) : progress?.interrupted ? (
+                '执行进度已中断'
+              ) : result ? (
+                `工作流：${labels[result.status]}`
+              ) : (
+                '生成候选方案后，按以下流程执行'
               )}
-              {report?.quality && (
-                <small>
-                  {assessed ? '检查结论已纳入评估' : `质量${qualityLabels[report.quality.outcome]}`}{' '}
-                  · {report.quality.round} 轮
-                </small>
-              )}
-              {execution?.execution && (
-                <small>
-                  {execution.execution.simulated
-                    ? '模拟失败 · 规则接管'
-                    : execution.execution.mode === 'live'
-                      ? '模型辅助'
-                      : '规则回退'}
-                </small>
-              )}
-              {execution && (
-                <button
-                  className="workflow-node-link"
-                  onClick={() => showDetails(stage.name)}
-                  aria-controls={`${detailId}-${stage.name}`}
-                  aria-label={`查看${stage.label}详情`}
-                >
-                  查看详情 →
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ol>
-      {running && (
-        <p className="hint" role="status">
-          已完成 {completed.length}/{visibleStages.length} 个环节；
-          {progress?.active
-            ? `正在执行${stages.find((stage) => stage.action === progress.active)?.label}。`
-            : '等待后台更新进度。'}
-          已完成的节点可查看详情，整条链路结束后展示可用方案。
-        </p>
-      )}
-      {progress?.cancelled && (
-        <p className="hint">本次执行已取消。已完成环节的记录保留，未完成的结果不作为候选方案。</p>
-      )}
-      {progress?.interrupted && !progress.cancelled && (
-        <p className="message warning">
-          进度连接或请求已中断。已收到的节点结果保留，其余状态未确认；请检查后台后重新生成方案。
-        </p>
-      )}
-      {result && !running && (
-        <p className="hint">
-          本次已完成 {completed.length}/{executions.length} 个智能环节
-          {completed.length > 0 && `：${completed.map((stage) => stage.label).join('、')}`}。
-          {!assessment &&
-            executions.some(({ step }) => step.status === 'blocked') &&
-            '阻断环节已标注，后续依赖环节未执行。'}
-        </p>
-      )}
-      {!!fallback.length && !running && (
-        <div className="message warning" aria-label="模型辅助执行情况">
-          <p>
-            模型辅助已完成 {modelCompleted.length}/{modelCount} 个智能环节
-            {modelCompleted.length > 0 &&
-              `：${modelCompleted.map((stage) => stage.label).join('、')}`}
-            。
-          </p>
-          <ul>
-            {fallback.map(({ name, label, step }) => (
-              <li key={name}>
-                <strong>
-                  {label}：{step.execution?.simulated ? '兜底演示（模拟）' : '模型辅助未完成'}
-                </strong>
-                （{modelErrors[step.execution?.error_code ?? ''] ?? '模型辅助执行异常'}）；
-                {!step.execution?.simulated &&
-                  step.execution?.failure_phase &&
-                  `未完成步骤：${modelPhases[step.execution.failure_phase] ?? '模型辅助'}；`}
-                {step.status === 'failed'
-                  ? '该环节执行失败，未得到可用结果。'
-                  : assessment && name === 'scheduling'
-                    ? '生产条件检查完成，未生成可用方案，具体结论已纳入本次评估。'
-                    : step.status === 'blocked'
-                      ? '规则检查已阻断后续执行，请先处理阻断项。'
-                      : `${ruleResults[name]}，本环节使用规则结果。`}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {result?.failure_code && (
-        <p className="message error">
-          本次流程未完成，已返回的各环节结果保留。请查看下方原因与处理建议。
-        </p>
-      )}
-      {result &&
-        stages.map((stage) => {
-          const report = result.results[stage.name];
-          if (assessment && stage.name === 'scheduling') return null;
-          if (!report || !['blocked', 'failed'].includes(report.status)) return null;
-          return (
-            <section key={stage.name} aria-label={`${stage.label}未完成原因`}>
-              <h3>
-                {stage.label}：
-                {report.status === 'blocked' ? '当前条件下未取得可用结果' : '系统执行失败'}
-              </h3>
-              <WorkflowNotices result={result} notices={report.errors} />
-              {!report.errors.length && <p>本环节未返回具体原因，请联系维护人员查看执行记录。</p>}
-              <p className="hint">本环节未提供可供后续使用的结果；其他环节以各自执行记录为准。</p>
-            </section>
-          );
-        })}
-      {assessment && (
-        <section aria-label="本次评估结论">
-          <h3>评估结论</h3>
-          <p>{assessment.summary}</p>
-          <ul>
-            {assessment.findings.map((item, i) => (
-              <li key={i}>{format(item.text)}</li>
-            ))}
-          </ul>
-          <ul>
-            {assessment.recommendations.map((text) => (
-              <li key={text}>{format(text)}</li>
-            ))}
-          </ul>
-          {assessment.limitations.map((text) => (
-            <p className="hint" key={text}>
-              {text}
-            </p>
-          ))}
-        </section>
-      )}
-      <details
-        className="workflow-details decision-accordion"
-        ref={detailsRef}
-        open={expanded || undefined}
-      >
-        <summary>
-          <h3 id="section-execution">执行详情</h3>
-        </summary>
-        <TraceTree
-          steps={(result?.trace ?? []).map((step) => ({
-            ...step,
-            label: stages.find((stage) => stage.action === step.action)?.label ?? '流程路由',
-          }))}
-        />
-        <p className="hint">查看各环节的问题与处理建议。辅助操作使用已保存的数据。</p>
-        {!readOnly && <p className="hint">重新校验会清除本次候选；生成方案时会自动校验。</p>}
-        {!readOnly && (
-          <div className="inline-actions">
-            <WriteButton disabled={disabled} onClick={() => onRun('validate')}>
-              仅校验数据
-            </WriteButton>
-            <WriteButton
-              disabled={disabled || !result?.results.scheduling?.data}
-              onClick={() => onRun('re_evaluate')}
-            >
-              重新评估已有方案
-            </WriteButton>
+            </span>
           </div>
-        )}
-        {result && (
-          <div className="workflow-detail-list">
-            {stages.map((stage) => {
-              const report = result.results[stage.name];
-              const execution = result.trace.find(
-                (step) => step.action === stage.action,
-              )?.execution;
-              const step = result.trace.find((item) => item.action === stage.action);
-              if (!report && !step) return null;
+          <ol
+            className="workflow-stages"
+            aria-label="智能环节执行顺序"
+            style={{ '--stage-count': visibleStages.length } as React.CSSProperties}
+          >
+            {visibleStages.map((stage, index) => {
+              const report = result?.results[stage.name];
+              const execution = result?.trace.find((step) => step.action === stage.action);
+              const assessed = assessment && stage.name === 'scheduling';
+              const status = assessed
+                ? 'warning'
+                : (execution?.status ??
+                  (partial ? undefined : report?.status) ??
+                  (running && progress?.active === stage.action ? 'running' : 'pending'));
+              const wasSkipped =
+                running &&
+                !!progress?.active &&
+                planned.indexOf(stage.action) < planned.indexOf(progress.active) &&
+                !execution;
+              const isStopped = progress?.interrupted && status === 'pending';
+              const pendingText = isStopped
+                ? progress?.cancelled
+                  ? '已取消（未完成）'
+                  : '状态未确认'
+                : wasSkipped || (result && !running)
+                  ? '未执行（前序阻断或失败）'
+                  : index === 0
+                    ? '等待后台开始'
+                    : '等待前序环节';
               return (
-                <article
+                <li
                   key={stage.name}
-                  id={`${detailId}-${stage.name}`}
-                  tabIndex={-1}
-                  ref={(element) => {
-                    detailRefs.current[stage.name] = element;
-                  }}
+                  data-status={wasSkipped ? 'skipped' : status}
+                  aria-current={status === 'running' ? 'step' : undefined}
                 >
-                  <header className="workflow-agent-heading">
-                    <h4>{stage.label}</h4>
-                    <span
-                      className="workflow-agent-status"
-                      data-status={step?.status ?? report?.status ?? 'failed'}
-                    >
-                      {assessment && stage.name === 'scheduling'
-                        ? '未生成方案，已纳入评估'
-                        : labels[step?.status ?? report?.status ?? 'failed']}
+                  <span className="workflow-node-title">
+                    <span className="workflow-node-marker" aria-hidden="true">
+                      {['success', 'warning'].includes(status)
+                        ? '✓'
+                        : status === 'blocked' || status === 'failed'
+                          ? '!'
+                          : index + 1}
                     </span>
-                  </header>
-                  <p>{stageSummary(stage.name, report)}</p>
+                    {stage.label}
+                  </span>
+                  <small>
+                    {status === 'running'
+                      ? progress?.quality?.action === stage.action
+                        ? `${phaseLabels[progress.quality.phase]} · 第 ${progress.quality.round}/3 轮`
+                        : '执行中'
+                      : status !== 'pending'
+                        ? assessed
+                          ? '条件检查完成，未生成方案'
+                          : labels[status]
+                        : intent
+                          ? pendingText
+                          : '待执行'}
+                  </small>
+                  {execution && (
+                    <p className="workflow-node-summary">{stageSummary(stage.name, report)}</p>
+                  )}
                   {report?.quality && (
-                    <section className="workflow-agent-notices">
-                      <h5>输出质量检查</h5>
-                      <p>
-                        <strong>{qualityLabels[report.quality.outcome]}</strong> · 共{' '}
-                        {report.quality.round} 轮
-                      </p>
-                      <ol>
-                        {report.quality.history.map((item) => (
-                          <li key={item.round}>
-                            第 {item.round} 轮：{item.repair && `${format(item.repair)}；`}
-                            {item.issues.length
-                              ? item.issues.map((issue) => format(issue.message)).join('；')
-                              : '检查通过'}
-                          </li>
-                        ))}
-                      </ol>
-                      {report.quality.stop_reason && (
-                        <p className="hint">停止原因：{format(report.quality.stop_reason)}</p>
-                      )}
-                    </section>
+                    <small>
+                      {assessed
+                        ? '检查结论已纳入评估'
+                        : `质量${qualityLabels[report.quality.outcome]}`}{' '}
+                      · {report.quality.round} 轮
+                    </small>
                   )}
-                  {!report && (
-                    <p className="hint">
-                      {step?.error_code
-                        ? `执行异常：${executionCodes[step.error_code] ?? '工作流执行异常'}。`
-                        : '该环节未返回详细报告。'}
-                    </p>
+                  {execution?.execution && (
+                    <small>
+                      {execution.execution.simulated
+                        ? '模拟失败 · 规则接管'
+                        : execution.execution.mode === 'live'
+                          ? '模型辅助'
+                          : '规则回退'}
+                    </small>
                   )}
-                  {!!(report?.errors.length || report?.warnings.length) && (
-                    <section className="workflow-agent-notices">
-                      <h5>问题与建议</h5>
-                      <WorkflowNotices
-                        result={result}
-                        notices={[...(report?.errors ?? []), ...(report?.warnings ?? [])]}
-                      />
-                    </section>
+                  {execution && (
+                    <button
+                      className="workflow-node-link"
+                      onClick={() => showDetails(stage.name)}
+                      aria-controls={
+                        view === 'chain'
+                          ? `fault-execution-${stage.name}`
+                          : `${detailId}-${stage.name}`
+                      }
+                      aria-label={`查看${stage.label}详情`}
+                    >
+                      查看详情 →
+                    </button>
                   )}
-                  {execution?.mode === 'live' && (
-                    <WorkflowStatements
-                      result={result}
-                      title="模型分析重点"
-                      headingLevel={5}
-                      items={execution.highlights}
-                    />
-                  )}
-                  {!!execution?.corrections?.length && (
-                    <p className="hint">
-                      模型调用修正记录：
-                      {execution.corrections
-                        .map(
-                          (item) =>
-                            `${modelPhases[item.phase] ?? '模型辅助步骤'}（${correctionReasons[item.reason] ?? '校验未通过'}）`,
-                        )
-                        .join('；')}
-                      。
-                    </p>
-                  )}
-                </article>
+                </li>
               );
             })}
-            <details open={expanded || undefined}>
-              <summary>
-                <h4>调用记录</h4>
-              </summary>
-              <ol>
-                {result.trace.map((step, i) => (
-                  <li key={i}>
-                    {stages.find((stage) => stage.action === step.action)?.label ?? step.action}：
-                    {labels[step.status] ?? '状态待确认'}
-                    {step.error_code && ` · ${executionCodes[step.error_code] ?? '执行异常'}`}
-                    {step.execution && (
-                      <span>
-                        {' · '}
-                        {step.execution.simulated
-                          ? '兜底演示（模拟）'
-                          : step.execution.mode === 'live'
-                            ? '模型辅助'
-                            : '规则回退'}
-                        {step.execution.model && ` · ${step.execution.model}`}
-                        {` · ${step.execution.calls} 次请求 · ${(step.execution.elapsed_ms / 1000).toFixed(1)} 秒`}
-                        {` · 已返回输入/输出 Token：${step.execution.input_tokens ?? '未提供'}/${step.execution.output_tokens ?? '未提供'}`}
-                        {step.execution.error_code &&
-                          ` · ${executionCodes[step.execution.error_code] ?? '执行异常'}`}
-                        {step.execution.failure_reason &&
-                          ` · ${correctionReasons[step.execution.failure_reason] ?? '校验未通过'}`}
-                      </span>
-                    )}
+          </ol>
+          {running && (
+            <p className="hint" role="status">
+              已完成 {completed.length}/{visibleStages.length} 个环节；
+              {progress?.active
+                ? `正在执行${stages.find((stage) => stage.action === progress.active)?.label}。`
+                : '等待后台更新进度。'}
+              已完成的节点可查看详情，整条链路结束后展示可用方案。
+            </p>
+          )}
+          {progress?.cancelled && (
+            <p className="hint">
+              本次执行已取消。已完成环节的记录保留，未完成的结果不作为候选方案。
+            </p>
+          )}
+          {progress?.interrupted && !progress.cancelled && (
+            <p className="message warning">
+              进度连接或请求已中断。已收到的节点结果保留，其余状态未确认；请检查后台后重新生成方案。
+            </p>
+          )}
+          {result && !running && (
+            <p className="hint">
+              本次已完成 {completed.length}/{executions.length} 个智能环节
+              {completed.length > 0 && `：${completed.map((stage) => stage.label).join('、')}`}。
+              {!assessment &&
+                executions.some(({ step }) => step.status === 'blocked') &&
+                '阻断环节已标注，后续依赖环节未执行。'}
+            </p>
+          )}
+          {!!fallback.length && !running && (
+            <div className="message warning" aria-label="模型辅助执行情况">
+              <p>
+                模型辅助已完成 {modelCompleted.length}/{modelCount} 个智能环节
+                {modelCompleted.length > 0 &&
+                  `：${modelCompleted.map((stage) => stage.label).join('、')}`}
+                。
+              </p>
+              <ul>
+                {fallback.map(({ name, label, step }) => (
+                  <li key={name}>
+                    <strong>
+                      {label}：{step.execution?.simulated ? '兜底演示（模拟）' : '模型辅助未完成'}
+                    </strong>
+                    （{modelErrors[step.execution?.error_code ?? ''] ?? '模型辅助执行异常'}）；
+                    {!step.execution?.simulated &&
+                      step.execution?.failure_phase &&
+                      `未完成步骤：${modelPhases[step.execution.failure_phase] ?? '模型辅助'}；`}
+                    {step.status === 'failed'
+                      ? '该环节执行失败，未得到可用结果。'
+                      : assessment && name === 'scheduling'
+                        ? '生产条件检查完成，未生成可用方案，具体结论已纳入本次评估。'
+                        : step.status === 'blocked'
+                          ? '规则检查已阻断后续执行，请先处理阻断项。'
+                          : `${ruleResults[name]}，本环节使用规则结果。`}
                   </li>
                 ))}
-              </ol>
-            </details>
-            <WorkflowDebugDetails data={result} headingLevel={4} />
-          </div>
-        )}
-      </details>
+              </ul>
+            </div>
+          )}
+          {result?.failure_code && (
+            <p className="message error">
+              本次流程未完成，已返回的各环节结果保留。请查看下方原因与处理建议。
+            </p>
+          )}
+          {result &&
+            stages.map((stage) => {
+              const report = result.results[stage.name];
+              if (assessment && stage.name === 'scheduling') return null;
+              if (!report || !['blocked', 'failed'].includes(report.status)) return null;
+              return (
+                <section key={stage.name} aria-label={`${stage.label}未完成原因`}>
+                  <h3>
+                    {stage.label}：
+                    {report.status === 'blocked'
+                      ? '当前条件下未取得可用结果'
+                      : stage.name === 'validation' && report.data
+                        ? '数据校验失败'
+                        : '系统执行失败'}
+                  </h3>
+                  <WorkflowNotices result={result} notices={report.errors} />
+                  {!report.errors.length && (
+                    <p>本环节未返回具体原因，请联系维护人员查看执行记录。</p>
+                  )}
+                  <p className="hint">
+                    本环节未提供可供后续使用的结果；其他环节以各自执行记录为准。
+                  </p>
+                </section>
+              );
+            })}
+          {assessment && (
+            <section aria-label="本次评估结论">
+              <h3>评估结论</h3>
+              <p>{assessment.summary}</p>
+              <ul>
+                {assessment.findings.map((item, i) => (
+                  <li key={i}>{format(item.text)}</li>
+                ))}
+              </ul>
+              <ul>
+                {assessment.recommendations.map((text) => (
+                  <li key={text}>{format(text)}</li>
+                ))}
+              </ul>
+              {assessment.limitations.map((text) => (
+                <p className="hint" key={text}>
+                  {text}
+                </p>
+              ))}
+            </section>
+          )}
+        </>
+      )}
+      {view !== 'chain' && (
+        <ExecutionSurface
+          className="workflow-details decision-accordion"
+          ref={(element: HTMLElement | null) => {
+            detailsRef.current = element instanceof HTMLDetailsElement ? element : null;
+          }}
+          open={view === 'execution' || expanded || undefined}
+        >
+          {view !== 'execution' && (
+            <summary>
+              <h3 id="section-execution">执行详情</h3>
+            </summary>
+          )}
+          <TraceTree
+            steps={(result?.trace ?? []).map((step) => ({
+              ...step,
+              label: stages.find((stage) => stage.action === step.action)?.label ?? '流程路由',
+            }))}
+          />
+          <p className="hint">查看各环节的问题与处理建议。辅助操作使用已保存的数据。</p>
+          {!readOnly && <p className="hint">重新校验会清除本次候选；生成方案时会自动校验。</p>}
+          {!readOnly && (
+            <div className="inline-actions">
+              <WriteButton disabled={disabled} onClick={() => onRun('validate')}>
+                仅校验数据
+              </WriteButton>
+              <WriteButton
+                disabled={disabled || !result?.results.scheduling?.data}
+                onClick={() => onRun('re_evaluate')}
+              >
+                重新评估已有方案
+              </WriteButton>
+            </div>
+          )}
+          {result && (
+            <div className="workflow-detail-list">
+              {stages.map((stage) => {
+                const report = result.results[stage.name];
+                const execution = result.trace.find(
+                  (step) => step.action === stage.action,
+                )?.execution;
+                const step = result.trace.find((item) => item.action === stage.action);
+                if (!report && !step) return null;
+                return (
+                  <article
+                    key={stage.name}
+                    id={
+                      view === 'execution'
+                        ? `fault-execution-${stage.name}`
+                        : `${detailId}-${stage.name}`
+                    }
+                    tabIndex={-1}
+                    ref={(element) => {
+                      detailRefs.current[stage.name] = element;
+                    }}
+                  >
+                    <header className="workflow-agent-heading">
+                      <h4>{stage.label}</h4>
+                      <span
+                        className="workflow-agent-status"
+                        data-status={step?.status ?? report?.status ?? 'failed'}
+                      >
+                        {assessment && stage.name === 'scheduling'
+                          ? '未生成方案，已纳入评估'
+                          : labels[step?.status ?? report?.status ?? 'failed']}
+                      </span>
+                    </header>
+                    <p>{stageSummary(stage.name, report)}</p>
+                    {report?.quality && (
+                      <section className="workflow-agent-notices">
+                        <h5>输出质量检查</h5>
+                        <p>
+                          Agent 得分：
+                          {report.quality.score == null
+                            ? '未评分（历史记录）'
+                            : `${report.quality.score.toFixed(2)}%`}
+                        </p>
+                        {report.quality.score_reasons?.map((reason) => (
+                          <p className="hint" key={reason}>
+                            {reason}
+                          </p>
+                        ))}
+                        <p>
+                          <strong>{qualityLabels[report.quality.outcome]}</strong> · 共{' '}
+                          {report.quality.round} 轮
+                        </p>
+                        <ol>
+                          {report.quality.history.map((item) => (
+                            <li key={item.round}>
+                              第 {item.round} 轮：{item.repair && `${format(item.repair)}；`}
+                              {item.issues.length
+                                ? item.issues.map((issue) => format(issue.message)).join('；')
+                                : '检查通过'}
+                            </li>
+                          ))}
+                        </ol>
+                        {report.quality.stop_reason && (
+                          <p className="hint">停止原因：{format(report.quality.stop_reason)}</p>
+                        )}
+                      </section>
+                    )}
+                    {!report && (
+                      <p className="hint">
+                        {step?.error_code
+                          ? `执行异常：${executionCodes[step.error_code] ?? '工作流执行异常'}。`
+                          : '该环节未返回详细报告。'}
+                      </p>
+                    )}
+                    {!!(report?.errors.length || report?.warnings.length) && (
+                      <section className="workflow-agent-notices">
+                        <h5>问题与建议</h5>
+                        <WorkflowNotices
+                          result={result}
+                          notices={[...(report?.errors ?? []), ...(report?.warnings ?? [])]}
+                        />
+                      </section>
+                    )}
+                    {execution?.mode === 'live' && (
+                      <WorkflowStatements
+                        result={result}
+                        title="模型分析重点"
+                        headingLevel={5}
+                        items={execution.highlights}
+                      />
+                    )}
+                    {!!execution?.corrections?.length && (
+                      <p className="hint">
+                        模型调用修正记录：
+                        {execution.corrections
+                          .map(
+                            (item) =>
+                              `${modelPhases[item.phase] ?? '模型辅助步骤'}（${correctionReasons[item.reason] ?? '校验未通过'}）`,
+                          )
+                          .join('；')}
+                        。
+                      </p>
+                    )}
+                  </article>
+                );
+              })}
+              <DetailSurface flat={view === 'execution'} title={<h4>调用记录</h4>}>
+                <ol>
+                  {result.trace.map((step, i) => (
+                    <li key={i}>
+                      {stages.find((stage) => stage.action === step.action)?.label ?? step.action}：
+                      {labels[step.status] ?? '状态待确认'}
+                      {step.error_code && ` · ${executionCodes[step.error_code] ?? '执行异常'}`}
+                      {step.execution && (
+                        <span>
+                          {' · '}
+                          {step.execution.simulated
+                            ? '兜底演示（模拟）'
+                            : step.execution.mode === 'live'
+                              ? '模型辅助'
+                              : '规则回退'}
+                          {step.execution.model && ` · ${step.execution.model}`}
+                          {` · ${step.execution.calls} 次请求 · ${(step.execution.elapsed_ms / 1000).toFixed(1)} 秒`}
+                          {` · 已返回输入/输出 Token：${step.execution.input_tokens ?? '未提供'}/${step.execution.output_tokens ?? '未提供'}`}
+                          {step.execution.error_code &&
+                            ` · ${executionCodes[step.execution.error_code] ?? '执行异常'}`}
+                          {step.execution.failure_reason &&
+                            ` · ${correctionReasons[step.execution.failure_reason] ?? '校验未通过'}`}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </DetailSurface>
+              <WorkflowDebugDetails data={result} headingLevel={4} flat={view === 'execution'} />
+            </div>
+          )}
+        </ExecutionSurface>
+      )}
     </section>
   );
 }

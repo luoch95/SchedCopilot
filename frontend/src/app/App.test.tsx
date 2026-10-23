@@ -56,7 +56,8 @@ describe('demo role navigation (URG-01)', () => {
     render(<App />);
     expect(screen.getByRole('heading', { name: '选择你的工作角色' })).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith('/api/visits', { method: 'GET', cache: 'no-store' });
     expect(screen.queryByRole('status')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: '解锁' })).toBeNull();

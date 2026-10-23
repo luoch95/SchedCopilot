@@ -4,6 +4,39 @@ import type { WorkflowResult, WorkflowProgress } from '../../shared/api/contract
 import { WorkflowPanel } from './WorkflowPanel';
 
 describe('workflow execution notices', () => {
+  it('shows the individual Agent score and its deductions in chain details', () => {
+    const result: WorkflowResult = {
+      id: 'quality',
+      intent: 'validate',
+      status: 'completed',
+      failure_code: null,
+      evidence_catalog: {},
+      trace: [{ action: 'validate', status: 'warning', result_ref: null, error_code: null }],
+      results: {
+        validation: {
+          status: 'warning',
+          data: null,
+          warnings: [],
+          errors: [],
+          quality: {
+            score: 98,
+            score_version: 'rules-v1',
+            score_reasons: ['存在轻微数据警告，扣 2 分。'],
+            version: 'AGD-V1.3-I1',
+            outcome: 'warning',
+            round: 1,
+            issues: [],
+            history: [],
+            stop_reason: null,
+          },
+        },
+      },
+    };
+    render(<WorkflowPanel running={false} disabled result={result} onRun={vi.fn()} />);
+    expect(screen.getByText('Agent 得分：98.00%')).toBeTruthy();
+    expect(screen.getByText('存在轻微数据警告，扣 2 分。')).toBeTruthy();
+    expect(screen.queryByText(/综合信任度/)).toBeNull();
+  });
   it('completes the chain with an actual no-candidate assessment instead of a workflow error', () => {
     const result: WorkflowResult = {
       id: 'assessment',

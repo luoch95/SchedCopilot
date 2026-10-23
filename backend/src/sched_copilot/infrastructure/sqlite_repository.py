@@ -18,7 +18,11 @@ from ..domain.models import (
 )
 from ..domain.scheduling import affected_operations, validate_schedule
 from . import fault_reviews
+from .event_deletion import delete_related
 from .fault_publication import fault_publication
+from .manual_faults import SCHEMA as MANUAL_SCHEMA
+from .manual_faults import ManualFaultStore
+from .manual_faults import gate as manual_gate
 from .plan_publication import (
     insertion_publication,
     plan_timeline,
@@ -58,7 +62,7 @@ def replace_database(source_path: Path, target_path: Path) -> None:
         target.close()
 
 
-class DecisionStore:
+class DecisionStore(ManualFaultStore):
     def __init__(self, path: str | Path, baseline: Schedule):
         self.path = str(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -66,6 +70,12 @@ class DecisionStore:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS current_plan (
                     id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS event_deletion_state (
+                    id INTEGER PRIMARY KEY CHECK(id=1)
+                );
+                CREATE TABLE IF NOT EXISTS empty_event (
+                    id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS current_event (
                     id INTEGER PRIMARY KEY CHECK(id=1), fingerprint TEXT NOT NULL,
@@ -82,6 +92,9 @@ class DecisionStore:
                     fingerprint TEXT NOT NULL, payload TEXT NOT NULL,
                     recorded_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS cancelled_events (
+                    revision INTEGER PRIMARY KEY, reason TEXT NOT NULL, cancelled_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS simulations (
                     id TEXT PRIMARY KEY, candidates TEXT NOT NULL, event TEXT NOT NULL
                 );
@@ -96,6 +109,7 @@ class DecisionStore:
                 );
             """)
             conn.executescript(fault_reviews.SCHEMA)
+            conn.executescript(MANUAL_SCHEMA)
             conn.execute(
                 "INSERT OR IGNORE INTO current_plan VALUES (1, ?)", (schedule_json(baseline),)
             )
@@ -243,17 +257,42 @@ class DecisionStore:
                 "SELECT created_at,result,evidence FROM decisions "
                 "WHERE action='publish' ORDER BY id DESC"
             ).fetchall()
+            fault_traces = []
+            for _created_at, payload, raw in reversed(rows):
+                published_version = raw_version(payload)
+                evidence = json.loads(raw)
+                if (
+                    published_version > version
+                    or "event" not in evidence
+                    or "candidate" not in evidence
+                ):
+                    continue
+                analysis = fault_publication(conn, evidence)
+                fault_traces.append(
+                    {
+                        "version": published_version,
+                        "event_revision": analysis["event_revision"],
+                        "failure": asdict(parse_event(json.dumps(evidence["event"]))),
+                        "affected_operations": [
+                            op
+                            for op in (analysis.get("baseline") or {}).get("operations", [])
+                            if op["id"] in (analysis.get("affected") or [])
+                        ],
+                    }
+                )
             for created_at, payload, raw in rows:
                 if raw_version(payload) == version:
                     evidence = json.loads(raw)
                     return {
                         **publication_info(version, created_at, evidence),
                         "history": timeline,
+                        "fault_traces": fault_traces,
                         "fault_analysis": fault_publication(conn, evidence),
                     }
         return {
             "version": version,
             "history": timeline,
+            "fault_traces": fault_traces,
             "published_at": None,
             "published_by": None,
             "version_summary": "初始演示计划" if version == 1 else "历史版本，未记录发布信息",
@@ -308,27 +347,117 @@ class DecisionStore:
     def event_history(self) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT revision,payload,recorded_at FROM event_history ORDER BY revision DESC"
+                "SELECT h.revision,h.payload,h.recorded_at,c.revision FROM event_history h "
+                "LEFT JOIN cancelled_events c ON c.revision=h.revision ORDER BY h.revision DESC"
             ).fetchall()
         return [
-            {**json.loads(payload), "revision": revision, "created_at": created_at}
-            for revision, payload, created_at in rows
+            {
+                **json.loads(payload),
+                "revision": revision,
+                "created_at": created_at,
+                "cancelled": cancelled is not None,
+            }
+            for revision, payload, created_at, cancelled in rows
         ]
+
+    def event_cancelled(self, revision: int) -> bool:
+        with self._connect() as conn:
+            return (
+                conn.execute(
+                    "SELECT 1 FROM cancelled_events WHERE revision=? "
+                    "UNION ALL SELECT 1 FROM empty_event WHERE revision=?",
+                    (revision, revision),
+                ).fetchone()
+                is not None
+            )
+
+    def cancel_event(self, expected_revision: int, fingerprint: str, target_revision=None) -> None:
+        """Physically delete every revision of one outage and its dependent artifacts."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            latest = conn.execute(
+                "SELECT revision FROM event_history ORDER BY revision DESC LIMIT 1"
+            ).fetchone()
+            empty = conn.execute("SELECT revision FROM empty_event WHERE id=1").fetchone()
+            revision = empty[0] if empty else (latest[0] if latest else 0)
+            baseline = parse_schedule(
+                conn.execute("SELECT payload FROM current_plan WHERE id=1").fetchone()[0]
+            )
+            if revision != expected_revision or baseline.fingerprint != fingerprint:
+                raise RuleViolation("事件或计划已更新，请刷新后再撤销")
+            target = target_revision if target_revision is not None else revision
+            row = conn.execute(
+                "SELECT payload FROM event_history WHERE revision=?", (target,)
+            ).fetchone()
+            if not row:
+                raise RuleViolation("故障已删除，请刷新后查看")
+            event = parse_event(row[0])
+            family = (event.machine_id, event.started_at)
+            revisions = {
+                rev
+                for rev, raw in conn.execute("SELECT revision,payload FROM event_history")
+                if (parse_event(raw).machine_id, parse_event(raw).started_at) == family
+            }
+            delete_related(conn, revisions, family)
+            conn.execute("INSERT OR IGNORE INTO event_deletion_state VALUES (1)")
+            # Advance the technical revision even when deleting an older blocking window.
+            # SQLite's sequence survives deletion; the empty marker stores no fault data.
+            remaining = conn.execute(
+                "SELECT fingerprint,payload FROM event_history WHERE revision NOT IN "
+                "(SELECT revision FROM cancelled_events) ORDER BY revision DESC LIMIT 1"
+            ).fetchone()
+            conn.execute("DELETE FROM current_event")
+            conn.execute("DELETE FROM empty_event")
+            if remaining:
+                conn.execute("INSERT INTO current_event VALUES (1,?,?)", remaining)
+                conn.execute(
+                    "INSERT INTO event_history VALUES (NULL,?,?,?)",
+                    (*remaining, datetime.now(timezone.utc).isoformat()),
+                )
+            else:
+                sequence = (
+                    conn.execute(
+                        "SELECT seq FROM sqlite_sequence WHERE name='event_history'"
+                    ).fetchone()[0]
+                    + 1
+                )
+                conn.execute(
+                    "UPDATE sqlite_sequence SET seq=? WHERE name='event_history'", (sequence,)
+                )
+                conn.execute("INSERT INTO empty_event VALUES (1,?)", (sequence,))
+
+    def has_deleted_events(self) -> bool:
+        with self._connect() as conn:
+            return conn.execute("SELECT 1 FROM event_deletion_state").fetchone() is not None
+
+    @staticmethod
+    def _empty_snapshot(baseline, revision):
+        # Compatibility DTO only: never persisted or accepted for analysis.
+        start = min(
+            (op.start for op in baseline.operations),
+            default=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        )
+        return MachineFailure("", start, None, "待录入故障", start), revision
 
     def active_event(self) -> tuple[MachineFailure, int] | None:
         with self._connect() as conn:
+            empty = conn.execute("SELECT revision FROM empty_event WHERE id=1").fetchone()
+            if empty:
+                return self._empty_snapshot(self.current(), empty[0])
             row = conn.execute(
                 "SELECT payload, revision FROM event_history ORDER BY revision DESC LIMIT 1"
             ).fetchone()
-        if not row:
-            return None
-        return parse_event(row[0]), row[1]
+        return (parse_event(row[0]), row[1]) if row else None
 
     def failure_windows(self) -> tuple[MachineFailure, ...]:
         """Keep independent outages; a revision of the same start replaces its older value."""
         windows = {}
         for item in self.event_history():
-            payload = {k: v for k, v in item.items() if k not in {"revision", "created_at"}}
+            if item["cancelled"]:
+                continue
+            payload = {
+                k: v for k, v in item.items() if k not in {"revision", "created_at", "cancelled"}
+            }
             event = parse_event(json.dumps(payload))
             windows.setdefault((event.machine_id, event.started_at), event)
         values = tuple(windows.values())
@@ -346,6 +475,10 @@ class DecisionStore:
             row = conn.execute(
                 "SELECT payload, revision FROM event_history ORDER BY revision DESC LIMIT 1"
             ).fetchone()
+            empty = conn.execute("SELECT revision FROM empty_event WHERE id=1").fetchone()
+        if empty:
+            event, revision = self._empty_snapshot(baseline, empty[0])
+            return baseline, event, revision
         if row is None:
             raise RuleViolation("尚未保存故障事件")
         return baseline, parse_event(row[0]), row[1]
@@ -384,15 +517,17 @@ class DecisionStore:
                 conn.execute("SELECT payload FROM current_plan WHERE id=1").fetchone()[0]
             )
             history = conn.execute(
-                "SELECT revision, payload FROM event_history ORDER BY revision DESC"
+                "SELECT revision, payload FROM event_history WHERE revision NOT IN "
+                "(SELECT revision FROM cancelled_events) ORDER BY revision DESC"
             ).fetchall()
-            revision = history[0][0] if history else 0
+            revision = conn.execute("SELECT MAX(revision) FROM event_history").fetchone()[0] or 0
             if expected_revision is not None and expected_revision != revision:
                 raise RuleViolation("事件已在其他页面更新，请重新载入后恢复")
             event = choose_event(baseline, tuple(parse_event(row[1]) for row in history))
             if history and digest(event) == digest(parse_event(history[0][1])):
                 return revision
             payload = json.dumps(asdict(event), default=str, ensure_ascii=False)
+            conn.execute("DELETE FROM empty_event")
             conn.execute(
                 "INSERT OR REPLACE INTO current_event VALUES (1, ?, ?)", (digest(event), payload)
             )
@@ -409,12 +544,21 @@ class DecisionStore:
             latest = conn.execute(
                 "SELECT revision, fingerprint FROM event_history ORDER BY revision DESC LIMIT 1"
             ).fetchone()
-            revision = latest[0] if latest else 0
+            empty = conn.execute("SELECT revision FROM empty_event WHERE id=1").fetchone()
+            revision = empty[0] if empty else (latest[0] if latest else 0)
             if expected_revision is not None and revision != expected_revision:
                 raise RuleViolation("事件已在其他页面更新，请重新载入后编辑")
-            if latest and latest[1] == fingerprint:
+            if (
+                not empty
+                and latest
+                and latest[1] == fingerprint
+                and not conn.execute(
+                    "SELECT 1 FROM cancelled_events WHERE revision=?", (revision,)
+                ).fetchone()
+            ):
                 return revision
             payload = json.dumps(asdict(event), default=str, ensure_ascii=False)
+            conn.execute("DELETE FROM empty_event")
             conn.execute(
                 "INSERT OR REPLACE INTO current_event VALUES (1, ?, ?)",
                 (fingerprint, payload),
@@ -489,7 +633,8 @@ class DecisionStore:
             if action == "publish" and event.recovered_at is None:
                 raise RuleViolation("恢复时间未知，不能发布候选方案")
             failure_rows = conn.execute(
-                "SELECT payload FROM event_history ORDER BY revision DESC"
+                "SELECT payload FROM event_history WHERE revision NOT IN "
+                "(SELECT revision FROM cancelled_events) ORDER BY revision DESC"
             ).fetchall()
             windows = {}
             for row in failure_rows:
@@ -509,6 +654,7 @@ class DecisionStore:
             if candidate.schedule.version != baseline.version + 1:
                 raise RuleViolation("候选版本号无效")
             if action == "publish" and approval_simulation_id is not None:
+                manual_gate(conn, approval_simulation_id, candidate)
                 fault_reviews.require_approval(conn, candidate, approval_simulation_id)
             result = candidate.schedule if action == "publish" else baseline
             if action == "publish":

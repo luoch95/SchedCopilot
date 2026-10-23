@@ -71,6 +71,37 @@
 .leader-dashboard .workshop-overview > .section-heading {
   margin-bottom: 10px;
 }
+.workshop-overview-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.workshop-overview-title h2 {
+  margin: 0;
+}
+.leader-dashboard .weekly-report-action {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.leader-dashboard .weekly-report-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  box-shadow: none;
+}
+.leader-dashboard .weekly-report-button:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
 .leader-dashboard .workshop-overview > .section-heading h2 {
   font-size: 13px;
   color: var(--muted);

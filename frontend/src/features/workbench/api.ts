@@ -1,6 +1,9 @@
 import { api, workflowStream } from '../../shared/api/http';
+import type { Metrics } from '../../shared/api/metrics';
 import { orderLabel } from '../../shared/lib/orderLabels';
 import type {
+  CopilotAnswer,
+  ManualFaultDraft,
   InsertionAssessment,
   InsertionRequestCreate,
   InsertionRequestRecord,
@@ -19,6 +22,43 @@ import type {
 
 /** The workbench's only transport adapter. Components never construct HTTP requests. */
 export const workbenchApi = {
+  ask: (request: SnapshotVersion & { workflow_id: string; question: string }) =>
+    api<CopilotAnswer>('/copilot/ask', request),
+  cancelEvent: (version: SnapshotVersion, revision?: number) =>
+    api<Workbench>(
+      revision === undefined ? '/event/cancel' : `/events/${revision}/cancel`,
+      version,
+    ),
+  manualDraft: () => api<ManualFaultDraft | null>('/fault-drafts/latest'),
+  createManualDraft: (workflow_id: string, simulation_id?: string, candidate_id?: string) =>
+    api<ManualFaultDraft>('/fault-drafts', {
+      workflow_id,
+      simulation_id,
+      candidate_id,
+      operator_role: 'planner',
+    }),
+  saveManualDraft: (
+    id: string,
+    revision: number,
+    moves: { operation_id: string; machine_id: string; start: string }[],
+    reason: string,
+  ) =>
+    api<ManualFaultDraft>(
+      `/fault-drafts/${encodeURIComponent(id)}`,
+      { revision, moves, reason, operator_role: 'planner' },
+      'PUT',
+    ),
+  confirmManualDraft: (id: string, revision: number) =>
+    api<ManualFaultDraft>(`/fault-drafts/${encodeURIComponent(id)}/confirm`, {
+      revision,
+      operator_role: 'planner',
+    }),
+  recordVisit: () => api<void>('/visits'),
+  adminSession: () => api<{ admin: boolean }>('/demo/session'),
+  adminLogin: (password: string) => api<{ admin: boolean }>('/demo/login', { password }),
+  adminLogout: () => api('/demo/logout', {}),
+  adminMetrics: () => api<Metrics>('/admin/metrics'),
+  weeklyMetrics: () => api<Metrics>('/reports/weekly'),
   submitFaultReview: (
     simulation_id: string,
     candidate_id: string,

@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 
-from .errors import RuleViolation
+from .errors import RuleViolation, ShiftCapacityExceeded
 from .models import (
     CandidatePlan,
     Machine,
@@ -151,6 +151,7 @@ def _replan(
     eligible_machine_ids: Mapping[str, frozenset[str]] | None = None,
     production=None,
     additional_failures: tuple[MachineFailure, ...] = (),
+    append_tail: bool = False,
 ) -> tuple[Schedule, tuple[tuple[str, tuple[str, ...]], ...]]:
     occupied: dict[str, list[tuple[datetime, datetime, str]]] = defaultdict(list)
     root = f"故障:{failure.machine_id}"
@@ -179,14 +180,31 @@ def _replan(
     order_map = {order.id: order for order in orders}
     pending = [op for op in baseline.operations if op.status == TaskStatus.PLANNED]
     direct = {op.id for op in affected_operations(baseline, failure)}
+    tail = set(direct) if append_tail else set()
+    if append_tail:
+        for blocked in additional_failures:
+            tail.update(op.id for op in affected_operations(baseline, blocked))
+        # A successor cannot run before an affected order's preceding operation.
+        while True:
+            expanded = tail | {
+                op.id
+                for op in pending
+                if any(
+                    prev.id in tail and prev.order_id == op.order_id and prev.sequence < op.sequence
+                    for prev in pending
+                )
+            }
+            if expanded == tail:
+                break
+            tail = expanded
     causes = {}
     # Waiting preserves each machine's published queue, including cross-order sequencing.
     machine_predecessors = {}
-    if not allow_transfer:
+    if not allow_transfer and not append_tail:
         for machine in machines:
             queue = sorted(
                 (op for op in baseline.operations if op.machine_id == machine.id),
-                key=lambda op: (op.start, op.id),
+                key=lambda op: (op.id in tail, op.start, op.id),
             )
             machine_predecessors.update(
                 {right.id: left.id for left, right in zip(queue, queue[1:])}
@@ -207,6 +225,8 @@ def _replan(
         op = min(
             eligible,
             key=lambda item: (
+                item.id in tail,
+                item.start if append_tail else order_map[item.order_id].due,
                 order_map[item.order_id].due,
                 order_map[item.order_id].priority,
                 item.start,
@@ -223,6 +243,7 @@ def _replan(
             earliest = max(earliest, placed[machine_predecessors[op.id]].end)
         options = []
         placement_errors = []
+        shift_only = True
         original_blockers = ()
         for machine in machines:
             if eligible_machine_ids is not None and machine.id not in eligible_machine_ids.get(
@@ -238,6 +259,7 @@ def _replan(
                 try:
                     start = production.place(op, machine.id, start, placed, failure)
                 except RuleViolation as exc:
+                    shift_only = shift_only and isinstance(exc, ShiftCapacityExceeded)
                     placement_errors.append(str(exc))
                     continue
             if machine.id == op.machine_id:
@@ -245,7 +267,8 @@ def _replan(
             options.append((start, machine.id != op.machine_id, machine.id, blockers))
         if not options:
             if placement_errors:
-                raise RuleViolation("；".join(placement_errors))
+                error = ShiftCapacityExceeded if shift_only else RuleViolation
+                raise error("；".join(placement_errors))
             raise RuleViolation(
                 f"工序 {op.id} 在本策略下没有满足设备能力和模具兼容条件的可选设备"
                 f"（原设备 {op.machine_id}，所需能力 {op.capability}）。"
@@ -325,6 +348,7 @@ def generate_candidates(
     eligible_machine_ids: Mapping[str, frozenset[str]] | None = None,
     production=None,
     additional_failures: tuple[MachineFailure, ...] = (),
+    append_tail: bool = False,
 ) -> tuple[CandidatePlan, ...]:
     # 新入口按明确指定的策略执行；旧调用不传参数时保留原有两方案行为。
     supported = {"wait-recovery", "allow-transfer"}
@@ -353,6 +377,7 @@ def generate_candidates(
                 eligible_machine_ids,
                 production,
                 additional_failures,
+                append_tail,
             )
         else:
             result, causes = Schedule(schedule.version + 1, schedule.operations), ()

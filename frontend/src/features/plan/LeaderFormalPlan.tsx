@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Workbench } from '../../shared/api/contracts';
 import { workbenchApi } from '../workbench';
 import { CurrentPlan } from './CurrentPlan';
-import { timelineRange } from './model';
+import { publishedPlanRange } from './model';
 
 /** Read the same published snapshot as the planner; no simulation or editing actions. */
 export function LeaderFormalPlan() {
@@ -56,7 +56,7 @@ export function LeaderFormalPlan() {
       <CurrentPlan
         compact
         state={state}
-        range={timelineRange(state, null, zoom, pan)}
+        range={publishedPlanRange(state, zoom, pan)}
         zoom={zoom}
         pan={pan}
         onZoom={setZoom}

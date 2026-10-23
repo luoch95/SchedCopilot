@@ -53,6 +53,7 @@ class WorkbenchSnapshot:
     operation_labels: dict = field(default_factory=dict)
     event_history: list[dict] = field(default_factory=list)
     fault_review: dict | None = None
+    event_cancelled: bool = False
 
 
 @dataclass(frozen=True)

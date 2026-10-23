@@ -8,18 +8,60 @@
 .fault-decision-layout > .workspace {
   max-width: none;
   margin: 0;
-  padding: 18px 0 24px;
+  padding: 12px 0 24px;
 }
 .fault-stage {
+  --decision-title: #1e3a8a;
+  --decision-heading: #334155;
+  --decision-text: #475569;
+  --decision-muted: #94a3b8;
+  --decision-space: 24px;
   width: 100%;
-  color: #203d4c;
+  color: var(--decision-text);
+  font-size: 14px;
+  line-height: 1.6;
 }
 .fault-stage-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 14px 24px;
-  margin: 6px 0 22px;
+  margin: 0 0 24px;
+}
+.fault-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-bottom: 8px;
+}
+.fault-decision-layout .fault-stage .fault-header-back {
+  padding: 4px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.fault-decision-layout .fault-stage .fault-header-back:hover {
+  background: transparent;
+  color: #1e3a8a;
+  text-decoration: underline;
+}
+.fault-back-arrow {
+  display: inline-block;
+  transition: transform 150ms ease;
+}
+.fault-header-back:hover .fault-back-arrow {
+  transform: translateX(-2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fault-back-arrow {
+    transition: none;
+  }
+}
+.fault-header-back:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 4px;
 }
 .fault-stage-heading {
   display: flex;
@@ -28,51 +70,36 @@
   gap: 8px 12px;
 }
 .fault-stage-header h1 {
-  font-size: 27px;
-  letter-spacing: -0.45px;
+  margin: 0;
+  color: var(--decision-title);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 .fault-stage-header p {
   margin-top: 5px;
   color: #667d89;
   font-size: 13px;
 }
-.fault-stage-meta {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: nowrap;
-  gap: 12px;
-  padding-top: 8px;
-  white-space: nowrap;
-  color: #667d89;
-  font-size: 11px;
+.fault-page-breadcrumb {
+  padding: 0 0 8px;
 }
-.fault-stage-meta .session-bar {
-  flex-wrap: nowrap;
-  gap: 10px;
-  font-size: inherit;
+.fault-page-breadcrumb .console-breadcrumb {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
 }
-.fault-stage-meta .session-bar strong {
+.fault-page-breadcrumb .console-breadcrumb button {
+  color: #475569;
   font-weight: 500;
 }
-.fault-stage-meta .session-bar button {
-  padding: 0 0 0 10px;
-  border: 0;
-  border-left: 1px solid #d2dfe5;
-  border-radius: 0;
-  background: transparent;
-  color: #176e7f;
-  font-size: inherit;
-  font-weight: 500;
-  line-height: inherit;
-}
-.fault-stage-meta .session-bar button:hover:not(:disabled) {
+.fault-page-breadcrumb .console-breadcrumb button:hover:not(:disabled) {
+  color: #1e3a8a;
   text-decoration: underline;
 }
-.fault-environment {
-  padding-left: 12px;
-  border-left: 1px solid #d2dfe5;
-  color: #78909c;
+.fault-page-breadcrumb .console-breadcrumb [aria-current='page'] {
+  color: #94a3b8;
 }
 .fault-stage-status {
   display: inline-flex;
@@ -82,7 +109,9 @@
   border-radius: 99px;
   background: #fff1d6;
   color: #966617;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
 }
 .fault-stage-status.is-ready {
   background: #e7f4ee;
@@ -90,18 +119,18 @@
 }
 .fault-stage-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px;
+  grid-template-columns: minmax(0, 1fr) 230px;
   align-items: start;
   gap: clamp(18px, 3vw, 48px);
 }
 .fault-stage-main {
   display: grid;
-  gap: 18px;
+  gap: var(--decision-space);
   min-width: 0;
 }
 .fault-stage-card {
   min-width: 0;
-  padding: 20px 22px;
+  padding: var(--decision-space);
   border: 1px solid #e0e9ed;
   border-radius: 12px;
   background: #fff;
@@ -216,7 +245,7 @@
 .fault-evidence-details > .workflow-progress {
   margin-top: 16px;
 }
-.fault-evidence-details > .ai-section {
+.fault-evidence-details > .ai-section:not(.copilot-assist) {
   margin: 12px 0 0;
   padding: 0;
   border: 0;
@@ -229,6 +258,16 @@
 }
 .fault-stage-workflow .workflow-caption h3 {
   font-size: 15px;
+}
+.workflow-trust {
+  margin: 16px 0;
+  color: #64748b;
+  font-size: 14px;
+}
+.workflow-trust strong {
+  color: #1e3a8a;
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
 }
 .fault-conclusion-card {
   display: grid;
@@ -342,18 +381,27 @@
   margin-top: 0;
 }
 .fault-evidence-details {
-  margin-top: 14px;
-  border-top: 1px solid #e6eef1;
+  margin-top: 16px;
 }
 .fault-evidence-details > summary {
-  padding: 12px 2px 2px;
-  color: #176e7f;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
   cursor: pointer;
 }
+.fault-evidence-details > summary:hover {
+  background: #e8eef5;
+}
+.fault-evidence-details > summary:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 3px;
+}
 .fault-evidence-content {
-  padding-top: 12px;
+  padding-top: 24px;
 }
 .fault-evidence-content > .section {
   margin: 0;
@@ -403,15 +451,8 @@
   background: #e7f3f5;
   color: #146b7b;
 }
-.fault-decision-layout .fault-stage-main .fault-stage-card h2 {
-  font-size: 18px;
-}
 .fault-decision-layout .fault-stage .fault-stage-outline h2 {
   font-size: 13px;
-}
-.fault-decision-layout .fault-stage-card .block-title {
-  margin: 18px 0 12px;
-  font-size: 15px;
 }
 .fault-decision-layout .fault-human-decision textarea {
   min-height: 70px;
@@ -419,11 +460,6 @@
 .fault-decision-layout .workspace {
   width: 100%;
   min-width: 0;
-}
-.fault-decision-layout :is(h2, .block-title, .decision-accordion summary h3) {
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.5;
 }
 .fault-decision-layout .section-heading {
   margin-bottom: 24px;
@@ -444,10 +480,10 @@
   font-size: 12px;
 }
 .fault-decision-layout .block-title {
-  margin: 28px 0 20px;
+  margin: 24px 0 16px;
 }
 .fault-decision-layout .section {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 .fault-decision-layout .stat-strip > div > span:first-child {
   font-size: 12px;
@@ -522,11 +558,11 @@
   scroll-margin-top: 24px;
 }
 .fault-decision-layout .section-heading h3[data-outline] {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
 }
 .fault-decision-layout .workflow-caption h3[data-outline] {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
 }
 .decision-accordion {
@@ -655,16 +691,13 @@
     padding-inline: 10px;
   }
   .fault-stage-header {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-    margin-top: 2px;
-    margin-bottom: 14px;
+    margin-bottom: 24px;
   }
   .fault-stage-header h1 {
-    font-size: 22px;
+    font-size: 24px;
   }
   .fault-stage-card {
-    padding: 15px 14px;
+    padding: 16px;
     border-radius: 10px;
   }
   .fault-overview-stats {
@@ -676,10 +709,6 @@
   }
   .fault-compare-tiles {
     grid-template-columns: 1fr;
-  }
-  .fault-stage-meta {
-    width: 100%;
-    padding-top: 0;
   }
   .fault-conclusion-card {
     padding: 15px 14px;
@@ -716,11 +745,294 @@
   scroll-margin-top: 24px;
 }
 .fault-decision-layout :is(#section-current-plan, #section-workflow) {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
 }
 @media (max-width: 1000px) {
   .fault-decision-layout [id^='section-'] {
     scroll-margin-top: 220px;
+  }
+}
+.manual-fault-panel > label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.fault-manual-action {
+  margin-top: 20px;
+  justify-content: flex-end;
+}
+.contribution-report {
+  padding: 16px 20px;
+  margin: 16px 0;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.contribution-report h3 {
+  margin-top: 0;
+}
+.contribution-report p {
+  line-height: 1.7;
+}
+
+/* One type scale for the decision page; nested content never inherits module sizing. */
+.fault-decision-layout .fault-stage :is(h2, h3, h4, h5, .block-title) {
+  color: var(--decision-heading);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.fault-decision-layout .fault-stage-card > h2,
+.fault-decision-layout .fault-stage-card > .fault-stage-card-heading > h2 {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--decision-title);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.fault-decision-layout .fault-stage-card > h2 {
+  margin-bottom: 24px;
+}
+.fault-decision-layout .fault-stage-card > .fault-stage-card-heading {
+  margin: 0 0 24px;
+  padding: 0;
+  border: 0;
+  gap: 16px;
+  align-items: center;
+}
+.fault-decision-layout .fault-stage :is(p, li, td, th, label, textarea, select, button) {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.fault-decision-layout .fault-stage :is(p, li, td, th) {
+  color: var(--decision-text);
+}
+.fault-decision-layout .fault-stage li + li {
+  margin-top: 8px;
+}
+.fault-decision-layout .fault-stage :is(.hint, .eyebrow, small, .outline-legend),
+.fault-decision-layout .fault-stage .fault-stage-note,
+.fault-decision-layout .fault-stage .fault-stage-card-heading > span,
+.fault-decision-layout .fault-stage .fault-conclusion-metadata,
+.fault-decision-layout .fault-stage .candidate-card header span,
+.fault-decision-layout .fault-stage .fault-overview-stats span {
+  color: var(--decision-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.fault-decision-layout .fault-stage :is(.block-title, .comparison-detail-section > h3) {
+  margin: 24px 0 16px;
+}
+.comparison-detail-section {
+  margin: 24px 0;
+  min-width: 0;
+}
+.comparison-detail-section .table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.fault-analysis-content > .copilot-assist {
+  margin: 24px 0;
+  padding: 24px;
+}
+.fault-decision-layout .fault-conclusion-card {
+  padding: 24px;
+  gap: 16px;
+}
+.fault-decision-layout .fault-conclusion-metadata {
+  margin: 0 -24px -24px;
+  padding: 12px 24px;
+}
+.fault-decision-layout .candidate-grid {
+  gap: 24px;
+}
+.fault-decision-layout .decision-accordion-content {
+  padding-top: 16px;
+}
+@media (max-width: 680px) {
+  .fault-analysis-content > .copilot-assist,
+  .fault-decision-layout .fault-conclusion-card {
+    padding: 16px;
+  }
+  .fault-decision-layout .fault-conclusion-metadata {
+    margin: 0 -16px -16px;
+    padding: 12px 16px;
+  }
+}
+
+/* Six business chapters, three deliberately different evidence surfaces. */
+.fault-decision-layout .planner-topbar {
+  border: 0;
+  box-shadow: none;
+}
+.fault-stage-outline {
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.fault-stage-outline .fault-outline-title {
+  margin: 0 0 12px 10px;
+  color: #334155;
+  font-size: 14px;
+}
+.fault-stage-outline .fault-outline-child {
+  margin-left: 12px;
+  padding-block: 5px;
+  font-size: 12px;
+}
+.fault-stage-outline a:not(.fault-outline-child) {
+  font-weight: 600;
+}
+.fault-evidence-card {
+  display: grid;
+  gap: 24px;
+}
+.fault-decision-layout .fault-evidence-card > .fault-stage-card-heading {
+  margin-bottom: 0;
+}
+.decision-analysis-block,
+.decision-analysis-block > .copilot-assist {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.fault-decision-layout .decision-analysis-block > .copilot-assist {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.decision-analysis-card {
+  padding: 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  min-width: 0;
+}
+.decision-analysis-card:nth-of-type(2) {
+  background: #eff6ff;
+  border-color: #dbeafe;
+}
+.fault-decision-layout .decision-analysis-card :is(h3, .block-title):first-child {
+  margin: 0 0 16px;
+}
+.decision-analysis-card .explanation-group > h3 {
+  font-size: 14px;
+}
+.decision-comparison-tabs {
+  min-width: 0;
+  border: 1px solid #dbe4ef;
+  border-radius: 10px;
+  overflow: clip;
+}
+.decision-tablist {
+  display: flex;
+  overflow-x: auto;
+  background: #f1f5f9;
+  border-bottom: 1px solid #dbe4ef;
+}
+.fault-stage .decision-tablist button {
+  flex: 1 0 auto;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #475569;
+}
+.fault-stage .decision-tablist button[aria-selected='true'] {
+  border-bottom-color: #2563eb;
+  background: #fff;
+  color: #1e3a8a;
+  font-weight: 700;
+}
+.decision-tablist button:focus-visible,
+.decision-comparison-tabs [role='tabpanel']:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -3px;
+}
+.decision-comparison-tabs [role='tabpanel'] {
+  padding: 24px;
+  min-width: 0;
+}
+.decision-comparison-tabs [hidden] {
+  display: none;
+}
+.decision-comparison-tabs .comparison-detail-section {
+  margin: 0;
+}
+.decision-comparison-tabs :is(.table-wrap, pre),
+.decision-system-panels :is(.table-wrap, pre) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.decision-system-panels {
+  display: grid;
+  gap: 12px;
+}
+.fault-stage .decision-system-panel {
+  margin: 0;
+  background: #fafbfd;
+}
+.decision-system-panel > summary:hover {
+  background: #f1f5f9;
+}
+.decision-system-panel > summary:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
+}
+.fault-stage .decision-system-panel > summary h3 {
+  color: #334155;
+  font-size: 16px;
+}
+.fault-stage .decision-system-panel .workflow-details {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+.fault-stage .decision-system-panel .copilot-assist {
+  padding: 24px;
+  margin: 0;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+}
+.decision-system-panel .copilot-conversation {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.fault-stage .fault-history-card .section {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+}
+.fault-stage :is([role='tabpanel'], h3[id]) {
+  scroll-margin-top: 24px;
+}
+@media (max-width: 1000px) {
+  .fault-stage-outline {
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .fault-stage-outline nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 680px) {
+  .decision-analysis-card,
+  .decision-comparison-tabs [role='tabpanel'],
+  .fault-stage .decision-system-panel .copilot-assist {
+    padding: 16px;
+  }
+  .fault-stage-outline nav {
+    grid-template-columns: 1fr;
   }
 }
