@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { PlanVersionTag } from './PlanVersionTag';
 import { stamp } from '../../shared/lib/time';
 import Gantt from '../../shared/ui/Gantt';
@@ -27,6 +28,23 @@ export function CurrentPlan({
   headingLevel,
   actions,
 }: Props) {
+  const [timeSource, setTimeSource] = useState<'snapshot' | 'current'>('snapshot');
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (timeSource !== 'current') return;
+    const update = () => setNow(Date.now());
+    update();
+    const timer = window.setInterval(update, 60_000);
+    window.addEventListener('focus', update);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', update);
+    };
+  }, [timeSource]);
+  const marker = {
+    time: timeSource === 'current' ? now : Date.parse(state.snapshot_time),
+    label: timeSource === 'current' ? '当前时间' : '执行快照',
+  };
   const Heading = (headingLevel ?? (compact ? 2 : 3)) === 2 ? 'h2' : 'h3';
   const publication = state.plan_publication;
   const faults = (
@@ -132,6 +150,27 @@ export function CurrentPlan({
             </label>
           </div>
         </div>
+        <div className="plan-time-controls">
+          <label>
+            时间定位
+            <select
+              aria-label="执行计划时间定位"
+              value={timeSource}
+              onChange={(event) => {
+                setNow(Date.now());
+                setTimeSource(event.target.value as 'snapshot' | 'current');
+              }}
+            >
+              <option value="snapshot">执行快照</option>
+              <option value="current">当前时间</option>
+            </select>
+          </label>
+          <span>
+            {Number.isFinite(marker.time)
+              ? `${marker.label}：${stamp(new Date(marker.time).toISOString())}（北京时间）`
+              : '执行快照时间缺失，无法定位'}
+          </span>
+        </div>
         <div
           className={compact ? 'current-plan-body' : undefined}
           tabIndex={compact ? 0 : undefined}
@@ -144,8 +183,10 @@ export function CurrentPlan({
             faults={faults}
             machines={state.machines}
             range={range}
+            timeMarker={marker}
           />
           <p className="hint">
+            竖线仅表示所选时间位置，实际进度以工序状态为准。
             浅色条为已完成工序，浅灰斜线底纹为设备停机留痕，悬停可查看说明。
             此图保留已发布安排，生成候选不会自动修改执行计划。
           </p>

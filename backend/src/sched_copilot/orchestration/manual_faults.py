@@ -10,6 +10,7 @@ from ..application.contracts import CandidateComparison, SimulationResult, Snaps
 from ..application.errors import ResourceNotFound, SnapshotConflict
 from ..domain.errors import RuleViolation
 from ..domain.impact import operation_changes, order_impacts
+from ..domain.manual_editing import check_manual_time_boundary
 from ..domain.models import CandidatePlan, Operation, Schedule, TaskStatus, digest
 from ..domain.scheduling import metrics
 from ..orchestration.state import WorkflowState
@@ -102,6 +103,9 @@ class ManualFaultService:
             if baseline.fingerprint == draft["baseline_fingerprint"]:
                 _, event, _, source = self._source(draft["workflow_id"])
                 candidate = self.store.simulation(simulation_id)[0][0]
+                check_manual_time_boundary(
+                    baseline, candidate.schedule, self.workbench.snapshot_time
+                )
                 self.check_schedule(source, candidate.schedule, event)
 
     def create(self, command):
@@ -144,6 +148,7 @@ class ManualFaultService:
             report=None,
             simulation_id=None,
             simulation=None,
+            workflow=None,
             created_at=now,
             updated_at=now,
         )
@@ -223,6 +228,7 @@ class ManualFaultService:
         schedule = Schedule(
             baseline.version + 1, tuple(operations[o.id] for o in schedule.operations)
         )
+        check_manual_time_boundary(self._schedule(draft), schedule, self.workbench.snapshot_time)
         issues = []
         try:
             self.check_schedule(source, schedule, event)
@@ -237,11 +243,12 @@ class ManualFaultService:
             report=None,
             simulation_id=None,
             simulation=None,
+            workflow=None,
             updated_at=now,
         )
         return self.store.save_manual_draft(draft, command.revision)
 
-    def confirm(self, draft_id, command):
+    def confirm(self, draft_id, command, analysis=None):
         draft = self.get(draft_id)
         if command.revision != draft["revision"]:
             raise SnapshotConflict("草案修订已变化，请重新载入")
@@ -249,6 +256,7 @@ class ManualFaultService:
             return draft
         baseline, event, _, source = self._source(draft["workflow_id"])
         schedule = self._schedule(draft)
+        check_manual_time_boundary(baseline, schedule, self.workbench.snapshot_time)
         self.check_schedule(source, schedule, event)
         candidate = self._candidate(draft, baseline, event, schedule)
         if not candidate.metrics.moved_operations:
@@ -277,12 +285,27 @@ class ManualFaultService:
             }
             for i, fact in enumerate(facts)
         }
-        model = self.reporter.run(
-            "explanation",
-            {"reason": "人工调整草案与延期风险"},
-            catalog=catalog,
-            instructions=REPORT_INSTRUCTIONS,
-        )
+        if analysis is None:
+            model = self.reporter.run(
+                "explanation",
+                {"reason": "人工调整草案与延期风险"},
+                catalog=catalog,
+                instructions=REPORT_INSTRUCTIONS,
+            )
+        else:
+            execution = next(
+                (
+                    step.get("execution") or {}
+                    for step in analysis["trace"]
+                    if step["action"] == "explain"
+                ),
+                {},
+            )
+            model = {
+                "mode": "live" if execution.get("mode") == "live" else "fallback",
+                "error_code": execution.get("error_code"),
+                "highlights": analysis["results"]["explanation"]["data"].get("facts", []),
+            }
         # No transaction spans the model call. Compare revision and full input again.
         self._source(draft["workflow_id"])
         simulation_id = str(uuid4())
@@ -326,11 +349,52 @@ class ManualFaultService:
         draft.update(
             status="ready_for_review", issues=[], report=report, simulation_id=simulation_id
         )
+        if analysis is not None:
+            draft["workflow"] = {**analysis, "contribution_report": report}
         saved = self.store.save_manual_draft(draft, command.revision, candidate)
         return saved, simulation
 
     def _origin(self, draft):
         return self._schedule({"schedule": draft["origin"]})
+
+    def evaluate(self, draft_id, command, on_progress=None):
+        """Run the normal typed chain with a fixed manual candidate, never re-schedule it."""
+        draft = self.get(draft_id)
+        if command.revision != draft["revision"]:
+            raise SnapshotConflict("草案修订已变化，请重新载入")
+        if draft["status"] == "ready_for_review" and draft.get("workflow"):
+            return self.response(draft)
+        baseline, event, revision, _ = self._source(draft["workflow_id"])
+        candidate = self._candidate(draft, baseline, event, self._schedule(draft))
+        outcome = self.workbench.workflow_runner(
+            baseline,
+            event,
+            self.workbench.machines,
+            self.workbench.orders,
+            self.workbench.snapshot_time,
+            revision,
+            intent="generate_candidates",
+            question="评估人工调整方案的事实、假设、风险与取舍；不得更改人工工序安排。",
+            manual_candidate=candidate,
+            on_progress=on_progress,
+        )
+        self._source(draft["workflow_id"])
+        if outcome.payload["status"] != "completed":
+            draft["workflow"] = outcome.payload
+            draft["issues"] = [
+                error["message"]
+                for report in outcome.payload["results"].values()
+                for error in report.get("errors", [])
+            ] or ["人工方案分析未完成，请查看执行详情并继续调整。"]
+            self.store.save_manual_draft(draft, command.revision)
+            return draft
+        if len(outcome.candidates) != 1 or (
+            outcome.candidates[0].schedule.fingerprint != candidate.schedule.fingerprint
+        ):
+            raise RuleViolation("评估结果改变了人工安排，不能提交审批")
+        result = self.confirm(draft_id, command, outcome.payload)
+        confirmed = result[0] if isinstance(result, tuple) else result
+        return self.response(confirmed)
 
     def response(self, draft):
         if not draft or not draft.get("simulation_id"):

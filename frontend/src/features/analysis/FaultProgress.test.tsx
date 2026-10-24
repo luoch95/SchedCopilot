@@ -28,6 +28,25 @@ const review: FaultReview = {
   reviewed_at: workbench.snapshot_time,
 };
 
+it('shows the effective manual approval only in event scope while the AI view stays unapproved', () => {
+  const state = { ...workbench, fault_review: { ...review, simulation_id: 'manual-batch' } };
+  const view = render(
+    <FaultProgress state={state} workflow={workflow} simulation={simulation} scope="event" />,
+  );
+  expect(screen.getByLabelText('计划发布：已流转排产员 · 待发布')).toBeTruthy();
+  view.rerender(<FaultProgress state={state} workflow={workflow} simulation={simulation} />);
+  expect(screen.getByLabelText('管理者审批：待提交')).toBeTruthy();
+  view.rerender(
+    <FaultProgress
+      state={{ ...state, event_revision: state.event_revision + 1 }}
+      workflow={workflow}
+      simulation={simulation}
+      scope="event"
+    />,
+  );
+  expect(screen.getByLabelText('管理者审批：待提交')).toBeTruthy();
+});
+
 it('advances a conclusion assessment through approval without requiring a plan publication', () => {
   const assessed: WorkflowResult = {
     ...workflow,
@@ -63,6 +82,37 @@ it('advances a conclusion assessment through approval without requiring a plan p
   expect(screen.getByLabelText('计划发布：评估结论无需发布排产').className).toBe('is-complete');
   view.rerender(<FaultProgress state={state} workflow={{ ...assessed, id: 'regenerated' }} />);
   expect(screen.getByLabelText('管理者审批：待提交').className).toBe('');
+});
+
+it('keeps a published event complete after later plan versions without reusing it for a new event', () => {
+  const state = {
+    ...workbench,
+    baseline: { ...workbench.baseline, version: 6 },
+    plan_publication: {
+      version: 6,
+      published_at: workbench.snapshot_time,
+      published_by: 'planner_01',
+      version_summary: '后续计划',
+      current_fault_analysis: {
+        event_revision: workbench.event_revision,
+        baseline_version: 3,
+        published_version: 4,
+        workflow,
+      },
+    },
+  };
+  const view = render(<FaultProgress state={state} workflow={null} scope="event" />);
+  expect(screen.getByLabelText('计划发布：已发布 V4').className).toBe('is-complete');
+  expect(screen.getByLabelText('管理者审批：已批准').className).toBe('is-complete');
+  view.rerender(
+    <FaultProgress
+      state={{ ...state, event_revision: state.event_revision + 1 }}
+      workflow={null}
+      scope="event"
+    />,
+  );
+  expect(screen.getByLabelText('管理者审批：待提交')).toBeTruthy();
+  expect(screen.queryByLabelText('计划发布：已发布 V4')).toBeNull();
 });
 
 it('shows saved, analyzing and analyzed states without marking unfinished steps complete', () => {

@@ -22,6 +22,13 @@ export function useWorkbench() {
   const [draft, setDraft] = useState<EventDraft | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
   const [manualDraft, setManualDraft] = useState<ManualFaultDraft | null>(null);
+  const [manualEditor, setManualEditor] = useState<ManualFaultDraft | null>(null);
+  const [analysisView, setAnalysisView] = useState<'ai' | 'manual'>('ai');
+  const analysisViewRef = useRef<'ai' | 'manual'>('ai');
+  const choices = useRef({
+    ai: { selected: '', reason: '', action: 'reject' },
+    manual: { selected: '', reason: '', action: 'reject' },
+  });
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -34,7 +41,8 @@ export function useWorkbench() {
   const [askError, setAskError] = useState('');
   const askingRef = useRef(false);
   const [question, setQuestion] = useState('设备故障后，应该如何比较方案？');
-  const [workflow, setWorkflow] = useState<WorkflowResult | null>(null);
+  const [aiWorkflow, setWorkflow] = useState<WorkflowResult | null>(null);
+  const workflow = analysisView === 'manual' ? (manualDraft?.workflow ?? null) : aiWorkflow;
   const [activeIntent, setActiveIntent] = useState<WorkflowIntent | null>(null);
   const [progress, setProgress] = useState<WorkflowProgress | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -81,6 +89,13 @@ export function useWorkbench() {
     setAnswer(null);
     setAskError('');
     setManualDraft(null);
+    setManualEditor(null);
+    setAnalysisView('ai');
+    analysisViewRef.current = 'ai';
+    choices.current = {
+      ai: { selected: '', reason: '', action: 'reject' },
+      manual: { selected: '', reason: '', action: 'reject' },
+    };
     recoveryEpoch.current += 1;
     setSimulation(null);
     setWorkflow(null);
@@ -164,7 +179,11 @@ export function useWorkbench() {
       if (
         err instanceof ApiError &&
         err.status === 409 &&
-        !(label.includes('人工') && err.code === 'rule_violation')
+        !(
+          label.includes('人工') &&
+          err.code === 'rule_violation' &&
+          !(/计划|故障|生产条件/.test(err.message) && /变化|更新/.test(err.message))
+        )
       ) {
         clearResults();
         if (err.code === 'snapshot_conflict' || /更新|版本|变化/.test(err.message)) setStale(true);
@@ -208,11 +227,19 @@ export function useWorkbench() {
     simulation.baseline_fingerprint === state.baseline.fingerprint
       ? simulation
       : null;
-  const currentSimulation = manualDraft
-    ? manualDraft.status === 'ready_for_review'
-      ? manualDraft.simulation
-      : null
-    : validSimulation;
+  const activeManual = analysisView === 'manual' ? manualDraft : null;
+  const currentSimulation =
+    activeManual &&
+    !dirty &&
+    !stale &&
+    activeManual.event_revision === state?.event_revision &&
+    activeManual.baseline_fingerprint === state?.baseline.fingerprint
+      ? activeManual.status === 'ready_for_review'
+        ? activeManual.simulation
+        : null
+      : analysisView === 'ai'
+        ? validSimulation
+        : null;
   const candidate = currentSimulation?.candidates.find((item) => item.id === selected);
 
   function edit(value: Partial<EventDraft>) {
@@ -412,7 +439,7 @@ export function useWorkbench() {
   const submitReview = () =>
     run('提交管理者审批', async () => {
       if (
-        !manualDraft &&
+        !activeManual &&
         workflow?.status === 'completed' &&
         workflow.results.evaluation?.data?.assessment
       ) {
@@ -510,7 +537,7 @@ export function useWorkbench() {
   }
 
   useEffect(() => {
-    if (!workflow || workflow.status !== 'completed') return;
+    if (!aiWorkflow || aiWorkflow.status !== 'completed') return;
     let active = true;
     const epoch = recoveryEpoch.current;
     void workbenchApi
@@ -523,60 +550,218 @@ export function useWorkbench() {
           !saved ||
           saved.event_revision !== state?.event_revision ||
           saved.baseline_fingerprint !== state?.baseline.fingerprint ||
-          (saved.workflow_id !== workflow.id &&
+          (saved.workflow_id !== aiWorkflow.id &&
             !(
-              workflow.intent !== 'generate_candidates' &&
+              aiWorkflow.intent !== 'generate_candidates' &&
               saved.source_simulation_id &&
               saved.source_simulation_id === simulation?.id
             ))
         )
           return;
         setManualDraft(saved);
-        if (saved.simulation) setSelected(saved.simulation.candidates[0]?.id ?? '');
       })
       .catch(() => {});
     return () => {
       active = false;
     };
-  }, [workflow?.id, state?.event_revision, state?.baseline.fingerprint]);
+  }, [aiWorkflow?.id, state?.event_revision, state?.baseline.fingerprint]);
 
-  const startManual = () =>
+  function switchAnalysis(view: 'ai' | 'manual') {
+    if (view === analysisViewRef.current || (view === 'manual' && !manualDraft)) return;
+    choices.current[analysisViewRef.current] = { selected, reason, action };
+    recoveryEpoch.current += 1;
+    analysisViewRef.current = view;
+    setAnalysisView(view);
+    const choice = choices.current[view];
+    setSelected(
+      choice.selected ||
+        (view === 'ai' ? validSimulation : manualDraft?.simulation)?.candidates[0]?.id ||
+        '',
+    );
+    setReason(choice.reason);
+    setAction(choice.action);
+    setAnswer(null);
+    setAskError('');
+  }
+
+  const startManual = (basis?: string | null) =>
     run('创建人工草案', async () => {
-      if (!workflow || workflow.status !== 'completed' || dirty || stale) return;
-      const saved = await workbenchApi.createManualDraft(
-        workflow.id,
-        validSimulation?.id,
-        candidate?.id,
-      );
-      setManualDraft(saved);
-      setState(await workbenchApi.load());
-      setNotice('已进入人工调整；拖拽只修改草案，确认评估后才能提交审批。');
+      if (!aiWorkflow || aiWorkflow.status !== 'completed' || dirty || stale) return;
+      if (basis === undefined && activeManual) {
+        setManualEditor(structuredClone(activeManual));
+        return;
+      }
+      if (basis === undefined) return;
+      const sourceCandidate =
+        basis === null ? undefined : validSimulation?.candidates.find((item) => item.id === basis);
+      if (basis !== null && !sourceCandidate) throw new Error('编辑起点已失效，请重新选择。');
+      setManualEditor({
+        id: '',
+        revision: 1,
+        status: 'editing',
+        workflow_id: aiWorkflow.id,
+        source_simulation_id: sourceCandidate ? validSimulation!.id : null,
+        source_candidate_id: sourceCandidate?.id ?? null,
+        event_revision: state!.event_revision,
+        baseline_fingerprint: state!.baseline.fingerprint,
+        schedule: structuredClone(sourceCandidate?.schedule ?? state!.baseline),
+        origin: structuredClone(sourceCandidate?.schedule ?? state!.baseline),
+        edits: [],
+        issues: [],
+        report: null,
+        simulation: null,
+      });
     });
-  const moveManual = (operation_id: string, machine_id: string, start: string, reason: string) =>
-    run('保存人工调整', async () => {
-      if (!manualDraft || dirty || stale) return;
-      const saved = await workbenchApi.saveManualDraft(
-        manualDraft.id,
-        manualDraft.revision,
-        [{ operation_id, machine_id, start }],
-        reason,
-      );
-      setManualDraft(saved);
-      setState(await workbenchApi.load());
-      setNotice('草案已保存；需确认评估并重新提交审批。');
-    });
+  const moveManual = (operation_id: string, machine_id: string, start: string, _reason: string) => {
+    if (readOnly || dirty || stale || busy || !Number.isFinite(Date.parse(start))) return;
+    const boundary = Date.parse(state!.snapshot_time);
+    if (Date.parse(start) < boundary) return;
+    setManualEditor((previous) =>
+      previous
+        ? {
+            ...previous,
+            status: 'editing',
+            issues: [],
+            schedule: {
+              ...previous.schedule,
+              operations: previous.schedule.operations.map((op) =>
+                op.id === operation_id &&
+                op.status === 'planned' &&
+                Date.parse(op.start) >= boundary
+                  ? {
+                      ...op,
+                      machine_id,
+                      start,
+                      end: new Date(
+                        Date.parse(start) + Date.parse(op.end) - Date.parse(op.start),
+                      ).toISOString(),
+                    }
+                  : op,
+              ),
+            },
+          }
+        : null,
+    );
+  };
+  const cancelManual = () => setManualEditor(null);
   const confirmManual = () =>
     run('评估人工草案', async () => {
-      if (!manualDraft || dirty || stale) return;
-      const saved = await workbenchApi.confirmManualDraft(manualDraft.id, manualDraft.revision);
-      setManualDraft(saved);
-      setSelected(saved.simulation?.candidates[0]?.id ?? '');
+      const editing = manualEditor ?? manualDraft;
+      if (!editing || dirty || stale) return;
+      choices.current[analysisViewRef.current] = { selected, reason, action };
+      analysisViewRef.current = 'manual';
+      setAnalysisView('manual');
+      setManualEditor(null);
+      setManualDraft({ ...editing, status: 'editing', workflow: null, simulation: null });
+      setSelected('');
       setReason('');
-      setNotice('人工调整草案报告已生成，待提交管理者审批。');
+      setAnswer(null);
+      setAskError('');
+      const abort = new AbortController();
+      workflowAbort.current = abort;
+      setActiveIntent('generate_candidates');
+      setProgress({
+        intent: 'generate_candidates',
+        actions: ['validate', 'schedule', 'evaluate', 'explain'],
+        active: null,
+        trace: [],
+        results: {},
+        interrupted: false,
+      });
+      try {
+        const persisted = editing.id
+          ? editing
+          : await workbenchApi.createManualDraft(
+              editing.workflow_id,
+              editing.source_simulation_id ?? undefined,
+              editing.source_candidate_id ?? undefined,
+            );
+        const savedDraft = await workbenchApi.saveManualDraft(
+          persisted.id,
+          persisted.revision,
+          editing.schedule.operations
+            .filter((op) => op.status === 'planned')
+            .map((op) => ({ operation_id: op.id, machine_id: op.machine_id, start: op.start })),
+          '排产员在甘特图中手动调整',
+        );
+        setManualDraft(savedDraft);
+        const saved = await workbenchApi.evaluateManualDraft(
+          savedDraft.id,
+          savedDraft.revision,
+          (event) =>
+            setProgress((previous) => {
+              if (!previous) return previous;
+              if (event.type === 'trace_started') return { ...previous, trace_id: event.trace_id };
+              if (event.type === 'plan') return { ...previous, actions: event.actions };
+              if (event.type === 'stage_started')
+                return { ...previous, active: event.action, quality: null };
+              if (event.type === 'quality_phase' || event.type === 'quality_checked')
+                return {
+                  ...previous,
+                  quality: {
+                    action: event.action,
+                    round: event.round,
+                    phase: event.type === 'quality_phase' ? event.phase : 'checked',
+                  },
+                };
+              return {
+                ...previous,
+                active: null,
+                quality: null,
+                trace: [...previous.trace, event.step],
+                results: event.report
+                  ? { ...previous.results, [event.name]: event.report }
+                  : previous.results,
+              };
+            }),
+          abort.signal,
+        );
+        const latest = await workbenchApi.load();
+        if (
+          latest.event_revision !== editing.event_revision ||
+          latest.baseline.fingerprint !== editing.baseline_fingerprint
+        ) {
+          clearResults();
+          setState(latest);
+          setDraft(draftFor(latest));
+          setStale(true);
+          throw new Error('计划或故障已更新，请基于最新数据重新评估。');
+        }
+        setState(latest);
+        setManualDraft(saved);
+        const manualSelected = saved.simulation?.candidates[0]?.id ?? '';
+        choices.current.manual = { selected: manualSelected, reason: '', action: 'publish' };
+        if (analysisViewRef.current === 'manual') {
+          setSelected(manualSelected);
+          setReason('');
+          setAction('publish');
+        }
+        setProgress(null);
+        setNotice(
+          saved.status === 'ready_for_review'
+            ? '人工方案评估已完成，可切换查看原 AI 方案或提交审批。'
+            : '人工方案未通过校验，请查看具体原因并继续手动调整。',
+        );
+      } catch (err) {
+        setProgress((previous) =>
+          previous ? { ...previous, active: null, interrupted: true } : null,
+        );
+        throw err;
+      } finally {
+        workflowAbort.current = null;
+        setActiveIntent(null);
+      }
     });
 
   return {
     manualDraft,
+    activeManual,
+    manualEditor,
+    analysisView,
+    switchAnalysis,
+    cancelManual,
+    originalSimulation: validSimulation,
+    originalWorkflow: aiWorkflow,
     startManual,
     moveManual,
     confirmManual,

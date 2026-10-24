@@ -36,15 +36,28 @@ class SchedulingRun:
 class SchedulingAgent:
     """先检查校验报告，再调用工具；不调用模型或其他 Agent。"""
 
+    @classmethod
+    def for_manual_candidate(cls, candidate):
+        from functools import partial
+
+        from ..tools.manual_schedule import manual_schedule
+
+        tool = partial(manual_schedule, candidate=candidate)
+        return cls(tool, authoritative_tool=tool)
+
     def run_insertion(self, calculate, snapshot):
         from ..tools.insertion import schedule_request
 
         return schedule_request(calculate, snapshot)
 
     def __init__(
-        self, tool: Callable[[SchedulingSource], SchedulingToolOutput] = generate_schedule
+        self,
+        tool: Callable[[SchedulingSource], SchedulingToolOutput] = generate_schedule,
+        *,
+        authoritative_tool: Callable[[SchedulingSource], SchedulingToolOutput] | None = None,
     ):
         self._tool = tool
+        self._authoritative_tool = authoritative_tool
 
     def run(
         self, request: SchedulingInput, *, expected_context: AgentContext | None = None
@@ -61,14 +74,16 @@ class SchedulingAgent:
             def inspect(output):
                 verify_evidence(output, original)
                 verify_tool_output(source, output)
-                expected = generate_schedule(prepare_scheduling(original.model_copy(deep=True)))
+                expected = (self._authoritative_tool or generate_schedule)(
+                    prepare_scheduling(original.model_copy(deep=True))
+                )
                 if output != expected:
                     raise ValueError("候选、策略、限制或风险披露与规则结果不一致")
 
             output, quality = checked_execute(
                 lambda: self._tool(prepare_scheduling(original.model_copy(deep=True))),
                 inspect,
-                lambda rejected, issues: generate_schedule(
+                lambda rejected, issues: (self._authoritative_tool or generate_schedule)(
                     prepare_scheduling(original.model_copy(deep=True))
                 ),
                 blocked=(SchedulingBlocked,),

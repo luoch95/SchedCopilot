@@ -8,18 +8,25 @@ export function EvidenceComparison({
   candidates,
   workflow,
   flat = false,
+  referenceWorkflow,
 }: {
   candidates: Candidate[];
   workflow: WorkflowResult | null;
   flat?: boolean;
+  referenceWorkflow?: WorkflowResult | null;
 }) {
   return (
     <>
       {!flat && <h3 className="block-title">方案计算依据</h3>}
       <div className="candidate-grid">
         {candidates.map((item) => {
-          const catalog = workflow?.evidence_catalog ?? {};
-          const evaluation = workflow?.results.evaluation?.data?.evaluations?.find(
+          const candidateWorkflow = workflow?.results.scheduling?.data?.candidates?.some(
+            (candidate) => candidate.candidate_id === item.id,
+          )
+            ? workflow
+            : (referenceWorkflow ?? workflow);
+          const catalog = candidateWorkflow?.evidence_catalog ?? {};
+          const evaluation = candidateWorkflow?.results.evaluation?.data?.evaluations?.find(
             (row) => row.candidate_id === item.id,
           );
           const refs = new Set(item.evidence.filter((ref) => ref in catalog));

@@ -1,6 +1,7 @@
 .candidate-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
   gap: 18px;
   margin-top: 20px;
 }
@@ -29,6 +30,37 @@
 }
 .candidate-card .gantt {
   padding: 10px 10px 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.candidate-card .chart-scroll {
+  display: flex;
+  flex: 1;
+}
+.candidate-card .chart-scroll > svg {
+  height: 100%;
+  max-height: none;
+  flex: 1;
+}
+.candidate-card .gantt-inspector {
+  margin: 12px 0 0;
+  padding: 12px 16px;
+  min-height: 73px;
+}
+.candidate-card .gantt-change-reason {
+  margin: 0;
+  padding: 8px 16px;
+}
+.candidate-card > .candidate-caption {
+  padding: 12px 16px;
+  min-height: 72px;
+}
+.candidate-card > .candidate-caption p {
+  margin: 0;
+}
+.candidate-card > .candidate-caption p + p {
+  margin-top: 8px;
 }
 
 .outline-legend {
@@ -49,12 +81,29 @@
   width: 20px;
   height: 12px;
   border-radius: 3px;
+  border: 1px solid transparent;
 }
-.purple-outline {
-  border: 3px solid #7c3aed;
+.baseline-fill {
+  background: #527da8;
 }
-.amber-outline {
-  border: 3px solid #b45309;
+.baseline-completed-fill {
+  background: #dbeafe;
+}
+.optimized-completed-fill {
+  background: #bbf7d0;
+}
+.outline-legend .conflict-outline {
+  background: #527da8;
+  border: 3px solid #ea580c;
+}
+.generated-fill {
+  background: #10b981;
+}
+.published-fill {
+  background: #059669;
+}
+.fault-pattern-fill {
+  background: repeating-linear-gradient(135deg, #f5f2f2 0 4px, #d9cfd0 4px 5px);
 }
 .difference-cell {
   padding: 9px;
@@ -221,9 +270,4 @@
   padding: 16px;
   margin-top: auto;
   border-top: 1px solid var(--border);
-}
-.candidate-selected {
-  color: #1d4ed8;
-  font-size: 12px;
-  font-weight: 600;
 }

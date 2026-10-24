@@ -172,8 +172,14 @@ class DecisionStore(ManualFaultStore):
         return payload, row[1]
 
     def fault_analysis(self, revision: int) -> dict | None:
-        """Recover the original analysis independently of the current event/plan."""
+        """Prefer the actual publication, retaining both source variants for audit."""
         with self._connect() as conn:
+            for (raw,) in conn.execute(
+                "SELECT evidence FROM decisions WHERE action='publish' ORDER BY id DESC"
+            ).fetchall():
+                evidence = json.loads(raw)
+                if evidence.get("candidate", {}).get("event_revision") == revision:
+                    return fault_publication(conn, evidence)
             rows = conn.execute(
                 "SELECT w.payload,s.candidates,s.event FROM workflow_runs w "
                 "LEFT JOIN simulations s ON s.id=w.simulation_id ORDER BY w.sequence DESC"
@@ -250,7 +256,7 @@ class DecisionStore(ManualFaultStore):
                 if needs_labels:
                     conn.execute("UPDATE current_plan SET payload=? WHERE id=1", (labeled,))
 
-    def plan_metadata(self, version):
+    def plan_metadata(self, version, event_revision=None):
         with self._connect() as conn:
             timeline = plan_timeline(conn, version)
             rows = conn.execute(
@@ -258,6 +264,7 @@ class DecisionStore(ManualFaultStore):
                 "WHERE action='publish' ORDER BY id DESC"
             ).fetchall()
             fault_traces = []
+            current_fault_analysis = None
             for _created_at, payload, raw in reversed(rows):
                 published_version = raw_version(payload)
                 evidence = json.loads(raw)
@@ -268,11 +275,17 @@ class DecisionStore(ManualFaultStore):
                 ):
                     continue
                 analysis = fault_publication(conn, evidence)
+                if analysis["event_revision"] == event_revision:
+                    current_fault_analysis = analysis
                 fault_traces.append(
                     {
                         "version": published_version,
                         "event_revision": analysis["event_revision"],
                         "failure": asdict(parse_event(json.dumps(evidence["event"]))),
+                        "candidate_label": evidence["candidate"]["label"],
+                        "metrics": asdict(
+                            parse_candidates(json.dumps([evidence["candidate"]]))[0].metrics
+                        ),
                         "affected_operations": [
                             op
                             for op in (analysis.get("baseline") or {}).get("operations", [])
@@ -288,11 +301,13 @@ class DecisionStore(ManualFaultStore):
                         "history": timeline,
                         "fault_traces": fault_traces,
                         "fault_analysis": fault_publication(conn, evidence),
+                        "current_fault_analysis": current_fault_analysis,
                     }
         return {
             "version": version,
             "history": timeline,
             "fault_traces": fault_traces,
+            "current_fault_analysis": current_fault_analysis,
             "published_at": None,
             "published_by": None,
             "version_summary": "初始演示计划" if version == 1 else "历史版本，未记录发布信息",

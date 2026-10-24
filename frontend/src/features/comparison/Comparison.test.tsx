@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { Comparison } from './Comparison';
 import { simulation, workbench } from '../../test/fixtures';
+import type { WorkflowResult } from '../../shared/api/contracts';
 
 it('compares the actual published plan with a single tail candidate across midnight', () => {
   const original = simulation.candidates[0];
@@ -31,7 +32,7 @@ it('compares the actual published plan with a single tail candidate across midni
     />,
   );
   const baseline = screen.getByRole('article', { name: '当前执行计划排产图' });
-  const tail = screen.getByRole('article', { name: '原计划对照排产图' });
+  const tail = screen.getByRole('article', { name: 'AI 原线等待方案排产图' });
   expect(within(baseline).getByRole('graphics-symbol').getAttribute('aria-label')).toContain(
     '10/19 13:00',
   );
@@ -40,11 +41,11 @@ it('compares the actual published plan with a single tail candidate across midni
   );
   expect(within(baseline).queryByRole('group', { name: 'M1 停机留痕' })).toBeNull();
   expect(within(tail).getByRole('group', { name: 'M1 停机留痕' })).toBeTruthy();
-  expect(within(tail).getByRole('heading', { name: candidate.label })).toBeTruthy();
+  expect(within(tail).getByRole('heading', { name: 'AI 原线等待方案' })).toBeTruthy();
   expect(screen.getAllByRole('img', { name: '设备工序甘特图' })).toHaveLength(2);
-  expect(within(baseline).queryByRole('button', { name: /采纳此方案/ })).toBeNull();
-  expect(within(tail).getByRole('button', { name: '采纳此方案（等待恢复）' })).toBeTruthy();
-  expect(screen.queryByText('⭐ AI 推荐')).toBeNull();
+  expect(within(baseline).queryByRole('button', { name: /^采纳/ })).toBeNull();
+  expect(within(tail).getByRole('button', { name: '采纳 AI 等待方案' })).toBeTruthy();
+  expect(screen.queryByText('AI 允许转移')).toBeNull();
 });
 
 it('binds each card action to its candidate and keeps archives read-only', () => {
@@ -61,19 +62,74 @@ it('binds each card action to its candidate and keeps archives read-only', () =>
     adoption: { selected: 'transfer', disabled: false, onAdopt },
   };
   const { rerender } = render(<Comparison {...props} />);
-  const waiting = screen.getByRole('article', { name: '原计划对照排产图' });
-  const transfer = screen.getByRole('article', { name: '允许合格设备转移排产图' });
-  fireEvent.click(within(waiting).getByRole('button', { name: '采纳此方案（等待恢复）' }));
+  const waiting = screen.getByRole('article', { name: 'AI 原线等待方案排产图' });
+  const transfer = screen.getByRole('article', { name: 'AI 允许转移方案排产图' });
+  expect(
+    within(waiting).getByRole('button', { name: '采纳 AI 等待方案' }).classList.contains('primary'),
+  ).toBe(false);
+  expect(
+    within(transfer)
+      .getByRole('button', { name: '采纳 AI 转移方案' })
+      .classList.contains('primary'),
+  ).toBe(true);
+  expect(screen.queryByText('已选中')).toBeNull();
+  fireEvent.click(within(waiting).getByRole('button', { name: '采纳 AI 等待方案' }));
   expect(onAdopt).toHaveBeenLastCalledWith('wait');
-  fireEvent.click(within(transfer).getByRole('button', { name: '采纳此方案（转移设备）' }));
+  fireEvent.click(within(transfer).getByRole('button', { name: '采纳 AI 转移方案' }));
   expect(onAdopt).toHaveBeenLastCalledWith('transfer');
-  expect(within(transfer).getByText('⭐ AI 推荐')).toBeTruthy();
-  expect(within(waiting).queryByText('⭐ AI 推荐')).toBeNull();
+  expect(within(transfer).getByText('AI 允许转移')).toBeTruthy();
+  expect(within(waiting).queryByText('AI 允许转移')).toBeNull();
   expect(transfer.getAttribute('data-selected')).toBe('true');
+  rerender(<Comparison {...props} adoption={{ ...props.adoption, selected: 'wait' }} />);
+  expect(
+    screen.getByRole('button', { name: '采纳 AI 等待方案' }).classList.contains('primary'),
+  ).toBe(true);
+  expect(
+    screen.getByRole('button', { name: '采纳 AI 转移方案' }).classList.contains('primary'),
+  ).toBe(false);
   rerender(<Comparison {...props} adoption={{ ...props.adoption, disabled: true }} />);
-  fireEvent.click(screen.getByRole('button', { name: '采纳此方案（等待恢复）' }));
+  fireEvent.click(screen.getByRole('button', { name: '采纳 AI 等待方案' }));
   expect(onAdopt).toHaveBeenCalledTimes(2);
   rerender(<Comparison {...props} archived />);
-  expect(screen.queryByRole('button', { name: /采纳此方案/ })).toBeNull();
-  expect(screen.queryByText('⭐ AI 推荐')).toBeNull();
+  expect(screen.queryByRole('button', { name: /^采纳/ })).toBeNull();
+  expect(screen.queryByText('AI 允许转移')).toBeNull();
+});
+
+it('uses original workflow strategy IDs after titles change and does not classify manual or unknown plans as transfer', () => {
+  const waiting = {
+    ...simulation.candidates[0],
+    id: 'opaque-wait-id',
+    label: '原 AI 方案（任意名称）',
+  };
+  const manual = { ...simulation.candidates[1], id: 'manual:draft:2', label: '任意人工标题' };
+  const unknown = { ...simulation.candidates[0], id: 'unknown', label: '原计划对照' };
+  render(
+    <Comparison
+      state={workbench}
+      simulation={{ ...simulation, candidates: [waiting, manual, unknown] }}
+      range={[
+        Date.parse(workbench.event.started_at),
+        Date.parse(waiting.schedule.operations[0].end),
+      ]}
+      workflow={null}
+      referenceWorkflow={
+        {
+          results: {
+            scheduling: {
+              data: { candidates: [{ candidate_id: waiting.id, strategy_id: 'wait-recovery' }] },
+            },
+          },
+        } as WorkflowResult
+      }
+      mode="plans"
+      adoption={{ selected: '', disabled: false, onAdopt: vi.fn() }}
+    />,
+  );
+  const waitingCard = screen.getByRole('article', { name: 'AI 原线等待方案排产图' });
+  expect(within(waitingCard).getByRole('button', { name: '采纳 AI 等待方案' })).toBeTruthy();
+  expect(within(waitingCard).getByRole('graphics-symbol').getAttribute('fill')).toBe('#527DA8');
+  expect(screen.getByRole('button', { name: '采纳人工方案' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '采纳此方案' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '采纳 AI 转移方案' })).toBeNull();
+  expect(screen.queryByText('AI 允许转移')).toBeNull();
 });

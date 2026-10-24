@@ -16,7 +16,10 @@ export function OperationComparison({
   const operations = state.baseline.operations.filter((op) =>
     candidates.some((item) => {
       const after = item.schedule.operations.find((task) => task.id === op.id)!;
-      return after.machine_id !== op.machine_id || after.start !== op.start;
+      return (
+        after &&
+        (after.machine_id !== op.machine_id || Date.parse(after.start) !== Date.parse(op.start))
+      );
     }),
   );
   return (

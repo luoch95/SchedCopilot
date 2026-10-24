@@ -152,12 +152,14 @@ it('evaluates a saved request and renders macro data only for sales, restoring i
   expect(screen.getByText('O1001 · 原订单')).toBeTruthy();
   expect(screen.queryByText(/M2|MD-URG-A|URG-request-1-OP1/)).toBeNull();
   expect(screen.queryByText('设备与工序排布明细')).toBeNull();
-  expect(screen.getByText('查看原文 · 紧急插单审批规范 · v1.0')).toBeTruthy();
+  expect(screen.getByLabelText('查看原文：紧急插单审批规范')).toBeTruthy();
+  expect(screen.getByText(/紧急插单审批规范 · v1.0/)).toBeTruthy();
   first.unmount();
   render(<PendingRequestsPanel />);
   await screen.findByText('待审批 · 已试排');
   expect(screen.getByText('满足')).toBeTruthy();
-  expect(screen.getByText('查看原文 · 紧急插单审批规范 · v1.0')).toBeTruthy();
+  expect(screen.getByLabelText('查看原文：紧急插单审批规范')).toBeTruthy();
+  expect(screen.getByText(/紧急插单审批规范 · v1.0/)).toBeTruthy();
 });
 
 it('planner sees the exact same saved summary plus equipment and operation details', async () => {

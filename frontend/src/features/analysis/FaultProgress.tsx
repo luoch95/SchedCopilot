@@ -8,6 +8,7 @@ export function FaultProgress({
   generating = false,
   dirty = false,
   onReview,
+  scope = 'plan',
 }: {
   state: Workbench;
   workflow: WorkflowResult | null;
@@ -15,16 +16,19 @@ export function FaultProgress({
   generating?: boolean;
   dirty?: boolean;
   onReview?: () => void;
+  scope?: 'event' | 'plan';
 }) {
-  const published = !dirty && !generating && !!publishedFault(state);
+  const publication = publishedFault(state);
+  const published = !dirty && !generating && !!publication;
   const review = state.fault_review;
   const assessment =
     workflow?.status === 'completed' && !!workflow.results.evaluation?.data?.assessment;
   const currentReview =
     review?.event_revision === state.event_revision &&
     review.baseline_fingerprint === state.baseline.fingerprint &&
-    (!assessment || (review.kind === 'assessment' && review.workflow_id === workflow?.id)) &&
-    (!simulation || review.simulation_id === simulation.id)
+    (scope === 'event' ||
+      ((!assessment || (review.kind === 'assessment' && review.workflow_id === workflow?.id)) &&
+        (!simulation || review.simulation_id === simulation.id)))
       ? review
       : null;
   const analyzed =
@@ -58,14 +62,17 @@ export function FaultProgress({
     },
     {
       label: '计划发布',
-      done: published || (assessment && approved),
-      detail: assessment
-        ? '评估结论无需发布排产'
-        : published
-          ? `已发布 V${state.baseline.version}`
-          : approved
-            ? '已流转排产员 · 待发布'
-            : '待审批通过',
+      done:
+        published ||
+        ((scope === 'event' ? currentReview?.kind === 'assessment' : assessment) && approved),
+      detail:
+        (scope === 'event' ? currentReview?.kind === 'assessment' : assessment) && !published
+          ? '评估结论无需发布排产'
+          : published
+            ? `已发布 V${publication?.published_version ?? state.baseline.version}`
+            : approved
+              ? '已流转排产员 · 待发布'
+              : '待审批通过',
     },
   ];
   const active = steps.findIndex((step) => !step.done);

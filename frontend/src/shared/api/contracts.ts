@@ -38,12 +38,36 @@ export interface Decision {
   reason: string;
   created_at: string;
 }
+export interface FaultAnalysis {
+  report?: ContributionReport;
+  decisions?: {
+    status: string;
+    candidate_id?: string;
+    reason: string;
+    review_reason: string;
+    reviewed_at: string | null;
+  };
+  event_revision: number;
+  baseline_version: number;
+  affected?: string[] | null;
+  workflow: WorkflowResult | null;
+  baseline?: Schedule;
+  simulation?: Simulation;
+  variants?: { ai: FaultAnalysis | null; manual: FaultAnalysis | null };
+  selected_variant?: 'ai' | 'manual';
+  selected_candidate_id?: string;
+  published_version?: number;
+  published_at?: string;
+}
 export interface PlanPublication {
+  current_fault_analysis?: FaultAnalysis | null;
   fault_traces?: {
     version: number;
     event_revision: number;
     failure: Failure;
     affected_operations: Operation[];
+    candidate_label?: string;
+    metrics?: Candidate['metrics'];
   }[];
   history?: {
     version: number;
@@ -56,21 +80,7 @@ export interface PlanPublication {
   published_at: string | null;
   published_by: string | null;
   version_summary: string;
-  fault_analysis?: {
-    report?: ContributionReport;
-    decisions?: {
-      status: string;
-      reason: string;
-      review_reason: string;
-      reviewed_at: string | null;
-    };
-    event_revision: number;
-    baseline_version: number;
-    affected: string[] | null;
-    workflow: WorkflowResult | null;
-    baseline?: Schedule;
-    simulation?: Simulation;
-  } | null;
+  fault_analysis?: FaultAnalysis | null;
 }
 export interface Workbench {
   fault_review?: FaultReview | null;
@@ -253,6 +263,10 @@ export interface WorkflowReport {
   warnings: WorkflowNotice[];
   errors: WorkflowNotice[];
   data: {
+    can_generate_candidates?: boolean;
+    checked_items?: string[];
+    unchecked_items?: string[];
+    issues?: { severity: 'blocking' | 'warning' | 'info'; message: string }[];
     assessment?: AnalysisAssessment | null;
     summary?: string;
     facts?: WorkflowStatement[];
@@ -336,6 +350,7 @@ export interface ContributionReport {
   model?: { mode: 'live' | 'fallback'; error_code: string | null; highlights: WorkflowStatement[] };
 }
 export interface ManualFaultDraft {
+  workflow?: WorkflowResult | null;
   source_simulation_id: string | null;
   source_candidate_id: string | null;
   id: string;

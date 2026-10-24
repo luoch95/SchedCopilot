@@ -121,19 +121,6 @@ class ManualFaultStore:
                         )
             elif expected_revision is not None:
                 raise RuleViolation("人工草案不存在")
-            else:
-                # Entering manual mode invalidates an already approved AI plan.
-                rows = conn.execute(
-                    "SELECT id,payload FROM fault_reviews WHERE event_revision=? "
-                    "AND baseline_fingerprint=? AND status IN ('pending','approved')",
-                    (payload["event_revision"], payload["baseline_fingerprint"]),
-                ).fetchall()
-                for review_id, raw_review in rows:
-                    changed = json.loads(raw_review) | {"status": "superseded"}
-                    conn.execute(
-                        "UPDATE fault_reviews SET status='superseded',payload=? WHERE id=?",
-                        (json.dumps(changed, ensure_ascii=False), review_id),
-                    )
             check_current(conn, payload)
             if candidate is not None:
                 conn.execute(

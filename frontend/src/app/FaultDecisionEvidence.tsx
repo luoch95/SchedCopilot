@@ -35,6 +35,7 @@ export function FaultDecisionEvidence({
   archived?: boolean;
 }) {
   const analysisProps = workflow && {
+    simulation,
     busy: controller.busy,
     question: controller.question,
     result: workflow,
@@ -43,21 +44,27 @@ export function FaultDecisionEvidence({
     answer: controller.answer,
     asking: controller.asking,
     askError: controller.askError,
-    disabled: controller.dirty || controller.stale || !!controller.manualDraft || archived,
+    disabled: controller.dirty || controller.stale || archived,
     readOnly: archived,
   };
   const chainProps = {
-    running: !archived && controller.activeIntent !== null,
+    running:
+      !archived &&
+      controller.activeIntent !== null &&
+      (controller.busy !== '评估人工草案' || controller.analysisView === 'manual'),
     disabled:
       archived ||
       !!controller.busy ||
       controller.dirty ||
       controller.stale ||
-      !!controller.manualDraft,
+      !!controller.activeManual,
     result: workflow,
-    progress: archived ? null : controller.progress,
+    progress:
+      archived || (controller.busy === '评估人工草案' && controller.analysisView === 'ai')
+        ? null
+        : controller.progress,
     onRun: controller.runWorkflow,
-    readOnly: archived,
+    readOnly: archived || !!controller.activeManual,
   };
   return (
     <>
@@ -69,7 +76,7 @@ export function FaultDecisionEvidence({
             <section className="decision-analysis-card" key={id}>
               <h3 id={id}>{title}</h3>
               <p>
-                {controller.manualDraft
+                {controller.activeManual
                   ? '人工调整后的方案尚无独立分析，请核对计算依据与约束。'
                   : '暂无完整解释，已有检查结果可在执行详情中查看。'}
               </p>
@@ -81,6 +88,7 @@ export function FaultDecisionEvidence({
         state={state}
         simulation={simulation}
         workflow={workflow}
+        referenceWorkflow={controller.activeManual ? controller.originalWorkflow : null}
         active={activeTab}
         onActive={onTab}
       />

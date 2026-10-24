@@ -8,9 +8,10 @@ import { useGanttSelection } from './GanttSelection';
 
 const colors = ['#2E748C', '#489B78', '#A87939', '#7B71A4', '#C17467'];
 const comparisonColors = {
-  red: ['#B83F45', '#A94D59', '#C65D46', '#963F57', '#B45F64'],
-  green: ['#24744F', '#388360', '#437A45', '#21685D', '#52864E'],
-};
+  red: '#527DA8',
+  green: '#10B981',
+  published: '#059669',
+} as const;
 const hour = (value: number) => stamp(new Date(value).toISOString()).split(' ')[1];
 type FaultOverlay = {
   failure: Failure;
@@ -24,9 +25,12 @@ export default function Gantt({
   machines,
   range,
   changes = [],
+  affectedOperationIds = [],
   tone,
   faultTrace,
   faults,
+  editBoundary,
+  timeMarker,
   onMove,
 }: {
   schedule: Schedule;
@@ -35,9 +39,12 @@ export default function Gantt({
   machines: Machine[];
   range: [number, number];
   changes?: Change[];
-  tone?: 'red' | 'green';
+  affectedOperationIds?: string[];
+  tone?: 'red' | 'green' | 'published';
   faultTrace?: { version: number; affectedOperations: Operation[] };
   faults?: FaultOverlay[];
+  editBoundary?: string;
+  timeMarker?: { time: number; label: string };
   onMove?: (operationId: string, machineId: string, start: string) => unknown;
 }) {
   const drag = useRef<{
@@ -50,6 +57,8 @@ export default function Gantt({
   } | null>(null);
   const [dragOffset, setDragOffset] = useState<{ id: string; x: number; y: number } | null>(null);
   const overlays = faults ?? [{ failure, faultTrace }];
+  const boundary = editBoundary ? Date.parse(editBoundary) : -Infinity;
+  const canEdit = (op: Operation) => op.status === 'planned' && Date.parse(op.start) >= boundary;
   const [hoveredFault, setHoveredFault] = useState(0);
   const activeFault = overlays[hoveredFault] ?? { failure, faultTrace };
   const patternId = `fault-pattern-${useId().replace(/:/g, '')}`;
@@ -58,7 +67,9 @@ export default function Gantt({
   const [faultAnchor, setFaultAnchor] = useState({ x: 0, y: 0 });
   const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0 });
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const palette = tone ? comparisonColors[tone] : colors;
+  const comparisonColor = tone ? comparisonColors[tone] : undefined;
+  const palette = comparisonColor ? [comparisonColor] : colors;
+  const completedColor = tone === 'red' ? '#DBEAFE' : tone ? '#BBF7D0' : '#F1F5F9';
   const sharedSelection = useGanttSelection();
   const [localSelection, setLocalSelection] = useState<string | null>(null);
   const selectedId = sharedSelection?.operationId ?? localSelection;
@@ -118,11 +129,17 @@ export default function Gantt({
     ((Number(typeof value === 'string' ? new Date(value) : value) - range[0]) /
       (range[1] - range[0])) *
       (width - left - right);
+  const boundaryX = Math.max(left, Math.min(width - right, x(boundary)));
+  const markerTime = timeMarker?.time;
+  const markerValid = markerTime !== undefined && Number.isFinite(markerTime);
+  const markerInRange = markerValid && markerTime >= range[0] && markerTime <= range[1];
+  const markerX = markerValid ? Math.max(left, Math.min(width - right, x(markerTime))) : left;
   const orderIds = [...new Set(schedule.operations.map((op) => op.order_id))].sort();
   const eventTicks = overlays
     .flatMap(({ failure }) => [failure.started_at, failure.recovered_at])
     .filter((value): value is string => !!value)
-    .map((value) => +new Date(value));
+    .map((value) => +new Date(value))
+    .filter((value) => value >= boundary);
   const step = range[1] - range[0] > 18 * 3600_000 ? 2 * 3600_000 : 3600_000;
   const firstHour = Math.ceil(range[0] / step) * step;
   const hourlyTicks: number[] = [];
@@ -164,6 +181,12 @@ export default function Gantt({
       Date.parse(op.start) < faultEnd &&
       Date.parse(op.end) > Date.parse(activeFailure.started_at),
   );
+  const affectedIds = new Set([...affectedOperationIds, ...conflicts.map((op) => op.id)]);
+  const affectedOrders = new Set(
+    [...schedule.operations, ...(baseline?.operations ?? [])]
+      .filter((op) => affectedIds.has(op.id))
+      .map((op) => op.order_id),
+  );
   const allTransferred =
     !!activeTrace?.affectedOperations.length &&
     activeTrace.affectedOperations.every((original) =>
@@ -171,14 +194,20 @@ export default function Gantt({
         (op) => op.id === original.id && op.machine_id !== activeFailure.machine_id,
       ),
     );
-  const faultDescription = `${activeTrace ? `V${activeTrace.version} 变更留痕：` : '设备停机窗口：'}因 ${activeFailure.machine_id} 设备故障（${hour(Date.parse(activeFailure.started_at))}—${activeFailure.recovered_at ? hour(Date.parse(activeFailure.recovered_at)) : '恢复时间未知'}），${conflicts.length ? `当前仍有 ${conflicts.length} 道工序与停机窗口重叠，需调整排产` : allTransferred ? '相关订单工序已全部转移' : activeTrace ? '相关工序已调整避开停机窗口' : '当前窗口内无排产冲突'}，当前时段设备不可用。`;
+  const faultDescription = `${activeTrace ? `V${activeTrace.version} 变更留痕：` : '设备停机窗口：'}因 ${activeFailure.machine_id} 设备故障（${stamp(activeFailure.started_at)}—${activeFailure.recovered_at ? stamp(activeFailure.recovered_at) : '恢复时间未知'}），${conflicts.length ? `当前仍有 ${conflicts.length} 道工序与停机窗口重叠，需调整排产` : allTransferred ? '相关订单工序已全部转移' : activeTrace ? '相关工序已调整避开停机窗口' : '当前窗口内无排产冲突'}，当前时段设备不可用。来源：${activeFailure.source}。`;
   return (
-    <div className="gantt">
-      <div className="chart-scroll" ref={chartRef} onScroll={() => setFaultHovered(false)}>
+    <div className={`gantt${tone === 'red' ? ' gantt-baseline' : ''}`}>
+      <div
+        className="chart-scroll"
+        ref={chartRef}
+        style={tone ? { minHeight: height } : undefined}
+        onScroll={() => setFaultHovered(false)}
+      >
         <svg
           width="100%"
           height={height}
           viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio={tone ? 'none' : undefined}
           role="img"
           aria-label="设备工序甘特图"
         >
@@ -190,6 +219,15 @@ export default function Gantt({
                 stroke="#d9cfd0"
                 strokeWidth="0.6"
                 strokeOpacity="0.55"
+              />
+            </pattern>
+            <pattern id={`${patternId}-current`} width="8" height="8" patternUnits="userSpaceOnUse">
+              <rect width="8" height="8" fill="#FEF3C7" fillOpacity="0.35" />
+              <path
+                d="M-2 6L2 10M0 0L8 8M6-2L10 2"
+                stroke="#B78B45"
+                strokeWidth="0.7"
+                strokeOpacity="0.65"
               />
             </pattern>
           </defs>
@@ -232,18 +270,31 @@ export default function Gantt({
               >
                 {machine.id}
               </text>
-              {overlays.map(({ failure }, faultIndex) => {
+              {editBoundary && (
+                <rect
+                  className="gantt-editable-region"
+                  x={boundaryX}
+                  y={top + index * rowHeight}
+                  width={width - right - boundaryX}
+                  height={rowHeight - 7}
+                  fill="#ECFDF5"
+                  pointerEvents="none"
+                />
+              )}
+              {overlays.map(({ failure, faultTrace: trace }, faultIndex) => {
                 const faultEnd = failure.recovered_at ? +new Date(failure.recovered_at) : range[1];
+                const faultStart = Math.max(Date.parse(failure.started_at), boundary, range[0]);
+                const label = editBoundary ? (trace ? '已发布停机' : '本次故障') : '停机留痕';
                 return (
                   machine.id === failure.machine_id &&
-                  x(faultEnd) > left &&
-                  x(failure.started_at) < width - right && (
+                  faultEnd > faultStart &&
+                  faultStart < range[1] && (
                     <g
-                      key={`${failure.machine_id}-${failure.started_at}-${failure.recovered_at}`}
+                      key={`${faultIndex}-${failure.machine_id}-${failure.started_at}`}
                       className="gantt-fault-region"
                       tabIndex={0}
                       role="group"
-                      aria-label={`${machine.id} 停机留痕`}
+                      aria-label={`${machine.id} ${label}${editBoundary && trace ? ` V${trace.version}` : ''}`}
                       aria-describedby={
                         faultHovered && hoveredFault === faultIndex ? tooltipId : undefined
                       }
@@ -266,24 +317,24 @@ export default function Gantt({
                       onBlur={() => setFaultHovered(false)}
                     >
                       <rect
-                        x={Math.max(left, x(failure.started_at))}
+                        x={Math.max(left, x(faultStart))}
                         y={top + index * rowHeight + 2}
                         width={Math.max(
                           0,
-                          Math.min(width - right, x(faultEnd)) -
-                            Math.max(left, x(failure.started_at)),
+                          Math.min(width - right, x(faultEnd)) - Math.max(left, x(faultStart)),
                         )}
                         height={rowHeight - 11}
-                        fill={`url(#${patternId})`}
-                        stroke="#ded6d6"
+                        fill={`url(#${patternId}${editBoundary && !trace ? '-current' : ''})`}
+                        stroke={editBoundary ? (trace ? '#7890A5' : '#B78B45') : '#ded6d6'}
+                        strokeDasharray={editBoundary && trace ? '4 3' : undefined}
                       />
                       <text
-                        x={Math.max(left, x(failure.started_at)) + 5}
-                        y={top + index * rowHeight + 13}
+                        x={Math.max(left, x(faultStart)) + 5}
+                        y={top + index * rowHeight + (editBoundary && !trace ? 54 : 13)}
                         className="fault-label"
                         pointerEvents="none"
                       >
-                        ⚠ 停机留痕
+                        ⚠ {label}
                       </text>
                     </g>
                   )
@@ -295,19 +346,24 @@ export default function Gantt({
             const original = baseline?.operations.find((item) => item.id === op.id);
             const transfer = original && original.machine_id !== op.machine_id;
             const changed = transfer || (original && original.start !== op.start);
+            const affected =
+              tone === 'red' && op.status !== 'completed' && affectedOrders.has(op.order_id);
             const start = Math.max(left, x(op.start)),
               end = Math.min(width - right, x(op.end));
             if (end <= start) return null;
             const row = machines.findIndex((item) => item.id === op.machine_id);
             const y = top + row * rowHeight + 20;
+            const label = op.display_name ?? op.id;
+            const labelWidth = Math.max(1, end - start - 6);
+            const editable = canEdit(op);
             return (
               <g
                 key={op.id}
-                className={`gantt-operation${selectedId === op.id ? ' gantt-operation-selected' : ''}`}
+                className={`gantt-operation${selectedId === op.id ? ' gantt-operation-selected' : ''}${editBoundary ? (editable ? ' gantt-operation-editable' : ' gantt-operation-locked') : ''}`}
                 data-operation-id={op.id}
                 data-selected={selectedId === op.id}
                 style={{
-                  cursor: onMove && op.status === 'planned' ? 'grab' : undefined,
+                  cursor: onMove && editable ? 'grab' : editBoundary ? 'not-allowed' : undefined,
                   touchAction: onMove ? 'none' : undefined,
                 }}
                 transform={
@@ -316,7 +372,7 @@ export default function Gantt({
                     : undefined
                 }
                 onPointerDown={(event) => {
-                  if (!onMove || op.status !== 'planned' || event.button !== 0) return;
+                  if (!onMove || !editable || event.button !== 0) return;
                   const bounds = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
                   if (!bounds?.width) return;
                   drag.current = {
@@ -361,11 +417,9 @@ export default function Gantt({
                         Math.min(machines.length - 1, active.row + Math.round(dy / rowHeight)),
                       )
                     ];
-                  void onMove(
-                    op.id,
-                    machine.id,
-                    new Date(active.start + minutes * 60000).toISOString(),
-                  );
+                  const nextStart = active.start + minutes * 60000;
+                  if (nextStart < boundary) return;
+                  void onMove(op.id, machine.id, new Date(nextStart).toISOString());
                 }}
                 onMouseEnter={() => setHover(op)}
                 onMouseLeave={() => setHover(null)}
@@ -381,17 +435,22 @@ export default function Gantt({
                   width={end - start}
                   height={29}
                   rx={4}
-                  fill={palette[orderIds.indexOf(op.order_id) % palette.length]}
-                  fillOpacity={op.status === 'completed' ? 0.42 : 1}
-                  stroke={transfer ? '#7C3AED' : changed ? '#B45309' : 'transparent'}
-                  strokeWidth={changed ? 4 : 0}
+                  fill={
+                    op.status === 'completed'
+                      ? completedColor
+                      : palette[orderIds.indexOf(op.order_id) % palette.length]
+                  }
+                  fillOpacity={1}
+                  stroke={affected ? '#EA580C' : 'transparent'}
+                  strokeWidth={affected ? 3 : 0}
                   tabIndex={0}
                   role="graphics-symbol"
-                  aria-label={`${op.display_name ?? op.id} ${op.machine_id} ${stamp(op.start)} 至 ${stamp(op.end)}${transfer ? ' 设备转移' : changed ? ' 时间调整' : ''}`}
+                  aria-label={`${op.display_name ?? op.id} ${op.machine_id} ${stamp(op.start)} 至 ${stamp(op.end)}${affected ? ' 故障影响' : ''}${transfer ? ' 设备转移' : changed ? ' 时间调整' : ''}${editBoundary ? (editable ? ' 可编辑' : ' 已锁定') : ''}`}
+                  aria-disabled={editBoundary && !editable ? true : undefined}
                   onKeyDown={(event) => {
                     if (
                       onMove &&
-                      op.status === 'planned' &&
+                      editable &&
                       ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
                     ) {
                       event.preventDefault();
@@ -408,11 +467,9 @@ export default function Gantt({
                           : event.key === 'ArrowLeft'
                             ? -300000
                             : 0;
-                      void onMove(
-                        op.id,
-                        machines[targetRow].id,
-                        new Date(Date.parse(op.start) + offset).toISOString(),
-                      );
+                      const nextStart = Date.parse(op.start) + offset;
+                      if (nextStart < boundary) return;
+                      void onMove(op.id, machines[targetRow].id, new Date(nextStart).toISOString());
                       return;
                     }
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -425,14 +482,87 @@ export default function Gantt({
                 >
                   <title>{`${op.display_name ?? op.id} · ${op.machine_id}\n${stamp(op.start)} → ${stamp(op.end)}`}</title>
                 </rect>
-                {end - start > 78 && (
-                  <text x={(start + end) / 2} y={y + 19} textAnchor="middle" className="bar-label">
-                    {op.display_name ?? op.id}
+                {(tone || end - start > 78) && (
+                  <text
+                    x={(start + end) / 2}
+                    y={y + 19}
+                    textAnchor="middle"
+                    className="bar-label"
+                    textLength={tone && label.length * 7 > labelWidth ? labelWidth : undefined}
+                    lengthAdjust="spacingAndGlyphs"
+                    style={{
+                      fill: tone ? '#000000' : op.status === 'completed' ? '#94A3B8' : undefined,
+                    }}
+                  >
+                    {label}
                   </text>
                 )}
               </g>
             );
           })}
+          {editBoundary && (
+            <g className="gantt-time-boundary" pointerEvents="none">
+              <rect
+                x={left}
+                y={top}
+                width={boundaryX - left}
+                height={machines.length * rowHeight - 7}
+                fill="#334155"
+                fillOpacity="0.18"
+              />
+              {boundary >= range[0] && boundary <= range[1] && (
+                <>
+                  <line
+                    x1={boundaryX}
+                    x2={boundaryX}
+                    y1={30}
+                    y2={height - 20}
+                    stroke="#0F766E"
+                    strokeWidth="2"
+                    strokeDasharray="5 3"
+                  />
+                  <text
+                    x={boundaryX + (boundaryX > width - 190 ? -6 : 6)}
+                    y={40}
+                    textAnchor={boundaryX > width - 190 ? 'end' : 'start'}
+                    fill="#115E59"
+                    fontSize="11"
+                    fontWeight="700"
+                  >
+                    执行快照 {hour(boundary)}
+                  </text>
+                </>
+              )}
+            </g>
+          )}
+          {timeMarker && markerValid && (
+            <g className="gantt-time-marker" pointerEvents="none">
+              <title>{`${timeMarker.label}：${stamp(new Date(markerTime).toISOString())}${markerInRange ? '' : '，在显示范围外'}`}</title>
+              {markerInRange && (
+                <line
+                  x1={markerX}
+                  x2={markerX}
+                  y1={30}
+                  y2={height - 20}
+                  stroke="#0F766E"
+                  strokeWidth="2"
+                  strokeDasharray="5 3"
+                />
+              )}
+              <text
+                x={markerX + (markerX > width - 190 ? -6 : 6)}
+                y={40}
+                textAnchor={markerX > width - 190 ? 'end' : 'start'}
+                fill="#115E59"
+                fontSize="11"
+                fontWeight="700"
+              >
+                {markerInRange
+                  ? `${timeMarker.label} ${hour(markerTime)}`
+                  : `${markerTime < range[0] ? '← ' : ''}${timeMarker.label}在显示范围外${markerTime > range[1] ? ' →' : ''}`}
+              </text>
+            </g>
+          )}
         </svg>
         {faultHovered && (
           <div
@@ -455,6 +585,13 @@ export default function Gantt({
             </span>
             <span>
               {statusLabel(inspected.status)}
+              {editBoundary && !canEdit(inspected)
+                ? Date.parse(inspected.start) < boundary && inspected.status === 'planned'
+                  ? ' · 已锁定：开始于快照前，请核实报工状态'
+                  : ' · 已锁定，不可调整'
+                : editBoundary
+                  ? ' · 可编辑'
+                  : ''}
               {before &&
               (before.machine_id !== inspected.machine_id || before.start !== inspected.start)
                 ? ` · 原安排 ${before.machine_id} / ${stamp(before.start)}`
@@ -466,7 +603,7 @@ export default function Gantt({
         )}
       </div>
       {change && (
-        <p className="hint">
+        <p className="hint gantt-change-reason">
           调整依据：
           <DecisionText text={businessText(change.依据, schedule.operations)} />
         </p>
@@ -474,7 +611,15 @@ export default function Gantt({
       <div className="order-legend">
         {orderIds.map((id, index) => (
           <span key={id}>
-            <i style={{ background: palette[index % palette.length] }} />
+            <i
+              style={{
+                background: schedule.operations
+                  .filter((op) => op.order_id === id)
+                  .every((op) => op.status === 'completed')
+                  ? completedColor
+                  : palette[index % palette.length],
+              }}
+            />
             {schedule.operations.find((op) => op.order_id === id)?.order_display_name ?? id}
           </span>
         ))}

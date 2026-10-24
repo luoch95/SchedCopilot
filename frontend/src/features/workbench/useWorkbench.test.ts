@@ -17,6 +17,7 @@ vi.mock('./api', () => ({
     createManualDraft: vi.fn(),
     saveManualDraft: vi.fn(),
     confirmManualDraft: vi.fn(),
+    evaluateManualDraft: vi.fn(),
   },
 }));
 const completed: WorkflowResponse = {
@@ -103,7 +104,8 @@ it('preserves the editable draft when confirmation finds a repairable constraint
   vi.mocked(workbenchApi.load).mockResolvedValue(workbench);
   vi.mocked(workbenchApi.latestWorkflow).mockResolvedValue(completed);
   vi.mocked(workbenchApi.manualDraft).mockResolvedValue(manualDraft);
-  vi.mocked(workbenchApi.confirmManualDraft).mockRejectedValue(
+  vi.mocked(workbenchApi.saveManualDraft).mockResolvedValue(manualDraft);
+  vi.mocked(workbenchApi.evaluateManualDraft).mockRejectedValue(
     new ApiError('resource conflict', 409, 'rule_violation'),
   );
   const { result } = renderHook(() => useWorkbench());

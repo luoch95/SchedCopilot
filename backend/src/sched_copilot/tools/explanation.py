@@ -6,7 +6,10 @@ import re
 from ..agents.contracts.artifacts import EvaluationDifferences, EvaluationMetrics
 from ..agents.contracts.common import Statement
 from ..agents.contracts.results import ExplanationData, ExplanationTradeoff, NextStep
-from ..domain.production_conditions import production_condition_labels
+from ..domain.production_conditions import (
+    production_condition_labels,
+    production_condition_limitation,
+)
 from ..domain.time_display import production_time
 from .explanation_context import ExplanationSource
 
@@ -288,7 +291,7 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
         warning_messages = [i.message for i in validation.data.issues if i.severity == "warning"]
         if missing or warning_messages:
             risk = (
-                "⚠️ 风险提示：缺少或尚未核验的数据条件："
+                "⚠️ 风险提示：尚未核验的生产条件或待确认问题："
                 + "；".join([*missing, *warning_messages])
                 + "。请人工核实后再决定执行。"
             )
@@ -301,5 +304,7 @@ def explain_results(source: ExplanationSource) -> ExplanationData:
         risks=risks,
         tradeoffs=tradeoffs,
         next_steps=steps,
-        limitations=list(dict.fromkeys(limitations)),
+        limitations=list(
+            dict.fromkeys(production_condition_limitation(text) for text in limitations)
+        ),
     )

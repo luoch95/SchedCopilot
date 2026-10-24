@@ -352,3 +352,41 @@ def test_partial_multi_candidate_evaluation_cannot_use_single_candidate_fallback
     assert run.result.status == "blocked"
     assert run.result.data is None
     assert run.result.errors[0].code == "EVALUATION_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    ("condition", "label"),
+    [
+        ("material_availability", "物料可用性"),
+        ("staffing", "人员配置"),
+        ("mold_maintenance", "模具维护状态"),
+    ],
+)
+def test_unchecked_conditions_are_explained_without_claiming_failed_evaluation(
+    explanation_request, condition, label
+):
+    from sched_copilot.tools.explanation_context import prepare_explanation
+
+    source = prepare_explanation(explanation_request)
+    source.batch.limitations.extend([condition, "保留原 AI 方案", "unknown_condition"])
+    before = source.batch.model_dump_json()
+    data = explain_results(source)
+    assert f"尚未核验的生产条件：{label}；执行前需人工确认。" in data.limitations
+    assert condition not in data.limitations
+    assert "保留原 AI 方案" in data.limitations
+    assert "unknown_condition" in data.limitations
+    assert source.batch.model_dump_json() == before
+
+
+def test_limitations_do_not_unconditionally_request_more_evidence(explanation_request):
+    explanation_request.assumptions = ["没有来源的假设"]
+    run = ExplanationAgent().run(explanation_request)
+    assert run.result.status == "warning"
+    assert any("缺少对应来源证据" in item for item in run.result.data.limitations)
+    assert run.result.warnings
+    assert all(
+        item.repair_hint == "请根据上述限制核实适用条件，执行前由计划员确认。"
+        for item in run.result.warnings
+    )
+    assert all(item.evidence_refs for item in run.result.warnings)
+    assert "⚠️ 风险提示" in run.result.data.summary

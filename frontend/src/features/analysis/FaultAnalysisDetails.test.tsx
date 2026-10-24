@@ -63,3 +63,13 @@ it('opens matching historical reports without new fields and marks missing detai
   expect(screen.getByText('历史记录未保存人工修改明细。')).toBeTruthy();
   expect(screen.getByText('历史记录未保存风险明细。')).toBeTruthy();
 });
+
+it('does not fill a missing archived workflow with caller workflow scores or explanations', () => {
+  render(<FaultAnalysisDetails state={state(10)} workflow={workflow} />);
+  expect(screen.getByText('旧故障的人工决策记录')).toBeTruthy();
+  expect(screen.queryByText(currentReport.title)).toBeNull();
+  expect(screen.getByText('评估可信度：暂无法量化')).toBeTruthy();
+  expect(screen.getByText('暂无完整分析记录，请同步最新数据。').getAttribute('role')).toBe(
+    'status',
+  );
+});

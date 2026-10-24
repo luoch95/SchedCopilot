@@ -1,4 +1,5 @@
 import type { Candidate, WorkflowResult } from '../../shared/api/contracts';
+import { candidateKind } from '../../shared/lib/candidatePresentation';
 
 /** Compare simulated candidates; the unaffected formal plan is not a failure scenario. */
 export function planConclusion(candidates: Candidate[], workflow: WorkflowResult | null) {
@@ -24,10 +25,7 @@ export function planConclusion(candidates: Candidate[], workflow: WorkflowResult
   )?.candidate_id;
   const reference = referenceId
     ? valid.find((item) => item.id === referenceId)
-    : valid.find(
-        (item) =>
-          item.id === 'wait-recovery' || ['原计划对照', '原设备等待恢复'].includes(item.label),
-      );
+    : valid.find((item) => candidateKind(item, workflow) === 'waiting');
   const earlier = reference
     ? (Date.parse(reference.metrics.makespan) - Date.parse(best.metrics.makespan)) / 60_000
     : 0;

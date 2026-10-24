@@ -13,3 +13,9 @@ PRODUCTION_CONDITION_LABELS = {
 
 def production_condition_labels(items) -> list[str]:
     return [PRODUCTION_CONDITION_LABELS.get(item, item) for item in items]
+
+
+def production_condition_limitation(text: str) -> str:
+    """Describe unchecked conditions without claiming missing data or a failed assessment."""
+    label = PRODUCTION_CONDITION_LABELS.get(text)
+    return f"尚未核验的生产条件：{label}；执行前需人工确认。" if label else text

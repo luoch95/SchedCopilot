@@ -7,11 +7,11 @@ from datetime import datetime
 from ..domain.impact import operation_changes, order_impacts
 from ..domain.models import Order, digest
 from ..domain.scheduling import affected_operations
-from .plan_publication import request_numbers, schedule_labels
+from .plan_publication import raw_version, request_numbers, schedule_labels
 from .serialization import parse_candidates, parse_event, parse_schedule
 
 
-def fault_publication(connection, evidence):
+def _analysis(connection, evidence, workflow_id=None):
     if "candidate" not in evidence or "event" not in evidence:
         return None
     candidate = parse_candidates(json.dumps([evidence["candidate"]], default=str))[0]
@@ -36,6 +36,7 @@ def fault_publication(connection, evidence):
         draft = json.loads(manual[0])
         report = draft["report"]
         result.update(
+            workflow=draft.get("workflow"),
             report=report,
             baseline=draft["baseline"],
             affected=[c["工序"] for c in report["changes"]],
@@ -62,7 +63,14 @@ def fault_publication(connection, evidence):
             reviewed = json.loads(review[0])
             result["decisions"] = {
                 k: reviewed.get(k)
-                for k in ("status", "reason", "review_reason", "created_at", "reviewed_at")
+                for k in (
+                    "status",
+                    "candidate_id",
+                    "reason",
+                    "review_reason",
+                    "created_at",
+                    "reviewed_at",
+                )
             }
         return result
     rows = connection.execute(
@@ -71,6 +79,8 @@ def fault_publication(connection, evidence):
     )
     for raw, state, candidates, created_at, simulation_id in rows:
         payload = json.loads(raw)
+        if workflow_id is not None and payload.get("id") != workflow_id:
+            continue
         if payload.get("intent") != "generate_candidates" or payload.get("status") != "completed":
             continue
         if not any(digest(item) == digest(candidate) for item in parse_candidates(candidates)):
@@ -84,7 +94,14 @@ def fault_publication(connection, evidence):
             reviewed = json.loads(review[0])
             result["decisions"] = {
                 k: reviewed.get(k)
-                for k in ("status", "reason", "review_reason", "created_at", "reviewed_at")
+                for k in (
+                    "status",
+                    "candidate_id",
+                    "reason",
+                    "review_reason",
+                    "created_at",
+                    "reviewed_at",
+                )
             }
         payload.setdefault("created_at", created_at)
         result["workflow"] = payload
@@ -153,4 +170,115 @@ def fault_publication(connection, evidence):
                 ],
             }
         break
+    return result
+
+
+def fault_publication(connection, evidence):
+    """Restore both variants from the same source snapshot, without executable reuse."""
+    result = _analysis(connection, evidence)
+    if result is None:
+        return None
+    candidate = evidence["candidate"]
+    revision = candidate["event_revision"]
+    fingerprint = candidate["baseline_fingerprint"]
+    manual = None
+    if candidate["id"].startswith("manual:"):
+        _, draft_id, draft_revision = candidate["id"].split(":")
+        row = connection.execute(
+            "SELECT payload FROM manual_fault_revisions WHERE draft_id=? AND revision=?",
+            (draft_id, int(draft_revision)),
+        ).fetchone()
+        manual = json.loads(row[0]) if row else None
+    source_id = manual["workflow_id"] if manual else (result.get("workflow") or {}).get("id")
+    source = connection.execute(
+        "SELECT payload,simulation_id FROM workflow_runs WHERE workflow_id=?", (source_id,)
+    ).fetchone()
+    source_workflow = json.loads(source[0]) if source else None
+    source_simulation_id = source[1] if source else None
+    context = source_workflow.get("context") if source_workflow else None
+    original = None
+    root_id = None
+    # Exact input identity also covers production conditions; event/version alone is insufficient.
+    if context and context.get("input_fingerprint"):
+        rows = connection.execute(
+            "SELECT w.workflow_id,w.payload,s.candidates,w.simulation_id FROM workflow_runs w "
+            "LEFT JOIN simulations s ON s.id=w.simulation_id ORDER BY w.sequence DESC"
+        ).fetchall()
+        for workflow_id, raw, candidates, simulation_id in rows:
+            workflow = json.loads(raw)
+            if (
+                workflow.get("context") != context
+                or workflow.get("intent") != "generate_candidates"
+                or workflow.get("status") != "completed"
+                or (
+                    source_workflow.get("intent") == "generate_candidates"
+                    and workflow_id != source_id
+                )
+                or (
+                    source_workflow.get("intent") != "generate_candidates"
+                    and simulation_id != source_simulation_id
+                )
+            ):
+                continue
+            root_id = workflow_id
+            plans = parse_candidates(candidates) if candidates else []
+            if plans:
+                selected = next((p for p in plans if p.id == candidate["id"]), plans[0])
+                original = _analysis(
+                    connection, {**evidence, "candidate": asdict(selected)}, workflow_id
+                )
+            else:
+                original = {
+                    "event_revision": revision,
+                    "baseline_version": result["baseline_version"],
+                    "workflow": workflow,
+                }
+            break
+    if not manual and root_id:
+        rows = connection.execute(
+            "SELECT payload FROM manual_fault_revisions WHERE "
+            "json_extract(payload,'$.event_revision')=? AND "
+            "json_extract(payload,'$.baseline_fingerprint')=? AND "
+            "json_extract(payload,'$.status')='ready_for_review' "
+            "ORDER BY rowid DESC",
+            (revision, fingerprint),
+        ).fetchall()
+        for (raw,) in rows:
+            draft = json.loads(raw)
+            source = connection.execute(
+                "SELECT payload,simulation_id FROM workflow_runs WHERE workflow_id=?",
+                (draft["workflow_id"],),
+            ).fetchone()
+            if (
+                source
+                and json.loads(source[0]).get("context") == context
+                and source[1] == (original.get("simulation") or {}).get("id")
+            ):
+                manual = draft
+                break
+    manual_analysis = None
+    if manual and manual.get("simulation_id"):
+        saved = connection.execute(
+            "SELECT candidates FROM simulations WHERE id=?", (manual["simulation_id"],)
+        ).fetchone()
+        plans = parse_candidates(saved[0]) if saved else []
+        if plans:
+            manual_analysis = _analysis(connection, {**evidence, "candidate": asdict(plans[0])})
+    result["variants"] = {
+        "ai": original if manual else (original or dict(result)),
+        "manual": manual_analysis,
+    }
+    result["selected_variant"] = "manual" if candidate["id"].startswith("manual:") else "ai"
+    result["selected_candidate_id"] = candidate["id"]
+    # Only a real publish decision establishes publication, never a review archive.
+    for raw, payload, created_at in connection.execute(
+        "SELECT evidence,result,created_at FROM decisions WHERE action='publish' ORDER BY id DESC"
+    ).fetchall():
+        saved = json.loads(raw).get("candidate")
+        if saved and digest(parse_candidates(json.dumps([saved]))[0]) == digest(
+            parse_candidates(json.dumps([candidate], default=str))[0]
+        ):
+            result["published_version"] = raw_version(payload)
+            result["published_at"] = created_at
+            break
     return result

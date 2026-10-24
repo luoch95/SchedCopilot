@@ -53,6 +53,18 @@ export const workbenchApi = {
       revision,
       operator_role: 'planner',
     }),
+  evaluateManualDraft: (
+    id: string,
+    revision: number,
+    onProgress: (event: WorkflowProgressEvent) => void,
+    signal?: AbortSignal,
+  ) =>
+    workflowStream<ManualFaultDraft>(
+      { revision, operator_role: 'planner' },
+      onProgress,
+      signal,
+      `/fault-drafts/${encodeURIComponent(id)}/evaluate`,
+    ),
   recordVisit: () => api<void>('/visits'),
   adminSession: () => api<{ admin: boolean }>('/demo/session'),
   adminLogin: (password: string) => api<{ admin: boolean }>('/demo/login', { password }),

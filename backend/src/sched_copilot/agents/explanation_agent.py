@@ -97,7 +97,7 @@ class ExplanationAgent:
                 Notice(
                     code="EXPLANATION_PARTIAL",
                     message=text,
-                    repair_hint="补充所缺证据后重新解释。",
+                    repair_hint="请根据上述限制核实适用条件，执行前由计划员确认。",
                     evidence_refs=refs,
                 )
                 for text in data.limitations

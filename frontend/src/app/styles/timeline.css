@@ -30,6 +30,9 @@
     600 12px 'IBM Plex Sans',
     sans-serif;
 }
+.gantt-baseline .bar-label {
+  fill: #000;
+}
 .bar-label {
   fill: #fff;
   font:
@@ -138,6 +141,47 @@
 .gantt-operation > rect:focus-visible {
   outline: 2px solid #176886;
   outline-offset: 3px;
+}
+.gantt-operation-locked {
+  opacity: 0.55;
+  filter: saturate(0.25);
+}
+.gantt-operation-locked > rect,
+.gantt-operation-locked > text {
+  cursor: not-allowed;
+}
+.gantt-operation-editable > rect {
+  stroke: #047857;
+  stroke-width: 1px;
+}
+.gantt-operation-editable > rect,
+.gantt-operation-editable > text {
+  cursor: grab;
+}
+.gantt-time-boundary text {
+  pointer-events: none;
+}
+.gantt .gantt-time-marker text {
+  pointer-events: none;
+}
+.plan-time-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 8px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.plan-time-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.plan-time-controls select {
+  width: auto;
+  margin: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   .gantt-operation {

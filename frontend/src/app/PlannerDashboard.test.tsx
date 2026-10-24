@@ -323,11 +323,11 @@ it('shows the saved analysis time and Trace for the same fault revision as the c
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(screen.getByText('分析于 10/19 14:30')).toBeTruthy();
   expect(screen.getAllByText('TRC-SAVED-FAULT').length).toBeGreaterThan(0);
-  expect(screen.getByRole('button', { name: '采纳此方案（等待恢复）' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: '采纳此方案（转移设备）' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '采纳 AI 等待方案' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '采纳 AI 转移方案' })).toBeTruthy();
   expect(location.hash).toBe('#/planner/fault-decision');
   expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/workflow')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+  fireEvent.click(screen.getByRole('button', { name: '← 工作台总览' }));
   await screen.findByRole('heading', { name: '排产计划工作台' });
   expect(location.hash).toBe('#/planner');
 });
@@ -507,7 +507,7 @@ it('uses browser Back and Forward for fault pages and nested dialogs', async () 
   expect(screen.queryByRole('button', { name: '+ 录入设备故障' })).toBeNull();
   expect(screen.getByLabelText('甘特图缩放')).toBeTruthy();
   expect(screen.getByLabelText('甘特图查看起点')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+  fireEvent.click(screen.getByRole('button', { name: '← 工作台总览' }));
   await screen.findByRole('heading', { name: '排产计划工作台' });
   fireEvent.click(screen.getByRole('button', { name: '+ 录入设备故障' }));
   expect(screen.getByRole('dialog')).toBeTruthy();
@@ -630,29 +630,31 @@ it('starts one workflow only on explicit analysis and presents the returned cand
     false,
   );
   expect(screen.queryByLabelText('确认理由（必填）')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '采纳此方案（转移设备）' }));
+  fireEvent.click(screen.getByRole('button', { name: '采纳 AI 转移方案' }));
   expect(screen.getByRole('heading', { name: '人工确认' }).closest('details')).toBeNull();
   expect(screen.getByLabelText('确认理由（必填）')).toBeTruthy();
   expect((screen.getByLabelText('本次处理的方案') as HTMLSelectElement).value).toBe('transfer');
   expect((screen.getByLabelText('处理方式') as HTMLSelectElement).value).toBe('publish');
   expect(
     screen
-      .getByRole('article', { name: '允许合格设备转移排产图' })
+      .getByRole('article', { name: 'AI 允许转移方案排产图' })
       .classList.contains('is-selected'),
   ).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: '采纳此方案（等待恢复）' }));
+  fireEvent.click(screen.getByRole('button', { name: '采纳 AI 等待方案' }));
   expect((screen.getByLabelText('本次处理的方案') as HTMLSelectElement).value).toBe('wait');
   expect(
-    screen.getByRole('button', { name: '采纳此方案（等待恢复）' }).getAttribute('aria-pressed'),
+    screen.getByRole('button', { name: '采纳 AI 等待方案' }).getAttribute('aria-pressed'),
   ).toBe('true');
   expect(
-    screen.getByRole('button', { name: '采纳此方案（转移设备）' }).getAttribute('aria-pressed'),
+    screen.getByRole('button', { name: '采纳 AI 转移方案' }).getAttribute('aria-pressed'),
   ).toBe('false');
   expect(screen.getByRole('button', { name: '提交管理者审批' }).hasAttribute('disabled')).toBe(
     true,
   );
   expect(screen.queryByRole('button', { name: '确认发布执行计划' })).toBeNull();
-  expect(screen.getByRole('button', { name: '都不满意，转人工手动排产' })).toBeTruthy();
+  expect(
+    screen.getByRole('button', { name: '不采纳，手动调整' }).closest('#fault-candidate'),
+  ).toBeTruthy();
   expect(screen.queryByRole('button', { name: '采纳方案' })).toBeNull();
   expect(screen.queryByRole('button', { name: '不采纳，人工调整' })).toBeNull();
   expect(screen.getByRole('heading', { name: '2　方案对比' }).closest('details')).toBeNull();
@@ -719,7 +721,7 @@ it.each([1000, 5000])(
     const analyze = await screen.findByRole('button', { name: '开始 AI 分析并生成方案' });
     vi.useFakeTimers();
     fireEvent.click(analyze);
-    const back = screen.getByRole('button', { name: '← 返回工作台总览' }) as HTMLButtonElement;
+    const back = screen.getByRole('button', { name: '← 工作台总览' }) as HTMLButtonElement;
     expect(back.disabled).toBe(false);
     expect(back.classList.contains('primary')).toBe(false);
     expect(
@@ -733,7 +735,7 @@ it.each([1000, 5000])(
     expect(signal?.aborted).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: '查看生成进度' }));
     expect(screen.getByRole('heading', { name: '故障影响与方案决策', level: 1 })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    fireEvent.click(screen.getByRole('button', { name: '← 工作台总览' }));
     await act(() => vi.advanceTimersByTimeAsync(20));
     await act(() => vi.advanceTimersByTimeAsync(duration));
     expect(screen.queryByRole('button', { name: '查看 AI 分析详情' })).toBeNull();
@@ -766,7 +768,7 @@ it.each([1000, 5000])(
     expect(screen.getAllByRole('img')).toHaveLength(2);
     expect(signal?.aborted).toBe(false);
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/workflow')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    fireEvent.click(screen.getByRole('button', { name: '← 工作台总览' }));
     await act(() => vi.advanceTimersByTimeAsync(20));
     fireEvent.click(screen.getByRole('button', { name: '+ 录入设备故障' }));
     fireEvent.change(screen.getByLabelText('事件来源'), {
@@ -800,7 +802,7 @@ it.each(['failed', 'blocked'])(
     const analyze = await screen.findByRole('button', { name: '开始 AI 分析并生成方案' });
     vi.useFakeTimers();
     fireEvent.click(analyze);
-    fireEvent.click(screen.getByRole('button', { name: '← 返回工作台总览' }));
+    fireEvent.click(screen.getByRole('button', { name: '← 工作台总览' }));
     await act(() => vi.advanceTimersByTimeAsync(20));
     await act(async () =>
       finish(
@@ -907,8 +909,8 @@ it('shows conflict guidance without an impact conclusion for an invalid fault', 
 });
 
 it.each([
-  ['wait', '采纳此方案（等待恢复）'],
-  ['transfer', '采纳此方案（转移设备）'],
+  ['wait', '采纳 AI 等待方案'],
+  ['transfer', '采纳 AI 转移方案'],
 ])(
   'submits the card-selected %s candidate for approval without publishing',
   async (candidateId, buttonLabel) => {
@@ -936,7 +938,7 @@ it.each([
     await analyzeFault();
     fireEvent.click(
       screen.getByRole('button', {
-        name: candidateId === 'wait' ? '采纳此方案（转移设备）' : '采纳此方案（等待恢复）',
+        name: candidateId === 'wait' ? '采纳 AI 转移方案' : '采纳 AI 等待方案',
       }),
     );
     fireEvent.click(screen.getByRole('button', { name: buttonLabel }));

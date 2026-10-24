@@ -10,6 +10,7 @@ export function Modal({
   drawerWidth,
   busy = false,
   scrollPosition,
+  heading,
 }: {
   title: string;
   children: ReactNode;
@@ -19,6 +20,7 @@ export function Modal({
   drawerWidth?: string;
   busy?: boolean;
   scrollPosition?: { current: number };
+  heading?: (titleId: string) => ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -53,12 +55,16 @@ export function Modal({
         if (!busy) closeRef.current();
       }}
     >
-      <header className="console-modal-heading">
-        <h2 id={titleId}>{title}</h2>
-        <button disabled={busy} onClick={onClose}>
-          {fullScreen ? '返回工作台' : '关闭'}
-        </button>
-      </header>
+      {heading ? (
+        <div className="console-modal-heading console-modal-custom-heading">{heading(titleId)}</div>
+      ) : (
+        <header className="console-modal-heading">
+          <h2 id={titleId}>{title}</h2>
+          <button disabled={busy} onClick={onClose}>
+            {fullScreen ? '返回工作台' : '关闭'}
+          </button>
+        </header>
+      )}
       <div ref={bodyRef} className="console-modal-body">
         {children}
       </div>

@@ -10,6 +10,64 @@ const range: [number, number] = [
   +new Date('2026-10-19T18:00:00+08:00'),
 ];
 
+it('clips downtime to the execution boundary and blocks past, crossing and started operations', () => {
+  const onMove = vi.fn();
+  const op = workbench.baseline.operations[0];
+  const at = (hour: number) => `2026-10-19T${hour}:00:00+08:00`;
+  const operations = [
+    { ...op, id: 'past', start: at(13), end: at(14) },
+    { ...op, id: 'crossing', start: at(14), end: at(16) },
+    { ...op, id: 'future', start: at(15), end: at(16) },
+    { ...op, id: 'started', start: at(16), end: at(17), status: 'in_progress' as const },
+  ];
+  render(
+    <Gantt
+      schedule={{ ...workbench.baseline, operations }}
+      failure={workbench.event}
+      machines={workbench.machines}
+      range={range}
+      editBoundary={at(15)}
+      faults={[
+        {
+          failure: { ...workbench.event, started_at: at(13), recovered_at: at(14) },
+          faultTrace: { version: 2, affectedOperations: [] },
+        },
+        {
+          failure: { ...workbench.event, started_at: at(14), recovered_at: at(17) },
+          faultTrace: { version: 3, affectedOperations: [] },
+        },
+        { failure: { ...workbench.event, started_at: at(14), recovered_at: at(18) } },
+      ]}
+      onMove={onMove}
+    />,
+  );
+  expect(screen.queryByRole('group', { name: 'M1 已发布停机 V2' })).toBeNull();
+  const published = screen.getByRole('group', { name: 'M1 已发布停机 V3' });
+  const current = screen.getByRole('group', { name: 'M1 本次故障' });
+  expect(published.querySelector('rect')?.getAttribute('x')).toBe(
+    current.querySelector('rect')?.getAttribute('x'),
+  );
+  expect(published.querySelector('rect')?.getAttribute('x')).toBe(
+    screen.getByRole('img').querySelector('.gantt-time-boundary line')?.getAttribute('x1'),
+  );
+  fireEvent.focus(published);
+  expect(screen.getByRole('tooltip').textContent).toContain('14:00');
+  expect(screen.getByRole('tooltip').textContent).toContain(workbench.event.source);
+  for (const id of ['past', 'crossing', 'started']) {
+    const bar = screen.getByRole('graphics-symbol', { name: new RegExp(`^${id} `) });
+    expect(bar.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.keyDown(bar, { key: 'ArrowRight' });
+    fireEvent.pointerDown(bar, { button: 0, clientX: 300, clientY: 80 });
+    fireEvent.pointerUp(bar, { clientX: 400, clientY: 80 });
+  }
+  expect(onMove).not.toHaveBeenCalled();
+  const future = screen.getByRole('graphics-symbol', { name: /^future / });
+  fireEvent.keyDown(future, { key: 'ArrowLeft' });
+  expect(onMove).not.toHaveBeenCalled();
+  fireEvent.keyDown(future, { key: 'ArrowRight' });
+  expect(onMove).toHaveBeenCalledWith('future', 'M1', '2026-10-19T07:05:00.000Z');
+});
+
 it('shows subtle fault trace and truthful transfer details on hover and focus', () => {
   const original = workbench.baseline.operations[0];
   const failure = {
@@ -185,7 +243,7 @@ describe('Gantt baseline comparison', () => {
     );
     expect(screen.queryByRole('graphics-symbol', { name: /^原安排/ })).toBeNull();
     const moved = screen.getByRole('graphics-symbol', { name: /^O1-OP1 M2.*设备转移$/ });
-    expect(moved.getAttribute('stroke')).toBe('#7C3AED');
+    expect(moved.getAttribute('stroke')).toBe('transparent');
     expect(screen.getAllByRole('graphics-symbol')).toHaveLength(1);
   });
 });
@@ -194,13 +252,17 @@ it('links the same operation across candidate charts in either direction and sup
   render(<Comparison state={workbench} simulation={simulation} range={range} workflow={null} />);
   const bars = screen.getAllByRole('graphics-symbol');
   expect(bars).toHaveLength(2);
+  expect(bars[0].getAttribute('fill')).toBe('#527DA8');
+  expect(bars[0].getAttribute('stroke')).toBe('#EA580C');
+  expect(bars[0].getAttribute('stroke-width')).toBe('3');
+  expect(bars[1].getAttribute('fill')).toBe('#10B981');
   fireEvent.click(bars[0]);
   expect(
     bars.every((bar) => bar.parentElement?.classList.contains('gantt-operation-selected')),
   ).toBe(true);
   fireEvent.keyDown(bars[1], { key: 'Enter' });
   expect(bars.every((bar) => bar.parentElement?.dataset.selected === 'true')).toBe(true);
-  expect(bars[1].getAttribute('stroke')).toBe('#7C3AED');
+  expect(bars[1].getAttribute('stroke')).toBe('transparent');
 });
 
 it('keeps independent comparison scopes separate and does not select an unrelated operation', () => {

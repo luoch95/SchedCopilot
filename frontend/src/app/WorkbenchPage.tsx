@@ -1,6 +1,7 @@
 import { AiAnalysisButton } from '../shared/ui/AiAnalysisButton';
 import { WorkbenchTitle } from '../shared/ui/WorkbenchTitle';
 import { FaultPlanPage } from './FaultPlanPage';
+import { PublishedFaultCard } from './PublishedFaultCard';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { stamp } from '../shared/lib/time';
 import { Modal } from '../shared/ui/Modal';
@@ -143,10 +144,25 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
     </nav>
   );
   const eventLabel = `${state.event.machine_id}故障 R${state.event_revision}`;
+  const publishedCandidate = publication?.simulation?.candidates.find(
+    (candidate) =>
+      candidate.id === (publication.selected_candidate_id ?? publication.decisions?.candidate_id),
+  );
   const analysisTime = analysisWorkflow?.created_at;
+  // A saved revision is not a separate outage. Keep current and published records,
+  // rather than showing superseded siblings with empty reports and delete actions.
+  const sameOutage = (left: Workbench['event'], right: Workbench['event']) =>
+    left.machine_id === right.machine_id &&
+    new Date(left.started_at).getTime() === new Date(right.started_at).getTime();
+  const publishedTraces = state.plan_publication?.fault_traces ?? [];
   const visibleEvents = [
     ...(state.event_history ?? []).filter(
-      (event) => event.revision !== state.event_revision && !event.cancelled,
+      (event) =>
+        event.revision !== state.event_revision &&
+        !event.cancelled &&
+        (publishedTraces.some((trace) => trace.event_revision === event.revision) ||
+          ((!sameOutage(event, state.event) || state.event_cancelled) &&
+            !publishedTraces.some((trace) => sameOutage(event, trace.failure)))),
     ),
     ...(state.event_cancelled
       ? []
@@ -166,14 +182,36 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
         newestFirst(a.created_at || a.started_at, b.created_at || b.started_at) ||
         b.revision - a.revision,
     );
-  const currentFaultCard = (
+  const currentFaultCard = publication ? (
+    <PublishedFaultCard
+      failure={state.event}
+      revision={state.event_revision}
+      version={
+        publication.published_version ??
+        state.plan_publication?.fault_traces?.find(
+          (trace) => trace.event_revision === state.event_revision,
+        )?.version
+      }
+      candidateLabel={
+        publishedCandidate
+          ? publication.selected_variant === 'manual' || publishedCandidate.id.startsWith('manual:')
+            ? '人工调整方案'
+            : '原 AI 方案'
+          : undefined
+      }
+      metrics={publishedCandidate?.metrics}
+      orderImpacts={publishedCandidate?.order_impacts}
+      label="已登记设备故障"
+      onOpen={navigation.openFault}
+      onReview={state.fault_review ? navigation.openApproval : undefined}
+    />
+  ) : (
     <>
       <section className="fault-event-banner" aria-label="已登记设备故障">
         <div className="fault-card-heading">
           <div className="fault-card-identity">
             <h2>
-              <span aria-hidden="true">⚠️</span> 已登记设备故障：
-              {state.event.machine_id} 停机
+              <span aria-hidden="true">⚠️</span> 已登记设备故障：{state.event.machine_id} 停机
             </h2>
             <p className="fault-analysis-window">
               分析窗口：{stamp(state.event.started_at)} —{' '}
@@ -231,6 +269,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
         </div>
         <div className="fault-process-row">
           <FaultProgress
+            scope="event"
             state={state}
             workflow={controller.workflow}
             simulation={currentSimulation}
@@ -238,7 +277,15 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
             dirty={controller.dirty}
             onReview={() => {
               const review = state.fault_review;
-              if (review && review.simulation_id === currentSimulation?.id && currentSimulation) {
+              if (
+                review &&
+                review.event_revision === state.event_revision &&
+                review.baseline_fingerprint === state.baseline.fingerprint
+              ) {
+                if (controller.manualDraft?.simulation?.id === review.simulation_id)
+                  controller.switchAnalysis('manual');
+                else if (controller.originalSimulation?.id === review.simulation_id)
+                  controller.switchAnalysis('ai');
                 controller.setSelected(review.candidate_id);
                 if (review.status === 'approved') controller.setAction('publish');
               }
@@ -263,11 +310,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
         {!controller.blocked && (
           <p className="fault-impact-summary">
             <strong>结论简要：</strong>
-            <strong>
-              {publication
-                ? `${publication.affected ? `本次故障原影响 ${publication.affected.length} 道工序；` : ''}发布后当前计划剩余 ${state.affected.length} 道工序受故障影响。`
-                : `当前计划有 ${state.affected.length} 道工序受故障影响。`}
-            </strong>
+            <strong>{`当前计划有 ${state.affected.length} 道工序受故障影响。`}</strong>
           </p>
         )}
       </section>
@@ -311,7 +354,6 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       >
         <main className="workspace">
           <div className="planner-topbar">
-            {view === 'fault' && <div className="fault-page-breadcrumb">{breadcrumb}</div>}
             {view === 'dashboard' && (
               <header className="page-header">
                 <div>
@@ -398,10 +440,27 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                       {visibleEvents.length === 0 && (
                         <p className="sales-muted">所选时间范围内暂无故障预警。</p>
                       )}
-                      {visibleEvents.map((event) =>
-                        event.revision === state.event_revision ? (
-                          <div key={event.revision}>{currentFaultCard}</div>
-                        ) : (
+                      {visibleEvents.map((event) => {
+                        if (event.revision === state.event_revision)
+                          return <div key={event.revision}>{currentFaultCard}</div>;
+                        const trace = state.plan_publication?.fault_traces?.find(
+                          (item) => item.event_revision === event.revision,
+                        );
+                        if (trace)
+                          return (
+                            <PublishedFaultCard
+                              key={event.revision}
+                              failure={trace.failure}
+                              revision={event.revision}
+                              version={trace.version}
+                              candidateLabel={trace.candidate_label}
+                              metrics={trace.metrics}
+                              label={`历史故障 ${event.machine_id} R${event.revision}`}
+                              history
+                              onOpen={() => setHistoricalEvent(event)}
+                            />
+                          );
+                        return (
                           <article
                             key={event.revision}
                             className="fault-history-item"
@@ -423,9 +482,8 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                                   window.confirm(
                                     '永久删除这条故障及关联分析、候选、人工草案和审批数据？删除后无法恢复；已发布计划不会回滚。',
                                   )
-                                ) {
+                                )
                                   void controller.cancelEvent(event.revision);
-                                }
                               }}
                             >
                               撤销
@@ -435,8 +493,8 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                               onClick={() => setHistoricalEvent(event)}
                             />
                           </article>
-                        ),
-                      )}
+                        );
+                      })}
                     </div>
                   </section>
                 </aside>
@@ -449,8 +507,10 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                 controller={controller}
                 state={state}
                 range={range}
+                breadcrumb={breadcrumb}
                 currentPlan={currentPlan}
                 onBack={navigation.home}
+                onSwitchRole={onSwitchRole ? switchRole : undefined}
                 onBackToAnalysis={navigation.fromAnalysis ? navigation.back : undefined}
                 onAdjust={navigation.openEvent}
                 showApproval={navigation.approvalOpen}
@@ -548,8 +608,10 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                   affected: historicalAnalysis.analysis.affected ?? [],
                   fault_review: null,
                   plan_publication: {
-                    version: historicalAnalysis.analysis.baseline_version + 1,
-                    published_at: null,
+                    version:
+                      historicalAnalysis.analysis.published_version ??
+                      historicalAnalysis.analysis.baseline_version,
+                    published_at: historicalAnalysis.analysis.published_at ?? null,
                     published_by: null,
                     version_summary: '',
                     fault_analysis: historicalAnalysis.analysis,

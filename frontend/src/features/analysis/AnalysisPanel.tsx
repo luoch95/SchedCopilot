@@ -1,11 +1,14 @@
 import ReactMarkdown from 'react-markdown';
-import type { CopilotAnswer, WorkflowResult } from '../../shared/api/contracts';
+import type { CopilotAnswer, Simulation, WorkflowResult } from '../../shared/api/contracts';
 import { WorkflowNotices, WorkflowStatements } from '../../shared/ui/WorkflowEvidence';
 import { DetailSurface } from '../../shared/ui/DetailSurface';
 import { KnowledgePanel } from '../../shared/ui/KnowledgePanel';
+import { AnalysisDetailCards } from './AnalysisDetailCards';
+import { EvidenceText } from '../../shared/ui/DecisionText';
 import { useBusinessText } from '../../shared/lib/BusinessLabelProvider';
 
 interface Props {
+  simulation?: Simulation | null;
   busy: string;
   question: string;
   result: WorkflowResult;
@@ -21,6 +24,7 @@ interface Props {
 }
 
 export function AnalysisPanel({
+  simulation,
   busy,
   question,
   result,
@@ -60,27 +64,36 @@ export function AnalysisPanel({
               </span>
             </div>
           )}
-          <p className="hint">
-            {execution?.mode === 'live'
-              ? '模型根据你的问题选择分析重点；事实、指标和风险来自已校验的后台证据。'
-              : execution?.mode === 'fallback'
-                ? '本次模型解释未完成，以下使用规则与证据模板说明。'
-                : '解释本次校验和候选方案的证据；当前说明由规则与证据模板生成。'}
-          </p>
-          {execution?.mode === 'live' && (
-            <WorkflowStatements result={result} title="本次分析重点" items={execution.highlights} />
-          )}
-          {report && (
-            <WorkflowNotices result={result} notices={[...report.errors, ...report.warnings]} />
-          )}
-          <KnowledgePanel
-            report={result.trace.find((step) => step.action === 'explain')?.knowledge}
-          />
+          <div className="analysis-intro">
+            <p className="hint">
+              {execution?.mode === 'live'
+                ? '模型根据你的问题选择分析重点；事实、指标和风险来自已校验的后台证据。'
+                : execution?.mode === 'fallback'
+                  ? '本次模型解释未完成，以下使用规则与证据模板说明。'
+                  : '解释本次校验和候选方案的证据；当前说明由规则与证据模板生成。'}
+            </p>
+            {execution?.mode === 'live' && (
+              <WorkflowStatements
+                result={result}
+                title="本次 AI 分析重点"
+                icon="✨"
+                items={execution.highlights}
+              />
+            )}
+            {report && (
+              <WorkflowNotices result={result} notices={[...report.errors, ...report.warnings]} />
+            )}
+            <KnowledgePanel
+              report={result.trace.find((step) => step.action === 'explain')?.knowledge}
+            />
+          </div>
           {data ? (
             <>
               {showSummary && (
                 <p className="explanation-summary">
-                  <strong>{format(data.summary ?? '')}</strong>
+                  <strong>
+                    <EvidenceText text={data.summary ?? ''} />
+                  </strong>
                 </p>
               )}
               <section
@@ -145,28 +158,7 @@ export function AnalysisPanel({
                   </h3>
                 }
               >
-                <WorkflowStatements result={result} title="更多事实" items={data.facts?.slice(1)} />
-                <WorkflowStatements
-                  result={result}
-                  title="更多假设"
-                  items={data.assumptions?.slice(1)}
-                />
-                <WorkflowStatements result={result} title="更多风险" items={data.risks?.slice(1)} />
-                <WorkflowStatements
-                  result={result}
-                  title="更多取舍"
-                  items={data.tradeoffs?.slice(1)}
-                />
-                {!!data.limitations?.length && (
-                  <div className="explanation-group">
-                    <h3>限制</h3>
-                    <ul>
-                      {data.limitations.map((text, i) => (
-                        <li key={i}>{format(text)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                <AnalysisDetailCards result={result} simulation={simulation} />
               </DetailSurface>
             </>
           ) : (

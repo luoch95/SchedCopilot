@@ -76,7 +76,7 @@ class WorkbenchService:
             () if cancelled else tuple(op.id for op in affected_operations(baseline, event)),
             () if cancelled else failure_issues(baseline, event, self.machines),
             self.repository.history(),
-            self.repository.plan_metadata(baseline.version),
+            self.repository.plan_metadata(baseline.version, revision),
             self.repository.operation_labels(baseline),
             self.repository.event_history(),
             self.repository.fault_review(revision, baseline.fingerprint),

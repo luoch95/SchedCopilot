@@ -10,15 +10,31 @@ INSTRUCTIONS = (
 )
 
 
+def current_analysis(service, version, workflow_id):
+    service.checked_snapshot(version)
+    saved = service.latest_workflow()
+    if saved and saved[0]["id"] == workflow_id:
+        return saved
+    draft = service.manual_faults.get() if saved else None
+    if (
+        draft
+        and draft["status"] == "ready_for_review"
+        and (draft.get("workflow") or {}).get("id") == workflow_id
+        and (
+            draft["workflow_id"] == saved[0]["id"]
+            or (saved[1] and draft["source_simulation_id"] == saved[1].id)
+        )
+    ):
+        _, simulation = service.manual_faults.response(draft)
+        return draft["workflow"], simulation
+    raise SnapshotConflict("分析结果已更新，请载入当前结果后提问")
+
+
 def answer_question(service, version, workflow_id, question):
     question = question.strip()
     if not question:
         raise InvalidInput("请输入要解答的问题")
-    service.checked_snapshot(version)
-    saved = service.latest_workflow()
-    if saved is None or saved[0]["id"] != workflow_id:
-        raise SnapshotConflict("分析结果已更新，请载入当前结果后提问")
-    workflow, simulation = saved
+    workflow, simulation = current_analysis(service, version, workflow_id)
     facts = []
     if simulation:
         for comparison in simulation.candidates:
@@ -70,10 +86,7 @@ def answer_question(service, version, workflow_id, question):
     # Only server-owned text may reach the answer; model prose is never displayed.
     answer = "## 解答依据\n\n" + "\n\n".join(item["text"] for item in selected)
     answer += "\n\n> 以上基于已有排产结果；是否接受延期与发布计划，仍由人工确认。"
-    service.checked_snapshot(version)
-    latest = service.latest_workflow()
-    if latest is None or latest[0]["id"] != workflow_id:
-        raise SnapshotConflict("分析结果已更新，本次回答已失效，请重新提问")
+    current_analysis(service, version, workflow_id)
     return dict(
         workflow_id=workflow_id,
         question=question,

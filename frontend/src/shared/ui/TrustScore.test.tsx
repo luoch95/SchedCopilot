@@ -36,11 +36,12 @@ function workflow(scores: (number | null)[]): WorkflowResult {
 }
 
 describe('workflow trust score', () => {
-  it('excludes validation from the mean and displays two decimal places', () => {
+  it('keeps technical scores separate from a missing validation record', () => {
     const result = workflow([98, 90, 80, 70]);
+    expect(workflowTrust(result)).toBe(80);
     render(<TrustScore result={result} />);
-    expect(screen.getByText('80.00%')).toBeTruthy();
-    expect(screen.getAllByText(/综合信任度/)).toHaveLength(1);
+    expect(screen.getByText('约束校验记录不完整，暂无法确认')).toBeTruthy();
+    expect(screen.queryByText(/综合信任度|80.00%/)).toBeNull();
   });
 
   it.each([
@@ -58,6 +59,61 @@ describe('workflow trust score', () => {
     result.status = 'failed';
     expect(workflowTrust(result)).toBeNull();
     render(<TrustScore result={null} />);
-    expect(screen.getByText('未评分')).toBeTruthy();
+    expect(screen.getByText('约束校验记录不完整，暂无法确认')).toBeTruthy();
+  });
+
+  it('counts distinct unchecked conditions from the validated result, not the score', () => {
+    const result = workflow([100, 70, 70, 70]);
+    result.results.validation!.data = {
+      can_generate_candidates: true,
+      checked_items: ['machine_compatibility'],
+      unchecked_items: ['material_availability', 'staffing', 'mold_maintenance', 'staffing'],
+      issues: [],
+    };
+    const view = render(<TrustScore result={result} />);
+    expect(screen.getByText('已检查约束通过，另有 3 项生产条件待核验')).toBeTruthy();
+    expect(screen.getByText(/已检查约束通过/).closest('details')?.title).toContain('物料可用性');
+    expect(screen.getByText('评估可信度：25%')).toBeTruthy();
+    result.results.validation!.data.unchecked_items = [];
+    view.rerender(<TrustScore result={result} />);
+    expect(screen.getByText('已检查约束通过，无待核验生产条件')).toBeTruthy();
+    expect(screen.getByText('评估可信度：100%')).toBeTruthy();
+  });
+
+  it.each(['blocked', 'failed', 'missing'] as const)(
+    'never claims passed checks for %s validation',
+    (state) => {
+      const result = workflow([100, 70, 70, 70]);
+      result.results.validation!.data =
+        state === 'missing'
+          ? null
+          : {
+              can_generate_candidates: true,
+              checked_items: ['machines'],
+              unchecked_items: [],
+              issues: [{ severity: 'blocking', message: '设备不可用' }],
+            };
+      if (state !== 'missing') result.results.validation!.status = state;
+      render(<TrustScore result={result} />);
+      expect(screen.queryByText(/已检查约束通过/)).toBeNull();
+    },
+  );
+
+  it('does not hide failed quality or a missing issue list behind a successful status', () => {
+    const result = workflow([100, 70, 70, 70]);
+    const validation = result.results.validation!;
+    validation.data = {
+      can_generate_candidates: true,
+      checked_items: ['machines'],
+      unchecked_items: [],
+      issues: [],
+    };
+    validation.quality!.outcome = 'failed';
+    const view = render(<TrustScore result={result} />);
+    expect(screen.queryByText(/已检查约束通过/)).toBeNull();
+    validation.quality!.outcome = 'passed';
+    delete validation.data.issues;
+    view.rerender(<TrustScore result={result} />);
+    expect(screen.queryByText(/已检查约束通过/)).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { expect, it, vi } from 'vitest';
 import { CurrentPlan } from './CurrentPlan';
 import { publishedPlanRange } from './model';
 import { workbench } from '../../test/fixtures';
@@ -83,4 +83,64 @@ it('ignores traces belonging to a different plan version', () => {
     }),
   );
   expect(screen.queryByText('⚠ 停机留痕')).toBeNull();
+});
+
+it('locates the execution snapshot without changing operation states or enabling editing', () => {
+  render(chart(workbench));
+  const marker = document.querySelector('.gantt-time-marker')!;
+  expect(marker.textContent).toContain('执行快照 13:00');
+  expect(marker.querySelector('line')).toBeTruthy();
+  expect(document.querySelector('.gantt-time-boundary')).toBeNull();
+  expect(document.querySelector('.gantt-editable-region')).toBeNull();
+  const bar = screen.getByRole('graphics-symbol');
+  expect(bar.getAttribute('fill')).not.toBe('#F1F5F9');
+  fireEvent.focus(bar);
+  expect(document.querySelector('.gantt-inspector')?.textContent).toContain('计划中');
+});
+
+it('updates current time each minute, keeps the range fixed and cleans up the timer', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-19T13:30:00+08:00'));
+  const range = publishedPlanRange(workbench, 1, 0);
+  const view = render(chart(workbench));
+  try {
+    fireEvent.change(screen.getByRole('combobox', { name: '执行计划时间定位' }), {
+      target: { value: 'current' },
+    });
+    const marker = document.querySelector('.gantt-time-marker')!;
+    const x = Number(marker.querySelector('line')!.getAttribute('x1'));
+    expect(marker.textContent).toContain('当前时间 13:30');
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(marker.textContent).toContain('当前时间 13:31');
+    expect(Number(marker.querySelector('line')!.getAttribute('x1'))).toBeGreaterThan(x);
+    vi.setSystemTime(new Date('2026-10-20T13:30:00+08:00'));
+    fireEvent(window, new Event('focus'));
+    expect(marker.querySelector('line')).toBeNull();
+    expect(marker.textContent).toContain('当前时间在显示范围外 →');
+    expect(publishedPlanRange(workbench, 1, 0)).toEqual(range);
+    fireEvent.change(screen.getByRole('combobox', { name: '执行计划时间定位' }), {
+      target: { value: 'snapshot' },
+    });
+    expect(marker.textContent).toContain('执行快照 13:00');
+    expect(vi.getTimerCount()).toBe(0);
+    fireEvent.change(screen.getByRole('combobox', { name: '执行计划时间定位' }), {
+      target: { value: 'current' },
+    });
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it('handles missing snapshot times and times before the displayed range without fabricating progress', () => {
+  const view = render(chart({ ...workbench, snapshot_time: '' }));
+  expect(screen.getByText('执行快照时间缺失，无法定位')).toBeTruthy();
+  expect(document.querySelector('.gantt-time-marker')).toBeNull();
+  view.rerender(chart({ ...workbench, snapshot_time: '2026-10-18T13:00:00+08:00' }));
+  expect(document.querySelector('.gantt-time-marker')?.textContent).toContain(
+    '← 执行快照在显示范围外',
+  );
+  expect(document.querySelector('.gantt-time-marker line')).toBeNull();
 });

@@ -124,7 +124,50 @@ def test_manual_report_approval_publish_restart_and_idempotency(tmp_path):
         assert final["baseline"]["version"] == state["baseline"]["version"] + 1
         assert final["plan_publication"]["fault_analysis"]["report"] == draft["report"]
         assert final["plan_publication"]["fault_analysis"]["decisions"]["status"] == "published"
+        archive = final["plan_publication"]["fault_analysis"]
+        assert archive["selected_variant"] == "manual"
+        assert archive["published_version"] == final["baseline"]["version"]
+        assert archive["variants"]["ai"]["simulation"]["id"] == result["simulation"]["id"]
+        assert archive["variants"]["manual"]["simulation"]["id"] == restored["simulation"]["id"]
+        assert archive["variants"]["ai"].get("decisions", {}).get("status") != "published"
+        assert archive["variants"]["manual"]["decisions"]["status"] == "published"
+        historical = client.get(f"/api/events/{state['event_revision']}/analysis").json()
+        assert historical == archive
+        assert final["plan_publication"]["current_fault_analysis"] == archive
+        traces = final["plan_publication"]["fault_traces"]
+        assert traces[-1]["metrics"] == restored["simulation"]["candidates"][0]["metrics"]
         assert publish(client, restored).json()["plan_version"] == final["baseline"]["version"]
+
+
+def test_ai_publication_preserves_manual_variant_from_its_own_workflow(tmp_path):
+    with TestClient(create_app(tmp_path / "ai-publication.sqlite3")) as client:
+        state, result = analyze(client)
+        draft = confirm(client, create(client, result))
+        review = submit(client, result)
+        approve(client, review)
+        response = publish(client, result)
+        assert response.status_code == 200, response.text
+        archive = response.json()["workbench"]["plan_publication"]["current_fault_analysis"]
+        assert archive["selected_variant"] == "ai"
+        assert archive["variants"]["ai"]["simulation"]["id"] == result["simulation"]["id"]
+        assert archive["variants"]["ai"]["decisions"]["status"] == "published"
+        assert archive["variants"]["manual"]["simulation"]["id"] == draft["simulation"]["id"]
+        assert archive["variants"]["manual"].get("decisions", {}).get("status") != "published"
+        assert client.get(f"/api/events/{state['event_revision']}/analysis").json() == archive
+
+
+def test_manual_archive_keeps_its_original_ai_batch_after_regeneration(tmp_path):
+    with TestClient(create_app(tmp_path / "original-ai.sqlite3")) as client:
+        _, result = analyze(client)
+        draft = confirm(client, create(client, result))
+        _, regenerated = analyze(client)
+        assert regenerated["simulation"]["id"] != result["simulation"]["id"]
+        approve(client, submit(client, draft))
+        response = publish(client, draft)
+        assert response.status_code == 200, response.text
+        archive = response.json()["workbench"]["plan_publication"]["current_fault_analysis"]
+        assert archive["variants"]["ai"]["simulation"]["id"] == result["simulation"]["id"]
+        assert archive["variants"]["ai"]["workflow"]["id"] == result["workflow"]["id"]
 
 
 def test_edit_invalidates_approval_conflicts_and_optimistic_revision(tmp_path):
@@ -249,6 +292,24 @@ def test_started_operations_and_stale_input_cannot_be_manually_overridden(tmp_pa
             },
         )
         assert response.status_code == 409
+        planned = next(o for o in draft["schedule"]["operations"] if o["status"] == "planned")
+        before_snapshot = datetime.fromisoformat(state["snapshot_time"]) - timedelta(minutes=5)
+        rejected = client.put(
+            f"/api/fault-drafts/{draft['id']}",
+            json={
+                "revision": 1,
+                "moves": [
+                    {
+                        "operation_id": planned["id"],
+                        "machine_id": planned["machine_id"],
+                        "start": before_snapshot.isoformat(),
+                    }
+                ],
+            },
+        )
+        assert rejected.status_code == 409
+        assert "执行快照时间之前" in rejected.text
+        assert client.get(f"/api/fault-drafts/{draft['id']}").json()["revision"] == 1
         changed = client.put(
             "/api/event",
             json={

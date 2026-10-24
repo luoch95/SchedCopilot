@@ -120,6 +120,7 @@ class WorkflowEngine:
         workflow_id=None,
         on_progress=None,
         demo_fallback=False,
+        manual_candidate=None,
     ):
         if demo_fallback and (intent != "generate_candidates" or self.demo_gate is None):
             raise InvalidInput("兜底演示仅支持已配置的候选生成流程")
@@ -176,7 +177,17 @@ class WorkflowEngine:
         trace_id = f"TRC-{uuid4().hex.upper()}"
         if on_progress:
             on_progress({"type": "trace_started", "trace_id": trace_id})
-        run = self.orchestrator.run(
+        orchestrator = self.orchestrator
+        if manual_candidate is not None:
+            from ..agents.scheduling_agent import SchedulingAgent
+
+            orchestrator = DynamicOrchestrator(
+                validation=orchestrator.validation,
+                scheduling=SchedulingAgent.for_manual_candidate(manual_candidate),
+                evaluation=orchestrator.evaluation,
+                explanation=orchestrator.explanation,
+            )
+        run = orchestrator.run(
             state,
             **({"on_progress": on_progress} if on_progress else {}),
             **({"fallback_demo": self._claim_demo} if demo_fallback else {}),
@@ -266,7 +277,9 @@ class WorkflowEngine:
                 "risks": [],
                 "decision": "分析完成不代表审批通过或计划已发布。",
             }
-            self.session_store.record_workflow(payload, result.model_dump(mode="json"))
+            # Manual runs belong to their durable draft, leaving the original AI run recoverable.
+            if manual_candidate is None:
+                self.session_store.record_workflow(payload, result.model_dump(mode="json"))
         return WorkflowOutcome(payload, tuple(candidates))
 
     @staticmethod

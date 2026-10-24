@@ -1,3 +1,5 @@
+import { DecisionPageHeader } from '../shared/ui/DecisionPageHeader';
+import { ManualPlanBreadcrumb } from '../shared/ui/ManualPlanBreadcrumb';
 import { FaultPlanOutline } from './FaultPlanOutline';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
@@ -8,7 +10,7 @@ import { DecisionPanel } from '../features/decisions';
 import { SimulationActions } from '../features/events';
 import { DecisionHistory } from '../features/history';
 import type { useWorkbench } from '../features/workbench';
-import { publishedFault, ManualFaultPanel } from '../features/workbench';
+import { publishedFault, ManualFaultPanel, ManualBasisPicker } from '../features/workbench';
 import { ContributionReport } from '../shared/ui/ContributionReport';
 import { DecisionText } from '../shared/ui/DecisionText';
 import { WriteButton } from '../shared/ui/WriteButton';
@@ -16,13 +18,19 @@ import { TraceBadge } from '../shared/ui/TraceTree';
 import { GenerationLoading } from '../shared/ui/GenerationLoading';
 import { stamp } from '../shared/lib/time';
 import { TrustScore } from '../shared/ui/TrustScore';
+import { FaultPlanSwitch } from '../shared/ui/FaultPlanSwitch';
+import { faultPlanStatus, faultVariant, publishedVariant } from '../shared/lib/faultPlanStatus';
+import { WorkflowPanel } from '../features/analysis';
+import { candidateTitle, changedOperationCount } from '../shared/lib/candidatePresentation';
 
 interface Props {
   controller: ReturnType<typeof useWorkbench>;
   state: Workbench;
   range: [number, number];
   currentPlan: ReactNode;
+  breadcrumb?: ReactNode;
   onBack: () => void;
+  onSwitchRole?: () => void;
   onBackToAnalysis?: () => void;
   onAdjust: () => void;
   showApproval?: boolean;
@@ -33,7 +41,9 @@ export function FaultPlanPage({
   state,
   range,
   currentPlan,
+  breadcrumb,
   onBack,
+  onSwitchRole,
   onBackToAnalysis,
   onAdjust,
   showApproval = false,
@@ -41,6 +51,42 @@ export function FaultPlanPage({
   const approvalRef = useRef<HTMLElement>(null);
   const [adopted, setAdopted] = useState('');
   const [activeTab, setActiveTab] = useState('section-operations');
+  const [choosingBasis, setChoosingBasis] = useState(false);
+  const [basisSelection, setBasisSelection] = useState<string | null | undefined>(undefined);
+  const [basisAcknowledged, setBasisAcknowledged] = useState(false);
+  const [archiveChoice, setArchiveChoice] = useState<{
+    revision: number;
+    view: 'ai' | 'manual';
+  } | null>(null);
+  const cancelEditor = () => {
+    setBasisSelection(controller.manualEditor?.source_candidate_id ?? null);
+    controller.cancelManual();
+    setChoosingBasis(true);
+  };
+  const openBasisPicker = () => {
+    setBasisSelection(undefined);
+    setBasisAcknowledged(false);
+    setChoosingBasis(true);
+  };
+  const exitManual = (navigate?: () => void) => {
+    controller.cancelManual();
+    setChoosingBasis(false);
+    navigate?.();
+  };
+  const manualBreadcrumb = (editing: boolean) => (
+    <ManualPlanBreadcrumb
+      editing={editing}
+      disabled={!!controller.busy}
+      onRole={onSwitchRole ? () => exitManual(onSwitchRole) : undefined}
+      onHome={() => exitManual(onBack)}
+      onDecision={() => exitManual()}
+      onBasis={cancelEditor}
+    />
+  );
+  const [comparisonChoice, setComparisonChoice] = useState<{
+    manualId: string;
+    id: string | null;
+  } | null>(null);
   useEffect(() => {
     if (!showApproval) return;
     approvalRef.current?.scrollIntoView?.({ block: 'start' });
@@ -49,7 +95,16 @@ export function FaultPlanPage({
   const { currentSimulation } = controller;
   const publication = publishedFault(state);
   const published = !!publication;
-  const generating = controller.activeIntent === 'generate_candidates';
+  const archiveView =
+    archiveChoice?.revision === state.event_revision
+      ? archiveChoice.view
+      : publishedVariant(publication);
+  const archive = faultVariant(publication, archiveView);
+  const manualView = published ? archiveView === 'manual' : controller.analysisView === 'manual';
+  const activeManual = controller.activeManual;
+  const generating =
+    controller.activeIntent === 'generate_candidates' &&
+    (controller.busy !== '评估人工草案' || manualView);
   const hasCandidates = !!currentSimulation?.candidates.length && !generating;
   const assessment =
     !generating && controller.workflow?.status === 'completed'
@@ -59,7 +114,16 @@ export function FaultPlanPage({
     assessment && state.fault_review?.workflow_id === controller.workflow?.id
       ? state.fault_review
       : null;
-  const conclusion = planConclusion(currentSimulation?.candidates ?? [], controller.workflow);
+  const presentCandidate = (
+    candidate: NonNullable<typeof currentSimulation>['candidates'][number],
+  ) => ({
+    ...candidate,
+    label: candidateTitle(candidate, controller.originalWorkflow, controller.workflow),
+  });
+  const conclusion = planConclusion(
+    currentSimulation?.candidates.map(presentCandidate) ?? [],
+    controller.workflow,
+  );
 
   const review =
     state.fault_review?.simulation_id === currentSimulation?.id ? state.fault_review : null;
@@ -82,14 +146,15 @@ export function FaultPlanPage({
     />
   );
   const decisionPanel = currentSimulation &&
-    (adopted === currentSimulation.id ||
-      controller.manualDraft?.status === 'ready_for_review' ||
-      review) && (
+    (adopted === currentSimulation.id || activeManual?.status === 'ready_for_review' || review) && (
       <DecisionPanel
         embedded
         state={state}
-        currentSimulation={currentSimulation}
-        candidate={controller.candidate}
+        currentSimulation={{
+          ...currentSimulation,
+          candidates: currentSimulation.candidates.map(presentCandidate),
+        }}
+        candidate={controller.candidate ? presentCandidate(controller.candidate) : undefined}
         busy={controller.busy}
         blocked={controller.blocked}
         selected={controller.selected}
@@ -102,12 +167,22 @@ export function FaultPlanPage({
         onSubmitReview={controller.submitReview}
       />
     );
-  const canChoose = controller.workflow?.status === 'completed' && !controller.manualDraft;
+  const canChoose = controller.workflow?.status === 'completed';
   const adoption = canChoose
     ? {
         selected: adopted === currentSimulation?.id || review ? controller.selected : '',
         disabled: controller.blocked || !!controller.busy || published,
         onAdopt: (candidateId: string) => {
+          if (
+            manualView &&
+            !currentSimulation?.candidates.some((item) => item.id === candidateId)
+          ) {
+            controller.switchAnalysis('ai');
+            controller.setSelected(candidateId);
+            controller.setAction('publish');
+            setAdopted(controller.originalSimulation?.id ?? '');
+            return;
+          }
           controller.setSelected(candidateId);
           controller.setAction('publish');
           setAdopted(currentSimulation?.id ?? '');
@@ -118,81 +193,192 @@ export function FaultPlanPage({
     if (!adopted || adopted !== currentSimulation?.id) return;
     document.getElementById('fault-human-decision')?.scrollIntoView?.({ block: 'nearest' });
   }, [adopted, currentSimulation?.id, controller.selected]);
-  const manualControl = canChoose && !published && (
+  const manualControl = controller.originalWorkflow?.status === 'completed' && !published && (
     <div className="inline-actions fault-manual-action">
       <WriteButton
         disabled={controller.blocked || !!controller.busy}
-        onClick={() => void controller.startManual()}
+        onClick={() => (manualView ? void controller.startManual() : openBasisPicker())}
       >
-        都不满意，转人工手动排产
+        {manualView ? '继续手动调整' : '不采纳，手动调整'}
       </WriteButton>
+      {manualView && (
+        <WriteButton disabled={controller.blocked || !!controller.busy} onClick={openBasisPicker}>
+          重新选择编辑起点
+        </WriteButton>
+      )}
     </div>
   );
-  const archived = !!publication && !currentSimulation;
-  const displaySimulation = archived ? publication.simulation : currentSimulation;
-  const displayWorkflow = controller.manualDraft
-    ? null
-    : archived
-      ? (publication.workflow ?? null)
-      : controller.workflow;
+  const archived = published;
+  const displaySimulation = archived ? archive?.simulation : currentSimulation;
+  const displayWorkflow = archived ? (archive?.workflow ?? null) : controller.workflow;
   const displayState =
-    archived && publication.baseline ? { ...state, baseline: publication.baseline } : state;
+    archived && archive?.baseline
+      ? { ...state, baseline: archive.baseline, affected: archive.affected ?? [] }
+      : state;
   const analysisTime = displayWorkflow?.created_at;
   const hasDisplayCandidates = !!displaySimulation?.candidates.length && !generating;
+  const aiCandidates = archived
+    ? (publication?.variants?.ai?.simulation?.candidates ??
+      (publication?.selected_variant === 'manual' ? [] : (displaySimulation?.candidates ?? [])))
+    : (controller.originalSimulation?.candidates ?? []);
+  const manualCandidate = archived
+    ? publication?.variants?.manual?.simulation?.candidates[0]
+    : controller.manualDraft?.status === 'ready_for_review'
+      ? controller.manualDraft.simulation?.candidates[0]
+      : undefined;
+  const titleFor = (candidate: (typeof aiCandidates)[number]) =>
+    candidateTitle(
+      candidate,
+      archived ? publication?.variants?.ai?.workflow : controller.originalWorkflow,
+      controller.manualDraft?.workflow,
+      displayWorkflow,
+    );
+  const named = (candidate: (typeof aiCandidates)[number]) => ({
+    ...candidate,
+    label: titleFor(candidate),
+  });
+  const allCandidates = [...aiCandidates, ...(manualCandidate ? [manualCandidate] : [])].map(named);
+  const comparisonId =
+    comparisonChoice && comparisonChoice.manualId === activeManual?.id
+      ? comparisonChoice.id
+      : (activeManual?.source_candidate_id ?? null);
+  const originalCandidate = aiCandidates.find((item) => item.id === comparisonId);
+  const comparisonSimulation =
+    manualView && displaySimulation
+      ? {
+          ...displaySimulation,
+          candidates: [
+            ...displaySimulation.candidates.map(named),
+            ...(originalCandidate ? [named(originalCandidate)] : []),
+          ],
+        }
+      : displaySimulation
+        ? { ...displaySimulation, candidates: displaySimulation.candidates.map(named) }
+        : displaySimulation;
+  const comparisonTimes = [
+    ...(comparisonSimulation?.candidates.flatMap((candidate) => candidate.schedule.operations) ??
+      []),
+    ...displayState.baseline.operations,
+  ].flatMap((operation) => [Date.parse(operation.start), Date.parse(operation.end)]);
+  const comparisonRange: [number, number] = [
+    Math.min(range[0], ...comparisonTimes),
+    Math.max(range[1], ...comparisonTimes),
+  ];
+  const referenceSchedule = originalCandidate?.schedule ?? displayState.baseline;
+  const referenceDelay =
+    originalCandidate?.metrics.total_lateness_minutes ??
+    manualCandidate?.order_impacts.reduce((sum, impact) => sum + impact['原延期(分钟)'], 0);
+  const referenceEnd =
+    originalCandidate?.metrics.makespan ??
+    referenceSchedule.operations.reduce(
+      (latest, op) => (Date.parse(op.end) > Date.parse(latest) ? op.end : latest),
+      referenceSchedule.operations[0]?.end ?? '',
+    );
+  const sourceLabel = (sourceId: string | null | undefined) => {
+    const source = aiCandidates.find((item) => item.id === sourceId);
+    return source
+      ? titleFor(source)
+      : sourceId
+        ? '原 AI 来源方案（当前不可用）'
+        : `当前执行计划 V${state.baseline.version}`;
+  };
   return (
     <div
       aria-label={archived ? '已发布故障方案存档' : undefined}
       className={`fault-stage${hasDisplayCandidates ? ' fault-stage-generated' : ' fault-stage-pending'}`}
     >
-      <header className="fault-stage-header">
-        <div className="fault-header-actions">
-          <button className="fault-header-back" onClick={onBack}>
-            <span className="fault-back-arrow">←</span> 返回工作台总览
-          </button>
-          {onBackToAnalysis && (
-            <button className="fault-header-back" onClick={onBackToAnalysis}>
-              <span className="fault-back-arrow">←</span> 返回评估详情
-            </button>
-          )}
-        </div>
-        <div className="fault-stage-title">
-          <div className="fault-stage-heading">
-            <h1>故障影响与方案决策</h1>
-            <span
-              className={`fault-stage-status${hasDisplayCandidates || assessment ? ' is-ready' : ''}`}
-            >
-              {published
-                ? `计划已发布 V${state.baseline.version}`
-                : hasCandidates
-                  ? review?.status === 'approved'
-                    ? '管理者已批准，待排产员发布'
-                    : review?.status === 'pending'
+      <DecisionPageHeader
+        title="故障影响与方案决策"
+        status={
+          <span
+            className={`fault-stage-status${hasDisplayCandidates || assessment ? ' is-ready' : ''}`}
+          >
+            {published
+              ? `计划已发布 V${publication.published_version ?? state.baseline.version}`
+              : hasCandidates
+                ? review?.status === 'approved'
+                  ? '管理者已批准，待排产员发布'
+                  : review?.status === 'pending'
+                    ? '待管理者审批'
+                    : '待提交管理者审批'
+                : assessment
+                  ? assessmentReview?.status === 'approved'
+                    ? '评估结论已批准'
+                    : assessmentReview?.status === 'pending'
                       ? '待管理者审批'
-                      : '待提交管理者审批'
+                      : '评估完成，待提交审批'
+                  : generating
+                    ? '方案生成中'
+                    : controller.workflow?.status === 'blocked'
+                      ? '生成受阻'
+                      : controller.workflow?.status === 'failed'
+                        ? '生成失败'
+                        : '方案待生成'}
+          </span>
+        }
+        breadcrumb={breadcrumb}
+        description={
+          published
+            ? '方案已发布，以下分析存档仅供查阅。'
+            : review?.status === 'approved'
+              ? '管理者已批准，请核对方案后发布；修改方案后需要重新审批。'
+              : review?.status === 'pending'
+                ? '方案已提交管理者审批，批准后由排产员发布。'
+                : hasCandidates
+                  ? '候选方案已生成，请比较差异并提交管理者审批；批准后发布，修改后重新审批。'
                   : assessment
-                    ? assessmentReview?.status === 'approved'
-                      ? '评估结论已批准'
-                      : assessmentReview?.status === 'pending'
-                        ? '待管理者审批'
-                        : '评估完成，待提交审批'
-                    : generating
-                      ? '方案生成中'
-                      : controller.workflow?.status === 'blocked'
-                        ? '生成受阻'
-                        : controller.workflow?.status === 'failed'
-                          ? '生成失败'
-                          : '方案待生成'}
-            </span>
-          </div>
-          <p>
-            {hasCandidates
-              ? '候选方案已生成，请比较差异并提交管理者审批；批准后发布，修改后重新审批。'
-              : assessment
-                ? '本次生产条件检查与评估已完成，请审核实际发现并提交管理者审批。'
-                : '先确认故障影响和当前正式计划，再生成候选排产方案。'}
-          </p>
-        </div>
-      </header>
+                    ? '本次生产条件检查与评估已完成，请审核实际发现并提交管理者审批。'
+                    : '先确认故障影响和当前正式计划，再生成候选排产方案。'
+        }
+        actions={
+          <>
+            <button className="fault-header-back" onClick={onBack}>
+              <span className="fault-back-arrow">←</span> 工作台总览
+            </button>
+            {(controller.originalWorkflow || archived) && (
+              <FaultPlanSwitch
+                view={manualView ? 'manual' : 'ai'}
+                onChange={(view) =>
+                  archived
+                    ? setArchiveChoice({ revision: state.event_revision, view })
+                    : controller.switchAnalysis(view)
+                }
+                hasAi={!archived || !!faultVariant(publication, 'ai')}
+                aiStatus={
+                  archived && !faultVariant(publication, 'ai')
+                    ? '原始记录缺失'
+                    : faultPlanStatus(
+                        archived
+                          ? publication?.variants?.ai?.simulation
+                          : controller.originalSimulation,
+                        archived ? null : state.fault_review,
+                        archived
+                          ? (publication?.variants?.ai ??
+                              (publication?.selected_variant !== 'manual' ? publication : null))
+                          : null,
+                        controller.originalWorkflow?.id,
+                      )
+                }
+                manualStatus={faultPlanStatus(
+                  archived
+                    ? publication?.variants?.manual?.simulation
+                    : controller.manualDraft?.simulation,
+                  archived ? null : state.fault_review,
+                  faultVariant(publication, 'manual'),
+                )}
+                hasManual={
+                  archived ? !!faultVariant(publication, 'manual') : !!controller.manualDraft
+                }
+              />
+            )}
+            {onBackToAnalysis && (
+              <button className="fault-header-back" onClick={onBackToAnalysis}>
+                ← 返回评估详情
+              </button>
+            )}
+          </>
+        }
+      />
       <div className="fault-stage-grid">
         <div className="fault-stage-main">
           {hasDisplayCandidates ? (
@@ -210,20 +396,49 @@ export function FaultPlanPage({
                   <div>
                     <h3>
                       <DecisionText
-                        text={archived ? '已发布方案与分析报告' : conclusion.headline}
+                        text={
+                          archived
+                            ? `${manualView ? '人工调整方案' : '原 AI 方案'} · 历史分析存档`
+                            : conclusion.headline
+                        }
                       />
                     </h3>
-                    <p>{archived ? '以下为发布时保存的分析与候选存档。' : conclusion.context}</p>
+                    <p>
+                      {archived
+                        ? `实际发布：${publishedVariant(publication) === 'manual' ? '人工调整方案' : '原 AI 方案'}，执行计划 V${publication?.published_version ?? state.baseline.version}。切换仅查看各方案存档。`
+                        : conclusion.context}
+                    </p>
                   </div>
                 </div>
-                {!controller.manualDraft && <TrustScore result={displayWorkflow} />}
-                {!controller.manualDraft && (
-                  <ContributionReport report={displayWorkflow?.contribution_report} />
-                )}
-                {!controller.manualDraft && displayWorkflow?.results.explanation?.data?.summary && (
-                  <p className="hint">{displayWorkflow.results.explanation.data.summary}</p>
-                )}
-                {!published && generationControls}
+                <ContributionReport
+                  candidate={
+                    displaySimulation?.candidates.find(
+                      (item) =>
+                        item.id ===
+                        (archived
+                          ? (archive?.selected_candidate_id ?? archive?.decisions?.candidate_id)
+                          : controller.selected),
+                    ) ??
+                    (displaySimulation?.candidates.length === 1
+                      ? displaySimulation.candidates[0]
+                      : undefined)
+                  }
+                  result={displayWorkflow}
+                  published={
+                    archived &&
+                    (archive?.decisions?.status === 'published' ||
+                      archive?.published_version !== undefined)
+                  }
+                  report={
+                    archived
+                      ? (archive?.report ?? displayWorkflow?.contribution_report)
+                      : displayWorkflow?.contribution_report
+                  }
+                />
+                {!displayWorkflow?.contribution_report &&
+                  !archive?.report &&
+                  !displaySimulation?.candidates.length && <TrustScore result={displayWorkflow} />}
+                {!published && !manualView && generationControls}
                 <footer className="fault-conclusion-metadata" aria-label="方案分析标识">
                   <span>
                     基线 V{displayState.baseline.version} · 故障 R
@@ -256,8 +471,8 @@ export function FaultPlanPage({
                 </div>
                 <div className="fault-compare-tiles">
                   <article>
-                    <h3>当前正式计划</h3>
-                    <p>受影响 {state.affected.length} 道工序</p>
+                    <h3>{archived ? '分析时的执行计划' : '当前正式计划'}</h3>
+                    <p>受影响 {displayState.affected.length} 道工序</p>
                     <p>保持现有设备与时间</p>
                   </article>
                   <article>
@@ -274,24 +489,73 @@ export function FaultPlanPage({
                     <p>请结合交期与资源变化审核</p>
                   </article>
                 </div>
-                {displaySimulation && <MetricsTable candidates={displaySimulation.candidates} />}
+                {allCandidates.length > 0 && (
+                  <MetricsTable candidates={allCandidates} manualDraft={controller.manualDraft} />
+                )}
               </section>
               <section className="fault-stage-card fault-candidate-card" id="fault-candidate">
                 <div className="fault-stage-card-heading">
                   <h2>3　候选排产计划</h2>
                   <span>设备 · 时间 · 工序</span>
                 </div>
-                {displaySimulation && (
+                {!archived && manualView && activeManual && (
+                  <>
+                    <label className="manual-comparison-select">
+                      人工方案对照对象
+                      <select
+                        value={originalCandidate?.id ?? 'baseline'}
+                        onChange={(event) =>
+                          setComparisonChoice({
+                            manualId: activeManual.id,
+                            id: event.target.value === 'baseline' ? null : event.target.value,
+                          })
+                        }
+                      >
+                        <option value="baseline">
+                          当前执行计划 V{displayState.baseline.version}（只读）
+                        </option>
+                        {aiCandidates.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {titleFor(candidate)}
+                            {candidate.id === activeManual.source_candidate_id
+                              ? '（编辑起点）'
+                              : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="hint">
+                      编辑起点：{sourceLabel(activeManual.source_candidate_id)}
+                      。切换对照不修改人工安排，也不代表采纳。
+                    </p>
+                    {manualCandidate && referenceDelay !== undefined && (
+                      <p className="manual-comparison-delta" aria-label="人工方案相对对照差异">
+                        相对{originalCandidate ? titleFor(originalCandidate) : '当前执行计划'}：
+                        总延期差 {manualCandidate.metrics.total_lateness_minutes - referenceDelay}{' '}
+                        分钟（负值表示减少）； 完工时间差{' '}
+                        {(Date.parse(manualCandidate.metrics.makespan) - Date.parse(referenceEnd)) /
+                          60000}{' '}
+                        分钟（负值表示提前）； 工序安排不同{' '}
+                        {changedOperationCount(referenceSchedule, manualCandidate.schedule)} 道。
+                      </p>
+                    )}
+                  </>
+                )}
+                {comparisonSimulation && (
                   <Comparison
                     state={displayState}
-                    simulation={displaySimulation}
-                    range={range}
+                    simulation={comparisonSimulation}
+                    range={comparisonRange}
                     workflow={displayWorkflow}
+                    referenceWorkflow={
+                      archived ? publication?.variants?.ai?.workflow : controller.originalWorkflow
+                    }
                     mode="plans"
                     archived={archived}
                     adoption={archived ? undefined : adoption}
                   />
                 )}
+                {manualControl}
               </section>
             </>
           ) : (
@@ -300,8 +564,13 @@ export function FaultPlanPage({
                 <h2>1　方案结论</h2>
                 {assessment ? (
                   <div aria-label="评估结论与审批">
-                    <ContributionReport report={controller.workflow?.contribution_report} />
-                    {!controller.manualDraft && <TrustScore result={controller.workflow} />}
+                    <ContributionReport
+                      report={controller.workflow?.contribution_report}
+                      result={controller.workflow}
+                    />
+                    {!controller.workflow?.contribution_report && !activeManual && (
+                      <TrustScore result={controller.workflow} />
+                    )}
                     <p>
                       {controller.workflow?.results.explanation?.data?.summary ??
                         assessment.summary}
@@ -363,8 +632,18 @@ export function FaultPlanPage({
                 <p className="fault-stage-note">
                   故障 R{state.event_revision} · 来源：{state.event.source}
                 </p>
-                {generationControls}
+                {!manualView && generationControls}
                 <GenerationLoading running={generating} />
+                {manualView && (
+                  <WorkflowPanel
+                    running={generating}
+                    disabled
+                    result={controller.workflow}
+                    progress={controller.progress}
+                    onRun={controller.runWorkflow}
+                    view="chain"
+                  />
+                )}
               </section>
               <section className="fault-stage-card" id="fault-compare-summary">
                 <h2>2　方案对比</h2>
@@ -381,18 +660,47 @@ export function FaultPlanPage({
                 </div>
                 <p>暂无候选，以下为当前正式计划。</p>
                 {currentPlan}
+                {activeManual?.issues.map((issue) => (
+                  <p className="message warning" role="alert" key={issue}>
+                    {issue}
+                  </p>
+                ))}
+                {manualControl}
               </section>
             </>
           )}
-          {controller.manualDraft && (
+          {controller.manualEditor && (
             <ManualFaultPanel
-              draft={controller.manualDraft}
+              draft={controller.manualEditor}
               state={state}
               range={range}
               busy={controller.busy}
               disabled={controller.dirty || controller.stale || published}
+              sourceLabel={sourceLabel(controller.manualEditor.source_candidate_id)}
               onMove={controller.moveManual}
               onConfirm={controller.confirmManual}
+              onCancel={cancelEditor}
+              breadcrumb={manualBreadcrumb(true)}
+            />
+          )}
+          {choosingBasis && !controller.manualEditor && (
+            <ManualBasisPicker
+              state={state}
+              simulation={controller.originalSimulation}
+              workflow={controller.originalWorkflow}
+              range={range}
+              breadcrumb={manualBreadcrumb(false)}
+              selected={basisSelection}
+              onSelected={setBasisSelection}
+              acknowledged={basisAcknowledged}
+              onAcknowledged={setBasisAcknowledged}
+              replacing={!!controller.manualDraft}
+              disabled={controller.blocked || !!controller.busy || published}
+              onCancel={() => setChoosingBasis(false)}
+              onChoose={(basis) => {
+                setChoosingBasis(false);
+                void controller.startManual(basis);
+              }}
             />
           )}
           <section className="fault-stage-card fault-evidence-card" id="fault-evidence">
@@ -403,7 +711,7 @@ export function FaultPlanPage({
             <FaultDecisionEvidence
               controller={controller}
               state={displayState}
-              simulation={displaySimulation}
+              simulation={comparisonSimulation}
               workflow={displayWorkflow}
               activeTab={activeTab}
               onTab={setActiveTab}
@@ -419,9 +727,11 @@ export function FaultPlanPage({
           >
             <div className="fault-stage-card-heading">
               <h2>5　人工确认</h2>
-              <WriteButton disabled={!!controller.busy} onClick={onAdjust}>
-                返回调整
-              </WriteButton>
+              {!archived && (
+                <WriteButton disabled={!!controller.busy} onClick={onAdjust}>
+                  返回调整
+                </WriteButton>
+              )}
             </div>
             {showApproval && state.fault_review && (
               <div>
@@ -450,7 +760,7 @@ export function FaultPlanPage({
                 )}
               </div>
             )}
-            {assessment && !controller.manualDraft && (
+            {!archived && assessment && !activeManual && (
               <>
                 <label>
                   提交理由（必填）
@@ -480,8 +790,8 @@ export function FaultPlanPage({
                 </WriteButton>
               </>
             )}
-            {hasCandidates && decisionPanel}
-            {!assessment && !decisionPanel && (
+            {!archived && hasCandidates && decisionPanel}
+            {(archived || (!assessment && !decisionPanel)) && (
               <p className="hint">
                 {archived
                   ? '方案已发布，分析存档仅供查阅。'
@@ -490,7 +800,6 @@ export function FaultPlanPage({
                     : '生成候选并完成评估后，可提交管理者审批。'}
               </p>
             )}
-            {manualControl}
           </section>
           <section className="fault-stage-card fault-history-card" id="fault-history">
             <div className="fault-stage-card-heading">

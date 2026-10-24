@@ -9,6 +9,7 @@ import { OrderComparison } from './OrderComparison';
 import { ImpactChains } from './ImpactChains';
 import { EvidenceComparison } from './EvidenceComparison';
 import { Accordion } from '../../shared/ui/Accordion';
+import { candidateKind, candidateTitle } from '../../shared/lib/candidatePresentation';
 export function Comparison({
   state,
   simulation,
@@ -17,6 +18,7 @@ export function Comparison({
   mode = 'full',
   archived = false,
   adoption,
+  referenceWorkflow,
 }: {
   state: Workbench;
   simulation: Simulation;
@@ -24,6 +26,7 @@ export function Comparison({
   workflow: WorkflowResult | null;
   mode?: 'full' | 'plans' | 'details';
   archived?: boolean;
+  referenceWorkflow?: WorkflowResult | null;
   adoption?: {
     selected: string;
     disabled: boolean;
@@ -31,17 +34,8 @@ export function Comparison({
   };
 }) {
   const candidates = simulation.candidates;
-  const waitingIds = new Set(
-    workflow?.results.scheduling?.data?.candidates
-      ?.filter((candidate) => candidate.strategy_id === 'wait-recovery')
-      .map((candidate) => candidate.candidate_id),
-  );
   const isWaiting = (item: (typeof candidates)[number]) =>
-    waitingIds.has(item.id) ||
-    item.id === 'wait-recovery' ||
-    item.label === '原设备等待恢复' ||
-    item.label === '原计划对照' ||
-    item.label.startsWith('原线排尾');
+    candidateKind(item, workflow, referenceWorkflow) === 'waiting';
   return (
     <GanttSelectionProvider>
       <section
@@ -88,9 +82,12 @@ export function Comparison({
                     <h3>当前执行计划 V{state.baseline.version}</h3>
                     <span>调整前基线</span>
                   </header>
-                  <p className="hint">已发布计划；本次候选尚未发布。</p>
+                  <div className="candidate-caption">
+                    <p className="hint">已发布计划；本次候选尚未发布。</p>
+                  </div>
                   <Gantt
                     tone="red"
+                    affectedOperationIds={state.affected}
                     schedule={state.baseline}
                     failure={state.event}
                     faults={(state.plan_publication?.version === state.baseline.version
@@ -113,33 +110,49 @@ export function Comparison({
                   className={`candidate-card ${isWaiting(item) ? 'candidate-waiting' : 'candidate-optimized'}${adoption?.selected === item.id ? ' is-selected' : ''}`}
                   data-selected={adoption?.selected === item.id || undefined}
                   key={item.id}
-                  aria-label={isWaiting(item) ? '原计划对照排产图' : `${item.label}排产图`}
+                  aria-label={`${candidateTitle(item, workflow, referenceWorkflow)}排产图`}
                 >
                   <header>
-                    <h3>
-                      {item.label.startsWith('原线排尾')
-                        ? item.label
-                        : isWaiting(item)
-                          ? '原计划对照'
-                          : item.label}
-                    </h3>
+                    <h3>{candidateTitle(item, workflow, referenceWorkflow)}</h3>
                     <div className="candidate-header-meta">
-                      {adoption && !archived && !isWaiting(item) && (
-                        <span className="candidate-recommendation">⭐ AI 推荐</span>
-                      )}
+                      {adoption &&
+                        !archived &&
+                        candidateKind(item, workflow, referenceWorkflow) === 'transfer' && (
+                          <span className="candidate-recommendation">AI 允许转移</span>
+                        )}
                       <span>{item.metrics.moved_operations} 道工序调整</span>
                     </div>
                   </header>
-                  <p className="candidate-delay">
-                    总延期 {item.metrics.total_lateness_minutes} 分钟
-                  </p>
-                  {isWaiting(item) && (
-                    <p className="hint">
-                      原设备等待恢复后的排产候选 · {archived ? '原始分析存档' : '尚未发布'}
+                  <div className="candidate-caption">
+                    <p className="candidate-delay">
+                      总延期 {item.metrics.total_lateness_minutes} 分钟
                     </p>
-                  )}
+                    {isWaiting(item) && (
+                      <p className="hint">
+                        原设备等待恢复后的排产候选 · {archived ? '原始分析存档' : '尚未发布'}
+                      </p>
+                    )}
+                  </div>
                   <Gantt
-                    tone={isWaiting(item) ? 'red' : 'green'}
+                    tone={isWaiting(item) ? 'red' : archived ? 'published' : 'green'}
+                    affectedOperationIds={
+                      isWaiting(item)
+                        ? [
+                            ...state.affected,
+                            ...item.changes.map((change) => change.工序),
+                            ...item.schedule.operations
+                              .filter(
+                                (op) =>
+                                  op.status === 'planned' &&
+                                  item.order_impacts.some(
+                                    (impact) =>
+                                      impact.订单 === op.order_id && impact['新增延期(分钟)'] > 0,
+                                  ),
+                              )
+                              .map((op) => op.id),
+                          ]
+                        : []
+                    }
                     schedule={item.schedule}
                     baseline={state.baseline}
                     failure={state.event}
@@ -150,31 +163,53 @@ export function Comparison({
                   {adoption && !archived && (
                     <footer className="candidate-actions">
                       <WriteButton
-                        className={isWaiting(item) ? undefined : 'primary'}
+                        className={adoption.selected === item.id ? 'primary' : undefined}
                         disabled={adoption.disabled}
                         aria-pressed={adoption.selected === item.id}
                         onClick={() => adoption.onAdopt(item.id)}
                       >
-                        {isWaiting(item) ? '采纳此方案（等待恢复）' : '采纳此方案（转移设备）'}
+                        {candidateKind(item, workflow, referenceWorkflow) === 'manual'
+                          ? '采纳人工方案'
+                          : isWaiting(item)
+                            ? '采纳 AI 等待方案'
+                            : candidateKind(item, workflow, referenceWorkflow) === 'transfer'
+                              ? '采纳 AI 转移方案'
+                              : '采纳此方案'}
                       </WriteButton>
-                      {adoption.selected === item.id && (
-                        <span className="candidate-selected">已选中</span>
-                      )}
                     </footer>
                   )}
                 </article>
               ))}
             </div>
-            <p className="outline-legend">
+            <p className="outline-legend" aria-label="甘特图图例">
               <span>
-                <i className="purple-outline" />
-                设备转移
+                <i className="baseline-completed-fill" />
+                原计划 · 已完工
               </span>
               <span>
-                <i className="amber-outline" />
-                仅调整时间
+                <i className="baseline-fill" />
+                原计划 · 未完工
               </span>
-              <span>各图共用时间范围；红色为原计划对照，绿色为优化方案，色阶区分订单</span>
+              <span>
+                <i className="conflict-outline" />
+                受影响订单 · 未完工
+              </span>
+              <span>
+                <i className="optimized-completed-fill" />
+                优化方案 · 已完工
+              </span>
+              <span>
+                <i className="generated-fill" />
+                生成方案 · 未完工
+              </span>
+              <span>
+                <i className="published-fill" />
+                已发布方案 · 未完工
+              </span>
+              <span>
+                <i className="fault-pattern-fill" />
+                停机留痕
+              </span>
             </p>
           </div>
         )}

@@ -9,6 +9,161 @@
     0 0 0 3px rgb(59 130 246 / 3%),
     0 6px 24px rgb(30 64 175 / 5%);
 }
+
+/* Compact evidence introduction: one spacing owner, no stacked child margins. */
+.copilot-assist .analysis-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  min-height: 0;
+}
+.copilot-assist .analysis-intro > :is(p, .explanation-group, .knowledge-panel, .message) {
+  margin: 0;
+}
+.copilot-assist .analysis-intro .explanation-group h3 {
+  margin: 0 0 8px;
+}
+.copilot-assist .analysis-intro .explanation-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.analysis-focus-icon {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 12px;
+}
+.fault-decision-layout .decision-analysis-block > .copilot-assist {
+  align-content: start;
+  grid-auto-rows: auto;
+  min-height: 0;
+}
+.fault-decision-layout .decision-analysis-block > .copilot-assist > p {
+  margin: 0;
+}
+.analysis-detail-content {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.analysis-candidate-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  color: #475569;
+}
+.analysis-candidate-picker select {
+  width: auto;
+  max-width: 100%;
+  min-width: 160px;
+}
+.analysis-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+.analysis-data-card,
+.analysis-note-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.copilot-assist :is(.analysis-data-card, .analysis-note-card) > h4 {
+  margin: 0 0 12px;
+  color: #334155;
+  font-size: 14px;
+}
+.analysis-operation-row + .analysis-operation-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+.analysis-before-after {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.analysis-before-after > span:not(.analysis-change-arrow) {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border-radius: 5px;
+  background: #f8fafc;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.analysis-before-after > span:last-child {
+  background: #eff6ff;
+}
+.analysis-change-arrow {
+  color: #2563eb;
+}
+.analysis-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 12px;
+  margin: 0;
+}
+.analysis-metric-grid dt {
+  color: #64748b;
+  font-size: 12px;
+}
+.analysis-metric-grid dd {
+  margin: 4px 0 0;
+  color: #1e3a8a;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.analysis-metric-grid dd small {
+  margin-left: 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+}
+.analysis-orders-card {
+  grid-column: 1 / -1;
+}
+.analysis-orders-card .table-wrap {
+  overflow-x: auto;
+  margin: 0;
+}
+.analysis-orders-card :is(td, th) {
+  padding: 8px 10px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.analysis-notes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  align-items: start;
+  gap: 12px;
+}
+.copilot-assist :is(.analysis-note-card, .analysis-operation-row, .analysis-data-card) p {
+  margin: 8px 0 0;
+}
+.analysis-note-card p + p {
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+.evidence-reference {
+  border-bottom: 1px dotted #94a3b8;
+  color: #64748b;
+  cursor: help;
+}
+@media (max-width: 800px) {
+  .analysis-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .copilot-assist .section-heading h2,
 .fault-decision-layout .copilot-assist .section-heading h2 {
   color: #1e3a8a;
@@ -57,20 +212,11 @@
 }
 .copilot-assist .knowledge-panel {
   margin: 24px 0;
-  padding: 20px;
-  border-color: #dbeafe;
-  background: #f8fbff;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
-.copilot-assist .knowledge-heading .tag {
-  padding: 2px 8px;
-  border: 1px solid #e2e8f0;
-  border-radius: 5px;
-  background: #f1f5f9;
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.6;
-}
+
 .copilot-assist .decision-accordion > summary {
   border-radius: 8px;
   background: #f1f5f9;

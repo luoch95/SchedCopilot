@@ -42,7 +42,7 @@
   gap: 6px 20px;
   min-width: 0;
 }
-.dashboard-layout .planner-title-row .console-breadcrumb {
+:is(.dashboard-layout, .decision-page-header) .planner-title-row .console-breadcrumb {
   margin: 0;
   font-size: 12px;
   font-weight: 400;
@@ -157,8 +157,13 @@
 .dashboard-layout .page-header {
   margin-bottom: 12px;
 }
-.dashboard-layout .page-header h1 {
+.dashboard-layout .page-header h1,
+.decision-page-header .workbench-title {
   font-size: 24px;
+  color: #243b48;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.6px;
 }
 .dashboard-layout .page-header p:not(.eyebrow) {
   margin-top: 4px;
@@ -273,7 +278,8 @@
   height: auto;
 }
 .dashboard-alerts-body > div:has(> .fault-event-banner),
-.dashboard-alerts-body > .fault-history-item {
+.dashboard-alerts-body > .fault-history-item,
+.dashboard-alerts-body > .fault-event-banner.is-published {
   position: relative;
   min-height: var(--fault-card-height);
   box-sizing: border-box;
@@ -290,6 +296,20 @@
   background: #f9fbfc;
   font-size: 12px;
 }
+.dashboard-alerts .fault-event-banner.is-published {
+  border: 1px solid var(--border);
+  border-left: 3px solid #b8cde2;
+  background: #f9fbfc;
+  color: #475569;
+}
+.dashboard-alerts .fault-event-banner.is-published h2 {
+  color: #475569;
+}
+.dashboard-alerts .fault-event-banner.is-published .fault-impact-summary {
+  border-top-color: #dbe4ed;
+  color: #475569;
+}
+
 .fault-history-item h3 {
   margin: 0 0 4px;
 }
@@ -707,7 +727,8 @@
     flex-direction: row;
     gap: 8px;
   }
-  .dashboard-layout .page-header h1 {
+  .dashboard-layout .page-header h1,
+  .decision-page-header .workbench-title {
     font-size: 20px;
   }
   .dashboard-layout .page-header > div:first-child > p {

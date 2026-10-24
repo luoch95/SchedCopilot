@@ -28,6 +28,8 @@ dist/
 *.log
 *.sqlite
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Operating system
 .DS_Store

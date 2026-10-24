@@ -68,6 +68,7 @@ class ManualReport(Contract):
 
 
 class ManualDraftResponse(Contract):
+    workflow: dict[str, JsonValue] | None = None
     id: str
     revision: int = Field(ge=1)
     status: Literal["editing", "ready_for_review"]

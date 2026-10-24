@@ -10,6 +10,7 @@ from .manual_contracts import (
     SaveManualDraft,
 )
 from .presenters import simulation_view
+from .workflow_stream import workflow_stream
 
 router = APIRouter(prefix="/api/fault-drafts")
 
@@ -52,3 +53,9 @@ def confirm(draft_id: str, command: ConfirmManualDraft, request: Request):
     service = request.app.state.manual_faults
     result = service.confirm(draft_id, command)
     return present(result if isinstance(result, tuple) else service.response(result))
+
+
+@router.post("/{draft_id}/evaluate")
+def evaluate(draft_id: str, command: ConfirmManualDraft, request: Request):
+    service = request.app.state.manual_faults
+    return workflow_stream(lambda emit: present(service.evaluate(draft_id, command, emit)))

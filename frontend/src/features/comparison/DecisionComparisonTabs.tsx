@@ -18,12 +18,14 @@ export function DecisionComparisonTabs({
   workflow,
   active,
   onActive,
+  referenceWorkflow,
 }: {
   state: Workbench;
   simulation?: Simulation | null;
   workflow: WorkflowResult | null;
   active: string;
   onActive: (id: string) => void;
+  referenceWorkflow?: WorkflowResult | null;
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const candidates = simulation?.candidates ?? [];
@@ -82,7 +84,12 @@ export function DecisionComparisonTabs({
               )}
               {index === 2 && <ImpactChains candidates={candidates} showHeading={false} />}
               {index === 3 && (
-                <EvidenceComparison candidates={candidates} workflow={workflow} flat />
+                <EvidenceComparison
+                  candidates={candidates}
+                  workflow={workflow}
+                  referenceWorkflow={referenceWorkflow}
+                  flat
+                />
               )}
             </>
           )}

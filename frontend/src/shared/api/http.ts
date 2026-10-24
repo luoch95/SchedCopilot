@@ -31,14 +31,15 @@ export async function api<T>(path: string, body?: unknown, method = 'POST'): Pro
 }
 
 /** Consume real progress without retrying a potentially still-running workflow. */
-export async function workflowStream(
+export async function workflowStream<T = WorkflowResponse>(
   body: unknown,
   onProgress: (event: WorkflowProgressEvent) => void,
   signal?: AbortSignal,
-): Promise<WorkflowResponse> {
+  path = '/workflow',
+): Promise<T> {
   let response: Response;
   try {
-    response = await fetch('/api/workflow', {
+    response = await fetch(`/api${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -58,14 +59,14 @@ export async function workflowStream(
   }
   // Retain compatibility with servers returning the original one-shot response.
   if (!response.headers.get('content-type')?.includes('application/x-ndjson'))
-    return response.json() as Promise<WorkflowResponse>;
+    return response.json() as Promise<T>;
   if (!response.body) throw new ApiError('无法读取执行进度，请重新生成方案。', 0);
   const reader = response.body.getReader();
   const cancelReader = () => void reader.cancel().catch(() => {});
   signal?.addEventListener('abort', cancelReader, { once: true });
   const decoder = new TextDecoder();
   let buffer = '';
-  let result: WorkflowResponse | undefined;
+  let result: T | undefined;
   function consume(line: string) {
     signal?.throwIfAborted();
     if (!line.trim()) return;
