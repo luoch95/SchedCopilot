@@ -1,7 +1,7 @@
-import type { Candidate, Failure } from '../shared/api/contracts';
-import { planReport } from '../shared/lib/planReport';
-import { stamp } from '../shared/lib/time';
-import { AiAnalysisButton } from '../shared/ui/AiAnalysisButton';
+import type { Candidate, Failure } from '../api/contracts';
+import { planReport } from '../lib/planReport';
+import { stamp } from '../lib/time';
+import { AiAnalysisButton } from './AiAnalysisButton';
 
 /** Only render for faults backed by an actual publication archive or trace. */
 export function PublishedFaultCard({

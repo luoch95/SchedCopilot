@@ -1,7 +1,8 @@
+import { visibleFaultEvents } from '../shared/lib/visibleFaultEvents';
 import { AiAnalysisButton } from '../shared/ui/AiAnalysisButton';
 import { WorkbenchTitle } from '../shared/ui/WorkbenchTitle';
 import { FaultPlanPage } from './FaultPlanPage';
-import { PublishedFaultCard } from './PublishedFaultCard';
+import { PublishedFaultCard } from '../shared/ui/PublishedFaultCard';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { stamp } from '../shared/lib/time';
 import { Modal } from '../shared/ui/Modal';
@@ -21,7 +22,7 @@ import { publishedFault, useWorkbench, useHistoricalFaultAnalysis } from '../fea
 import { WriteButton } from '../shared/ui/WriteButton';
 import { BusinessLabelProvider } from '../shared/lib/BusinessLabelProvider';
 import { DateRangeFilter } from '../shared/ui/DateRangeFilter';
-import { inDateRange, newestFirst, type DateRange } from '../shared/lib/dateRange';
+import { type DateRange } from '../shared/lib/dateRange';
 
 /** Composition only. Workflow state and HTTP calls live outside the page. */
 export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => void }) {
@@ -149,39 +150,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       candidate.id === (publication.selected_candidate_id ?? publication.decisions?.candidate_id),
   );
   const analysisTime = analysisWorkflow?.created_at;
-  // A saved revision is not a separate outage. Keep current and published records,
-  // rather than showing superseded siblings with empty reports and delete actions.
-  const sameOutage = (left: Workbench['event'], right: Workbench['event']) =>
-    left.machine_id === right.machine_id &&
-    new Date(left.started_at).getTime() === new Date(right.started_at).getTime();
-  const publishedTraces = state.plan_publication?.fault_traces ?? [];
-  const visibleEvents = [
-    ...(state.event_history ?? []).filter(
-      (event) =>
-        event.revision !== state.event_revision &&
-        !event.cancelled &&
-        (publishedTraces.some((trace) => trace.event_revision === event.revision) ||
-          ((!sameOutage(event, state.event) || state.event_cancelled) &&
-            !publishedTraces.some((trace) => sameOutage(event, trace.failure)))),
-    ),
-    ...(state.event_cancelled
-      ? []
-      : [
-          {
-            ...state.event,
-            revision: state.event_revision,
-            created_at:
-              state.event_history?.find((event) => event.revision === state.event_revision)
-                ?.created_at ?? state.event.received_at,
-          },
-        ]),
-  ]
-    .filter((event) => inDateRange(event.started_at, dateRange))
-    .sort(
-      (a, b) =>
-        newestFirst(a.created_at || a.started_at, b.created_at || b.started_at) ||
-        b.revision - a.revision,
-    );
+  const visibleEvents = visibleFaultEvents(state, dateRange);
   const currentFaultCard = publication ? (
     <PublishedFaultCard
       failure={state.event}

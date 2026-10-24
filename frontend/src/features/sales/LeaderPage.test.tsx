@@ -2,7 +2,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LeaderPage } from './LeaderPage';
-import { workbench } from '../../test/fixtures';
+import { workbench, simulation } from '../../test/fixtures';
+import type { Workbench } from '../../shared/api/contracts';
 
 const published = {
   ...workbench,
@@ -137,6 +138,119 @@ it('opens the same fault analysis in a read-only drawer without navigating or wr
   expect(screen.queryByRole('button', { name: /录入.*故障|生成候选|确认发布/ })).toBeNull();
   fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   expect(screen.queryByRole('dialog')).toBeNull();
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.every(([, options]) => !options?.method || options.method === 'GET'),
+  ).toBe(true);
+});
+
+function serveAlerts(value: Workbench) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, options?: RequestInit) => {
+      if (url === '/api/workbench') return new Response(JSON.stringify(value));
+      if (url === '/api/sales/requests') return new Response('[]');
+      if (url === '/api/workflow/latest' || url === '/api/events/2/analysis')
+        return new Response('null');
+      if (url === '/api/fault-reviews/review-1/actions') {
+        expect(JSON.parse(options!.body as string)).toEqual({
+          action: 'approve',
+          reason: '核验通过',
+          operator_role: 'leader',
+        });
+        return new Response(
+          JSON.stringify({ ...value, fault_review: { ...value.fault_review, status: 'approved' } }),
+        );
+      }
+      throw new Error(`Unexpected endpoint: ${url}`);
+    }),
+  );
+}
+
+it('uses the published card and its archived candidate metrics without an inline report', async () => {
+  serveAlerts({
+    ...published,
+    plan_publication: {
+      ...published.plan_publication,
+      fault_analysis: {
+        event_revision: 1,
+        baseline_version: 1,
+        published_version: 2,
+        workflow: null,
+        simulation,
+        selected_candidate_id: 'wait',
+      },
+    },
+  });
+  render(<LeaderPage onSwitchRole={() => {}} />);
+  const title = await screen.findByRole('heading', { name: /M1 停机 · R1 · 已发布 V2/ });
+  const card = title.closest('article')!;
+  expect(card.classList.contains('is-published')).toBe(true);
+  expect(within(card).getByText('已发布方案的预计结果：')).toBeTruthy();
+  expect(card.textContent).toContain('预计 1 个订单延期，共 120 分钟');
+  expect(within(card).queryByRole('region', { name: '故障方案审批' })).toBeNull();
+  expect(within(card).queryByText(/剩余.*道工序受故障影响/)).toBeNull();
+});
+
+it('keeps approval forms in a drawer and still sends the leader approval action', async () => {
+  serveAlerts({
+    ...workbench,
+    fault_review: {
+      id: 'review-1',
+      simulation_id: simulation.id,
+      candidate_id: 'wait',
+      baseline_fingerprint: 'plan-1',
+      event_revision: 1,
+      status: 'pending',
+      reason: '调整排产',
+      review_reason: '',
+      created_at: workbench.snapshot_time,
+      reviewed_at: null,
+      candidate_label: '原 AI 方案',
+      metrics: simulation.candidates[0].metrics,
+      analysis: { event_revision: 1, baseline_version: 1, workflow: null, simulation },
+    },
+  });
+  render(<LeaderPage onSwitchRole={() => {}} />);
+  const trigger = await screen.findByRole('button', { name: '审批详情' });
+  expect(screen.queryByRole('textbox', { name: '审批意见（必填）' })).toBeNull();
+  expect(screen.getByRole('region', { name: '异常与预警' }).textContent).toContain(
+    '预计 1 个订单延期，共 120 分钟',
+  );
+  fireEvent.click(trigger);
+  const drawer = screen.getByRole('dialog', { name: '故障方案审批详情' });
+  fireEvent.change(within(drawer).getByRole('textbox', { name: '审批意见（必填）' }), {
+    target: { value: '核验通过' },
+  });
+  fireEvent.click(within(drawer).getByRole('button', { name: '同意方案并交回排产员' }));
+  await within(drawer).findByText('故障方案审批 · 已批准，待排产员发布');
+  expect(screen.queryByRole('button', { name: /确认发布/ })).toBeNull();
+});
+
+it('lists published history, filters duplicate outage revisions and isolates missing archives', async () => {
+  const other = { ...workbench.event, machine_id: 'M2', started_at: '2026-10-18T13:00:00+08:00' };
+  serveAlerts({
+    ...workbench,
+    event_revision: 3,
+    event_history: [
+      { ...workbench.event, revision: 1, created_at: workbench.snapshot_time },
+      { ...other, revision: 2, created_at: other.started_at },
+    ],
+    plan_publication: {
+      ...published.plan_publication,
+      version: 1,
+      fault_traces: [{ version: 1, event_revision: 2, failure: other, affected_operations: [] }],
+    },
+  });
+  render(<LeaderPage onSwitchRole={() => {}} />);
+  const history = await screen.findByRole('article', { name: '历史故障 M2 R2' });
+  expect(screen.queryByRole('article', { name: '历史故障 M1 R1' })).toBeNull();
+  expect(history.textContent).toContain('历史指标记录缺失');
+  fireEvent.click(within(history).getByRole('button', { name: '查看历史 AI 分析' }));
+  const drawer = screen.getByRole('dialog', { name: 'M2故障 R2 · 历史智能分析明细' });
+  await within(drawer).findByText('该历史修订尚未生成 AI 分析，暂无分析记录。');
+  expect(within(drawer).queryByText('TRC-LEADER')).toBeNull();
   expect(
     vi
       .mocked(fetch)

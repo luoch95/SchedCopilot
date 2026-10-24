@@ -8,14 +8,13 @@ import type {
 } from '../../shared/api/contracts';
 import { Modal } from '../../shared/ui/Modal';
 import { CurrentPlan, publishedPlanRange } from '../plan';
-import { publishedFault, workbenchApi } from '../workbench';
-import { FaultAnalysisDetails, FaultProgress } from '../analysis';
+import { publishedFault, workbenchApi, useHistoricalFaultAnalysis } from '../workbench';
+import { FaultAnalysisDetails } from '../analysis';
 import { FaultReviewPanel } from './FaultReviewPanel';
-import { AiAnalysisButton } from '../../shared/ui/AiAnalysisButton';
+import { LeaderFaultAlerts, type FaultEvent } from './LeaderFaultAlerts';
 import { WorkbenchTitle } from '../../shared/ui/WorkbenchTitle';
 import { DateRangeFilter } from '../../shared/ui/DateRangeFilter';
-import { inDateRange, type DateRange } from '../../shared/lib/dateRange';
-import { stamp } from '../../shared/lib/time';
+import { type DateRange } from '../../shared/lib/dateRange';
 import { WorkshopOverview } from './WorkshopOverview';
 import { PendingRequestsPanel } from './PendingRequestsPanel';
 import { WeeklyReportButton } from '../admin';
@@ -31,6 +30,9 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   const [loading, setLoading] = useState(true);
   const [planRevision, setPlanRevision] = useState(0);
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [historicalEvent, setHistoricalEvent] = useState<FaultEvent | null>(null);
+  const historical = useHistoricalFaultAnalysis(historicalEvent?.revision);
   const [planOpen, setPlanOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState(0);
@@ -44,6 +46,9 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     setWorkflow(null);
     setSimulation(null);
     setAnalysisError(false);
+    setReviewOpen(false);
+    setAnalysisOpen(false);
+    setHistoricalEvent(null);
     void workbenchApi
       .load()
       .then((value) => {
@@ -73,7 +78,7 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   }, [planRevision]);
   const fault = state?.event_cancelled ? undefined : state?.event;
   const publication = publishedFault(state);
-  const analysisWorkflow = workflow ?? publication?.workflow ?? null;
+  const analysisWorkflow = publication?.workflow ?? workflow;
   const step = publication
     ? `调整方案已发布（V${state!.baseline.version}）`
     : state?.fault_review?.status === 'pending'
@@ -101,7 +106,7 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     '今日整体产线利用率 80%（演示）',
   ].join('　 |　 ');
   const sync = (
-    <button disabled={loading} onClick={() => setPlanRevision((value) => value + 1)}>
+    <button disabled={loading || busy} onClick={() => setPlanRevision((value) => value + 1)}>
       同步最新计划
     </button>
   );
@@ -150,43 +155,16 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
               </div>
             )}
             {!state && loading && <p role="status">正在同步车间信息…</p>}
-            {fault && inDateRange(fault.started_at, faultRange) && (
-              <section className="fault-event-banner" aria-label="已登记设备故障">
-                <div className="fault-card-heading">
-                  <div className="fault-card-identity">
-                    <h2>⚠️ 已登记设备故障：{fault.machine_id} 停机</h2>
-                    <p className="fault-analysis-window">
-                      分析窗口：{stamp(fault.started_at)} —{' '}
-                      {fault.recovered_at ? stamp(fault.recovered_at) : '恢复时间未知'}
-                    </p>
-                  </div>
-                  <div className="fault-task-actions">
-                    <div className="ai-analysis-action">
-                      <AiAnalysisButton onClick={() => setAnalysisOpen(true)} />
-                    </div>
-                  </div>
-                </div>
-                <div className="fault-process-row">
-                  <FaultProgress state={state!} workflow={workflow} simulation={simulation} />
-                </div>
-                {!!fault.recovered_at && !state!.issues.length && (
-                  <p className="fault-impact-summary">
-                    <strong>
-                      结论简要：
-                      {publication
-                        ? `${publication.affected ? `本次故障原影响 ${publication.affected.length} 道工序；` : ''}发布后当前计划剩余 ${state!.affected.length} 道工序受故障影响。`
-                        : `当前计划有 ${state!.affected.length} 道工序受故障影响。`}
-                    </strong>
-                  </p>
-                )}
-                <FaultReviewPanel state={state!} onChange={setState} />
-              </section>
-            )}
-            {state?.event_cancelled && (
-              <p className="sales-muted">误录故障已撤销，不参与后续排产。</p>
-            )}
-            {fault && !inDateRange(fault.started_at, faultRange) && (
-              <p className="sales-muted">所选时间范围内暂无故障预警。</p>
+            {state && (
+              <LeaderFaultAlerts
+                state={state}
+                workflow={workflow}
+                simulation={simulation}
+                range={faultRange}
+                onAnalysis={() => setAnalysisOpen(true)}
+                onReview={() => setReviewOpen(true)}
+                onHistory={setHistoricalEvent}
+              />
             )}
           </div>
         </section>
@@ -219,6 +197,48 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
             ))}
         </div>
       </details>
+      {reviewOpen && state?.fault_review && (
+        <Modal drawer busy={busy} title="故障方案审批详情" onClose={() => setReviewOpen(false)}>
+          <FaultReviewPanel state={state} onChange={setState} onBusyChange={setBusy} />
+        </Modal>
+      )}
+      {historicalEvent && state && (
+        <Modal
+          drawer
+          drawerWidth="min(1120px, 100vw)"
+          title={`${historicalEvent.machine_id}故障 R${historicalEvent.revision} · 历史智能分析明细`}
+          onClose={() => setHistoricalEvent(null)}
+        >
+          {historical.loading ? (
+            <p role="status">正在加载历史 AI 分析…</p>
+          ) : historical.error ? (
+            <p role="alert">{historical.error}</p>
+          ) : historical.analysis ? (
+            <FaultAnalysisDetails
+              state={{
+                ...state,
+                event: historicalEvent,
+                event_revision: historicalEvent.revision,
+                baseline: historical.analysis.baseline ?? state.baseline,
+                affected: historical.analysis.affected ?? [],
+                fault_review: null,
+                plan_publication: {
+                  version:
+                    historical.analysis.published_version ?? historical.analysis.baseline_version,
+                  published_at: historical.analysis.published_at ?? null,
+                  published_by: null,
+                  version_summary: '',
+                  fault_analysis: historical.analysis,
+                },
+              }}
+              workflow={historical.analysis.workflow}
+              simulation={historical.analysis.simulation}
+            />
+          ) : (
+            <p role="status">该历史修订尚未生成 AI 分析，暂无分析记录。</p>
+          )}
+        </Modal>
+      )}
       {analysisOpen && state && (
         <Modal
           drawer

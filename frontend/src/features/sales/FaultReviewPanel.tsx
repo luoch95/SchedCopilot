@@ -7,9 +7,11 @@ import { workbenchApi } from '../workbench';
 export function FaultReviewPanel({
   state,
   onChange,
+  onBusyChange,
 }: {
   state: Workbench;
   onChange: (value: Workbench) => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -19,6 +21,7 @@ export function FaultReviewPanel({
   async function act(action: 'approve' | 'reject') {
     if (!review || busy || !reason.trim()) return;
     setBusy(true);
+    onBusyChange?.(true);
     setError('');
     try {
       onChange(await workbenchApi.reviewFault(review.id, action, reason.trim()));
@@ -27,6 +30,7 @@ export function FaultReviewPanel({
       setError(err instanceof Error ? err.message : '审批未完成，请刷新后重试。');
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
     }
   }
   return (
