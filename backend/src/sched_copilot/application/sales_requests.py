@@ -15,6 +15,7 @@ from ..domain.models import digest
 from .errors import ResourceNotFound
 from .ports import InsertionRepository
 from .sales import SalesService
+from .telemetry import bind, observed, span
 
 
 class SalesRequestService:
@@ -111,10 +112,37 @@ class SalesRequestService:
     def production_fingerprint(snapshot):
         return sha256(json.dumps(snapshot, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
+    @observed("insertion")
     def assess(self, request_id, snapshot, production_snapshot=None, *, on_progress=None):
         request = self.repository.get(request_id)
         if request is None:
             raise ResourceNotFound("插单申请不存在")
+        bind(
+            business_id=request["request_no"],
+            plan_version=snapshot.baseline.version,
+            event_revision=snapshot.event_revision,
+            input_fingerprint=sha256(
+                json.dumps(
+                    {
+                        "request": {
+                            key: request[key]
+                            for key in (
+                                "id",
+                                "product_id",
+                                "quantity",
+                                "earliest_start_at",
+                                "requested_due_at",
+                                "reason",
+                            )
+                        },
+                        "baseline": snapshot.baseline.fingerprint,
+                        "revision": snapshot.event_revision,
+                        "production": self.production_fingerprint(production_snapshot),
+                    },
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest(),
+        )
         if request["status"] in {"rejected", "published"}:
             raise RuleViolation("已驳回或已发布申请不能重新试排，请新建申请")
         if self.workflow_runner:
@@ -131,7 +159,13 @@ class SalesRequestService:
         if on_progress:
             on_progress(dict(type="insertion_stage_started", agent="saving"))
         try:
-            self.repository.save_assessment(request["id"], result)
+            with span("saving"):
+                self.repository.save_assessment(request["id"], result)
+            bind(
+                assessment_id=result.get("assessment_id"),
+                local_trace_id=result.get("workflow", {}).get("trace_id"),
+                mode=result.get("workflow", {}).get("mode", "rules"),
+            )
         except Exception:
             if on_progress:
                 on_progress(dict(type="insertion_stage_failed", agent="saving"))

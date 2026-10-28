@@ -1,6 +1,7 @@
 import { api, workflowStream } from '../../shared/api/http';
 import type { InsertionProgressEvent } from '../../shared/api/contracts';
 import type { Metrics } from '../../shared/api/metrics';
+import type { DiagnosticPage, DiagnosticRun } from '../../shared/api/traces';
 import { orderLabel } from '../../shared/lib/orderLabels';
 import type {
   CopilotAnswer,
@@ -71,6 +72,11 @@ export const workbenchApi = {
   adminLogin: (password: string) => api<{ admin: boolean }>('/demo/login', { password }),
   adminLogout: () => api('/demo/logout', {}),
   adminMetrics: () => api<Metrics>('/admin/metrics'),
+  adminTraces: (filters: Record<string, string>) =>
+    api<DiagnosticPage>(
+      `/admin/traces?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value))}`,
+    ),
+  adminTrace: (id: string) => api<DiagnosticRun>(`/admin/traces/${encodeURIComponent(id)}`),
   weeklyMetrics: () => api<Metrics>('/reports/weekly'),
   submitFaultReview: (
     simulation_id: string,

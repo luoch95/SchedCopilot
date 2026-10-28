@@ -19,6 +19,7 @@ from ..agents.contracts.artifacts import CandidateChanges, CandidateSnapshot
 from ..agents.contracts.inputs import ProductionSnapshot
 from ..application.contracts import WorkflowOutcome
 from ..application.errors import DemoCooldown, InvalidInput, SnapshotConflict
+from ..application.telemetry import bind, span
 from ..domain.models import CandidatePlan, Schedule, digest
 from ..domain.scheduling import metrics
 from .orchestrator import DynamicOrchestrator
@@ -175,6 +176,7 @@ class WorkflowEngine:
                 failures=failures,
             )
         trace_id = f"TRC-{uuid4().hex.upper()}"
+        bind(local_trace_id=trace_id, input_fingerprint=fingerprint)
         if on_progress:
             on_progress({"type": "trace_started", "trace_id": trace_id})
         orchestrator = self.orchestrator
@@ -279,7 +281,8 @@ class WorkflowEngine:
             }
             # Manual runs belong to their durable draft, leaving the original AI run recoverable.
             if manual_candidate is None:
-                self.session_store.record_workflow(payload, result.model_dump(mode="json"))
+                with span("saving"):
+                    self.session_store.record_workflow(payload, result.model_dump(mode="json"))
         return WorkflowOutcome(payload, tuple(candidates))
 
     @staticmethod

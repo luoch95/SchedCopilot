@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from time import monotonic
@@ -15,6 +16,7 @@ from ..agents.live_agent import LiveAgent, ModelExecution
 from ..agents.quality import quality_progress, validate_handoff
 from ..agents.scheduling_agent import SchedulingAgent
 from ..agents.validation_agent import ValidationAgent
+from ..application.telemetry import span
 from .routing import Action, Intent, route
 from .state import WorkflowState
 
@@ -120,6 +122,7 @@ class DynamicOrchestrator:
             steps += 1
             started = monotonic()
             span_id = f"SPN-{uuid4().hex}"
+            diagnostic = None
             try:
                 self._sync_requests(current)
                 name = self._agent(action)
@@ -136,12 +139,28 @@ class DynamicOrchestrator:
                     if on_progress:
                         on_progress({**event, "action": action.value})
 
-                with quality_progress(emit_quality):
-                    run = agent.run(
-                        request.model_copy(deep=True),
-                        expected_context=current.context,
-                        **({"simulate_failure": True} if simulate_failure else {}),
+                with quality_progress(emit_quality), span(name) as diagnostic:
+                    tool_span = (
+                        span(name + "_tool", "tool")
+                        if not isinstance(agent, LiveAgent)
+                        else nullcontext()
                     )
+                    with tool_span as tool_diagnostic:
+                        run = agent.run(
+                            request.model_copy(deep=True),
+                            expected_context=current.context,
+                            **({"simulate_failure": True} if simulate_failure else {}),
+                        )
+                        if tool_diagnostic is not None:
+                            tool_diagnostic["status"] = run.result.status
+                    diagnostic["status"] = run.result.status
+                    execution = getattr(run, "execution", None)
+                    diagnostic["mode"] = execution.mode if execution else "rules"
+                    if execution and execution.error_code:
+                        diagnostic["error_code"] = execution.error_code
+                    if execution:
+                        diagnostic["corrections"] = len(execution.corrections)
+                        diagnostic["failure_phase"] = execution.failure_phase
                 result = validate_handoff(run, name)
                 if result.context != current.context or result.agent_name != name:
                     raise ValueError("Agent result mismatch")
@@ -179,6 +198,8 @@ class DynamicOrchestrator:
                         }
                     )
             except Exception as exc:
+                if diagnostic is not None:
+                    diagnostic.update(status="failed", error_code="WORKFLOW_AGENT_FAILED")
                 logger.warning("Workflow Agent failed: %s", type(exc).__name__)
                 current.workflow_status, current.failure_code = "failed", "WORKFLOW_AGENT_FAILED"
                 trace.append(

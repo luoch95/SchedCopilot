@@ -3,6 +3,7 @@ import { workbenchApi } from '../workbench';
 import type { Metrics } from '../../shared/api/metrics';
 import { WeeklyReportButton } from './WeeklyReportButton';
 import { WorkbenchTitle } from '../../shared/ui/WorkbenchTitle';
+import { AgentTraces } from './AgentTraces';
 
 const roleLabels: Record<string, string> = { sales: '业务员', planner: '计划员', leader: '管理者' };
 
@@ -124,6 +125,7 @@ export default function AdminPage({ onSwitchRole }: { onSwitchRole: () => void }
           重试读取指标
         </button>
       )}
+      {authorized && <AgentTraces />}
       {metrics && (
         <>
           <div className="admin-toolbar">

@@ -11,6 +11,8 @@ vi.mock('../workbench', () => ({
     adminLogin: vi.fn(),
     adminLogout: vi.fn(),
     adminMetrics: vi.fn(),
+    adminTraces: vi.fn(),
+    adminTrace: vi.fn(),
     weeklyMetrics: vi.fn(),
   },
 }));
@@ -38,6 +40,7 @@ const metrics: Metrics = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(workbenchApi.adminTraces).mockResolvedValue({ items: [], total: 0, page: 1 });
 });
 it('loads metrics only after a server login and hides them on logout', async () => {
   vi.mocked(workbenchApi.adminSession).mockResolvedValue({ admin: false });

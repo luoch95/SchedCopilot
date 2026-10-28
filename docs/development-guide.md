@@ -70,3 +70,27 @@ GitHub 发布前先确认仓库根目录、许可证和公开内容。没有远�
 新版故障业务编号、稳定 `fault_event_id`、设备当天 `GZ` 序号和流程节点规则见 [多设备故障并行处理](failure-multi-event.md)。实现必须保留旧 `event_revision` 作为内部兼容字段，不得用全局最新 revision 推断其他事件已完成或历史化。
 
 故障事件的并行处理、保存后生成修订号和流程驱动历史状态见 [多设备故障并行处理](failure-multi-event.md)。故障草稿不得写入事件历史；新事件不得仅因修订号更新而使未完成旧事件进入历史。
+## LangSmith 与后台运行追踪
+
+新增故障分析、插单评估的独立诊断记录：根运行关联本地 workflow/assessment、业务编号、计划版本、事件修订与输入指纹；四角色下记录规则工具、模型调用及适用格式修复，保存结果为独立节点。后台增加运行列表、业务类型/状态/日期筛选、节点详情和 LangSmith 跳转。旧记录不回填虚构 Trace。
+
+追踪默认关闭；密钥仅在服务端配置。仅上传白名单身份、状态、耗时、模式、Token 和脱敏错误类别，不上传问题原文、生产快照、Prompt、模型原始响应。业务完成、降级与追踪上传状态分别记录；采用有界后台上传，追踪服务不可达不改变业务结果。沿用研发后台演示会话校验，不新增账号体系。
+
+验收包括两类运行、规则/模型/降级、业务与保存失败、追踪上传失败、并发隔离、后台访问控制与旧记录兼容；全量后端及前端检查通过后，真实云端 Trace 仍需配置凭证并实测。本次不自动部署或上传历史数据。
+
+实现入口：`application/telemetry.py` 提供请求内上下文；`telemetry_wiring.py` 在组合层包装规则工具和模型调用；`infrastructure/telemetry.py` 存储诊断并上传。故障 `/api/workflow` 与插单评估均覆盖四角色及保存节点，适用格式修复以实际模型调用与角色修复次数记录。手工调整、兼容分析和独立问答未纳入本版业务运行列表。
+
+服务端配置（模板见 `backend/.env.example`）：
+
+```dotenv
+SCHED_TRACING_ENABLED=1
+LANGSMITH_API_KEY=替换为服务端密钥
+LANGSMITH_PROJECT=SchedCopilot
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+```
+
+默认 `SCHED_TRACING_ENABLED=0` 仅保存本地脱敏诊断；开启但无密钥显示“未配置密钥”。不需要启用 `LANGSMITH_TRACING` 等原生自动上传开关；模型请求显式关闭原生追踪，避免上传 Prompt 和原始响应。Endpoint 要求 HTTPS。密钥不进入页面、配置 repr 或诊断记录。
+
+后台登录后查询 `/api/admin/traces`，支持 `kind`、`status`、北京时间日期 `start/end` 和 `page`，每页 20 条；详情为 `/api/admin/traces/{id}`。两者均要求现有研发会话并禁止缓存。详情提供服务器生成的 LangSmith 私有链接，需要对应 LangSmith 项目访问权限，不创建公共分享链接。上传后刷新可读取最新状态。
+
+首次启动在现有 SQLite 中增建 `diagnostic_runs`，建表前调用现有 SQLite backup 机制；不回填旧业务记录。后台上传队列最多 32 条、一个工作线程、单请求超时 3 秒，上传失败不反复重试；队列满单独标记。队列是进程内的，重启不自动补传，历史“等待上传”不代表重启后仍在发送。诊断当前在业务调用结束后保存，后台不提供执行中的实时监控；业务页面沿用原有实时链路。部署时继续遵守备份和三方状态验收规范。

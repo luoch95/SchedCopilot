@@ -20,6 +20,7 @@ from .contracts import (
 )
 from .errors import AnalysisUnavailable, InvalidInput, ResourceNotFound, SnapshotConflict
 from .ports import Analyzer, DecisionRepository, WorkflowRunner
+from .telemetry import bind, observed, span
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +256,7 @@ class WorkbenchService:
         )
         return result.version, self.workbench()
 
+    @observed("fault")
     def run_workflow(
         self,
         version: SnapshotVersion,
@@ -266,6 +268,11 @@ class WorkbenchService:
         demo_fallback=False,
     ) -> tuple[dict, SimulationResult | None]:
         baseline, event, revision = self.checked_snapshot(version)
+        bind(
+            business_id=event.fault_business_code or f"{event.machine_id}-R{revision}",
+            plan_version=baseline.version,
+            event_revision=revision,
+        )
         if self.workflow_runner is None:
             raise InvalidInput("动态编排器未配置")
         outcome = self.workflow_runner(
@@ -281,11 +288,18 @@ class WorkbenchService:
             **({"on_progress": on_progress} if on_progress else {}),
             **({"demo_fallback": True} if demo_fallback else {}),
         )
+        bind(
+            workflow_id=outcome.payload["id"],
+            local_trace_id=outcome.payload["trace_id"],
+            input_fingerprint=outcome.payload["context"]["input_fingerprint"],
+            outcome=outcome.payload["status"],
+        )
         self.checked_snapshot(version)
         simulation = None
         if outcome.candidates:
             simulation_id = str(uuid4())
-            self.repository.record_simulation(simulation_id, outcome.candidates, event)
+            with span("save_simulation"):
+                self.repository.record_simulation(simulation_id, outcome.candidates, event)
             simulation = SimulationResult(
                 simulation_id,
                 version,
@@ -302,7 +316,8 @@ class WorkbenchService:
         simulation_id = simulation.id if simulation else None
         if not simulation_id and workflow_id and intent in {"explain", "re_evaluate"}:
             simulation_id = self.repository.workflow_simulation_id(workflow_id)
-        self.repository.attach_workflow_simulation(outcome.payload["id"], simulation_id)
+        with span("attach_simulation"):
+            self.repository.attach_workflow_simulation(outcome.payload["id"], simulation_id)
         return outcome.payload, simulation
 
     def fault_analysis(self, revision: int) -> dict | None:

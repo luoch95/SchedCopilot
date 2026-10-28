@@ -7,6 +7,7 @@ from ..agents.evaluation_agent import EvaluationAgent
 from ..agents.explanation_agent import ExplanationAgent
 from ..agents.scheduling_agent import SchedulingAgent
 from ..agents.validation_agent import ValidationAgent
+from ..application.telemetry import bind, span
 
 
 class InsertionWorkflow:
@@ -19,6 +20,7 @@ class InsertionWorkflow:
 
     def __call__(self, request, snapshot, calculate, *, on_progress=None):
         trace_id = f"TRC-{uuid4().hex.upper()}"
+        bind(local_trace_id=trace_id)
         trace = []
         started = monotonic()
         model_error = None
@@ -30,8 +32,16 @@ class InsertionWorkflow:
         def run(role, execute, fact=None):
             emit(dict(type="insertion_stage_started", agent=role))
             try:
-                output = execute()
-                record(role, None if role == "validation" else fact if fact is not None else output)
+                with span(role) as node:
+                    with span(role + "_tool", "tool"):
+                        output = execute()
+                    record(
+                        role, None if role == "validation" else fact if fact is not None else output
+                    )
+                    node["mode"] = trace[-1]["mode"]
+                    execution = trace[-1].get("execution") or {}
+                    if execution.get("error_code"):
+                        node["error_code"] = execution["error_code"]
             except Exception:
                 emit(dict(type="insertion_stage_failed", agent=role))
                 raise

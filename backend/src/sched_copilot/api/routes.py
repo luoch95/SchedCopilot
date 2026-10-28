@@ -1,8 +1,10 @@
 """HTTP adapters only: validate, invoke a use case, present its result."""
 
+from datetime import date
 from typing import Annotated, Literal
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from ..application.contracts import Analyze, Decide, SaveEvent
 from ..application.metrics import read_metrics
@@ -24,6 +26,7 @@ from .schemas import (
     SnapshotRequest,
     WorkflowRequest,
 )
+from .trace_schemas import DiagnosticPage, DiagnosticRun
 from .workflow_stream import workflow_stream
 
 router = APIRouter(prefix="/api")
@@ -101,6 +104,41 @@ def admin_metrics(request: Request, response: Response):
 def weekly_metrics(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
     return read_metrics(request.app.state.metric_records(), weekly=True)
+
+
+@router.get("/admin/traces", response_model=DiagnosticPage)
+def admin_traces(
+    request: Request,
+    response: Response,
+    kind: Literal["fault", "insertion"] | None = None,
+    status: Literal["completed", "failed", "blocked"] | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+):
+    if not is_admin(request):
+        raise HTTPException(status_code=403, detail="请先登录研发后台（演示权限）")
+    if start and end and start > end:
+        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+    response.headers["Cache-Control"] = "no-store"
+    return request.app.state.telemetry.store.records(
+        kind=kind,
+        status=status,
+        start=start.isoformat() if start else None,
+        end=end.isoformat() if end else None,
+        page=page,
+    )
+
+
+@router.get("/admin/traces/{run_id}", response_model=DiagnosticRun)
+def admin_trace_detail(run_id: UUID, request: Request, response: Response):
+    if not is_admin(request):
+        raise HTTPException(status_code=403, detail="请先登录研发后台（演示权限）")
+    response.headers["Cache-Control"] = "no-store"
+    record = request.app.state.telemetry.store.detail(str(run_id))
+    if record is None:
+        raise HTTPException(status_code=404, detail="运行追踪不存在；旧记录未接入追踪")
+    return record
 
 
 @router.get("/workbench")

@@ -14,6 +14,7 @@ from ..config import Settings
 from ..infrastructure.metrics import metric_records
 from ..infrastructure.visits import VisitStore
 from ..observability import configure_logging
+from ..telemetry_wiring import build_telemetry
 from .demo_access import require_write_access
 from .errors import register_errors
 from .manual_faults import router as manual_router
@@ -46,6 +47,9 @@ def create_app(
     # Normalize persisted business numbers before restoring formal-plan display metadata.
     app.state.sales, app.state.sales_requests = build_sales(settings)
     app.state.workbench = build_workbench(settings)
+    app.state.telemetry = build_telemetry(settings)
+    app.state.workbench.telemetry = app.state.telemetry
+    app.state.sales_requests.telemetry = app.state.telemetry
     app.state.manual_faults = app.state.workbench.manual_faults
     install_visits(app, VisitStore(settings.database_path).record)
     register_errors(app)

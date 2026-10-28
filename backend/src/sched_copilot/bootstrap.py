@@ -18,6 +18,7 @@ from .infrastructure.sqlite_repository import DecisionStore
 from .orchestration.engine import WorkflowEngine
 from .orchestration.orchestrator import DynamicOrchestrator
 from .scenarios.demo import EVENT_TIME, demo_machines, demo_orders, demo_schedule
+from .telemetry_wiring import ModelProbe, RuleProbe
 
 
 def build_workbench(settings: Settings) -> WorkbenchService:
@@ -88,14 +89,17 @@ def build_model_factory(settings: Settings):
     def create_model():
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(
-            model=os.environ["LLM_MODEL"],
-            api_key=os.environ["LLM_API_KEY"],
-            base_url=os.getenv("LLM_BASE_URL") or None,
-            use_responses_api=settings.llm_api_type == "responses",
-            max_tokens=4096,
-            timeout=settings.llm_timeout_seconds,
-            max_retries=0,
+        return ModelProbe(
+            ChatOpenAI(
+                model=os.environ["LLM_MODEL"],
+                api_key=os.environ["LLM_API_KEY"],
+                base_url=os.getenv("LLM_BASE_URL") or None,
+                use_responses_api=settings.llm_api_type == "responses",
+                max_tokens=4096,
+                timeout=settings.llm_timeout_seconds,
+                max_retries=0,
+            ),
+            os.getenv("LLM_MODEL"),
         )
 
     return create_model
@@ -110,8 +114,12 @@ def build_orchestrator(settings: Settings, model_factory=None) -> DynamicOrchest
     agents = {
         name: LiveAgent(
             name,
-            agent(knowledge_tool=knowledge_tool) if name == "explanation" else agent(),
-            model_factory or create_model,
+            RuleProbe(
+                agent(knowledge_tool=knowledge_tool) if name == "explanation" else agent(), name
+            ),
+            (lambda: ModelProbe(model_factory(), os.getenv("LLM_MODEL")))
+            if model_factory
+            else create_model,
             os.getenv("LLM_MODEL") or None,
             unavailable_code=unavailable,
         )
@@ -132,7 +140,11 @@ def build_knowledge_tool(settings: Settings, model_factory=None):
     return partial(
         knowledge_explanation,
         MarkdownKnowledgeStore().search,
-        model_factory=(model_factory or build_model_factory(settings))
+        model_factory=(
+            (lambda: ModelProbe(model_factory(), os.getenv("LLM_MODEL")))
+            if model_factory
+            else build_model_factory(settings)
+        )
         if model_enabled(settings)
         else None,
         model_name=os.getenv("LLM_MODEL") or None,
@@ -159,7 +171,9 @@ def build_sales(settings: Settings, model_factory=None):
         insertion_resources,
         InsertionWorkflow(
             InsertionAnalysisAgent(
-                model_factory or build_model_factory(settings),
+                (lambda: ModelProbe(model_factory(), os.getenv("LLM_MODEL")))
+                if model_factory
+                else build_model_factory(settings),
                 os.getenv("LLM_MODEL") or None,
                 unavailable_code=(
                     None if settings.llm_configured or model_factory else "MODEL_NOT_CONFIGURED"

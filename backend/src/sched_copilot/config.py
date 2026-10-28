@@ -1,8 +1,9 @@
 """Resolve runtime configuration once at the composition root."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
@@ -34,6 +35,10 @@ class Settings:
     llm_api_type: str = "chat_completions"
     demo_mode: bool = False
     demo_admin_password: str = "admin123"
+    tracing_enabled: bool = False
+    langsmith_api_key: str | None = field(default=None, repr=False)
+    langsmith_project: str = "SchedCopilot"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
 
     def __post_init__(self):
         if self.workflow_model_mode not in {"rules", "auto", "live"}:
@@ -42,6 +47,16 @@ class Settings:
             raise ValueError("LLM_TIMEOUT_SECONDS 必须在 1 到 60 秒之间")
         if self.llm_api_type not in {"chat_completions", "responses"}:
             raise ValueError("LLM_API_TYPE 必须是 chat_completions 或 responses")
+        endpoint = urlsplit(self.langsmith_endpoint)
+        if self.tracing_enabled and (
+            endpoint.scheme != "https"
+            or not endpoint.hostname
+            or endpoint.username
+            or endpoint.password
+            or endpoint.query
+            or endpoint.fragment
+        ):
+            raise ValueError("LANGSMITH_ENDPOINT 必须是不含凭证或查询参数的 HTTPS 地址")
 
     @property
     def llm_configured(self) -> bool:
@@ -69,4 +84,8 @@ class Settings:
             os.getenv("LLM_API_TYPE", "chat_completions"),
             demo_mode,
             os.getenv("SCHED_DEMO_ADMIN_PASSWORD", "admin123"),
+            os.getenv("SCHED_TRACING_ENABLED", "0") == "1",
+            os.getenv("LANGSMITH_API_KEY") or None,
+            os.getenv("LANGSMITH_PROJECT", "SchedCopilot"),
+            os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"),
         )
