@@ -3,9 +3,10 @@
 import json
 import sqlite3
 from collections.abc import Callable
-from dataclasses import asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 from ..domain.errors import RuleViolation
 from ..domain.models import (
@@ -104,6 +105,9 @@ class DecisionStore(ManualFaultStore):
                     created_at TEXT NOT NULL, payload TEXT NOT NULL,
                     state TEXT NOT NULL, simulation_id TEXT
                 );
+                CREATE TABLE IF NOT EXISTS scenario_context (
+                    id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS production_inputs (
                     id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL
                 );
@@ -121,8 +125,73 @@ class DecisionStore(ManualFaultStore):
                     "INSERT INTO event_history VALUES (NULL, ?, ?, ?)",
                     (*legacy, datetime.now(timezone.utc).isoformat()),
                 )
+            self._migrate_event_identity(conn)
 
         self._restore_publication_metadata()
+
+    @staticmethod
+    def _business_date(event: MachineFailure) -> str:
+        china_time = timezone(timedelta(hours=8))
+        return event.started_at.astimezone(china_time).date().isoformat()
+
+    @classmethod
+    def _migrate_event_identity(cls, conn: sqlite3.Connection) -> None:
+        """Backfill stable IDs and human-readable codes without changing event facts."""
+        rows = conn.execute(
+            "SELECT revision,payload FROM event_history ORDER BY revision"
+        ).fetchall()
+        groups: dict[tuple[str, str], tuple[str, str]] = {}
+        counters: dict[tuple[str, str], int] = {}
+        for revision, raw in rows:
+            data = json.loads(raw)
+            event = parse_event(raw)
+            key = (event.machine_id, cls._business_date(event))
+            family = (event.machine_id, event.started_at.isoformat())
+            identity = groups.get(family)
+            if identity is None:
+                counters[key] = counters.get(key, 0) + 1
+                identity = (
+                    str(uuid5(NAMESPACE_URL, f"schedcopilot:fault:{revision}")),
+                    f"{event.machine_id}-GZ{counters[key]:02d}",
+                )
+                groups[family] = identity
+            changed = False
+            if not data.get("fault_event_id"):
+                data["fault_event_id"] = identity[0]
+                changed = True
+            if not data.get("fault_business_code"):
+                data["fault_business_code"] = identity[1]
+                changed = True
+            if "fault_process_stage" not in data:
+                data["fault_process_stage"] = "001"
+                changed = True
+            if changed:
+                conn.execute(
+                    "UPDATE event_history SET payload=? WHERE revision=?",
+                    (json.dumps(data, ensure_ascii=False), revision),
+                )
+        current = conn.execute("SELECT payload FROM current_event WHERE id=1").fetchone()
+        if current:
+            data = json.loads(current[0])
+            if not data.get("fault_event_id"):
+                event = parse_event(current[0])
+                match = conn.execute(
+                    "SELECT payload FROM event_history "
+                    "WHERE json_extract(payload,'$.machine_id')=? "
+                    "AND json_extract(payload,'$.started_at')=? ORDER BY revision LIMIT 1",
+                    (event.machine_id, event.started_at.isoformat()),
+                ).fetchone()
+                if match:
+                    source = json.loads(match[0])
+                    data.update(
+                        fault_event_id=source.get("fault_event_id"),
+                        fault_business_code=source.get("fault_business_code"),
+                        fault_process_stage=source.get("fault_process_stage", "001"),
+                    )
+                    conn.execute(
+                        "UPDATE current_event SET payload=? WHERE id=1",
+                        (json.dumps(data, ensure_ascii=False),),
+                    )
 
     def record_workflow(self, payload: dict, state: dict) -> None:
         with self._connect() as conn:
@@ -256,7 +325,7 @@ class DecisionStore(ManualFaultStore):
                 if needs_labels:
                     conn.execute("UPDATE current_plan SET payload=? WHERE id=1", (labeled,))
 
-    def plan_metadata(self, version, event_revision=None):
+    def plan_metadata(self, version, event_revision=None, *, include_analysis=False):
         with self._connect() as conn:
             timeline = plan_timeline(conn, version)
             rows = conn.execute(
@@ -274,7 +343,17 @@ class DecisionStore(ManualFaultStore):
                     or "candidate" not in evidence
                 ):
                     continue
-                analysis = fault_publication(conn, evidence)
+                candidate = evidence["candidate"]
+                analysis = (
+                    fault_publication(conn, evidence)
+                    if include_analysis
+                    else {
+                        "event_revision": candidate["event_revision"],
+                        "baseline_version": published_version - 1,
+                        "published_version": published_version,
+                        "selected_candidate_id": candidate["id"],
+                    }
+                )
                 if analysis["event_revision"] == event_revision:
                     current_fault_analysis = analysis
                 fault_traces.append(
@@ -282,15 +361,23 @@ class DecisionStore(ManualFaultStore):
                         "version": published_version,
                         "event_revision": analysis["event_revision"],
                         "failure": asdict(parse_event(json.dumps(evidence["event"]))),
-                        "candidate_label": evidence["candidate"]["label"],
-                        "metrics": asdict(
-                            parse_candidates(json.dumps([evidence["candidate"]]))[0].metrics
+                        "candidate_label": candidate["label"],
+                        "metrics": (
+                            asdict(parse_candidates(json.dumps([candidate]))[0].metrics)
+                            if include_analysis
+                            else candidate["metrics"]
                         ),
-                        "affected_operations": [
-                            op
-                            for op in (analysis.get("baseline") or {}).get("operations", [])
-                            if op["id"] in (analysis.get("affected") or [])
-                        ],
+                        **(
+                            {
+                                "affected_operations": [
+                                    op
+                                    for op in (analysis.get("baseline") or {}).get("operations", [])
+                                    if op["id"] in (analysis.get("affected") or [])
+                                ]
+                            }
+                            if include_analysis
+                            else {}
+                        ),
                     }
                 )
             for created_at, payload, raw in rows:
@@ -310,7 +397,7 @@ class DecisionStore(ManualFaultStore):
             "current_fault_analysis": current_fault_analysis,
             "published_at": None,
             "published_by": None,
-            "version_summary": "初始演示计划" if version == 1 else "历史版本，未记录发布信息",
+            "version_summary": "初始演示计划" if version in (0, 1) else "历史版本，未记录发布信息",
         }
 
     def operation_labels(self, schedule):
@@ -333,6 +420,13 @@ class DecisionStore(ManualFaultStore):
         with self._connect() as conn:
             row = conn.execute("SELECT payload FROM production_inputs WHERE id=1").fetchone()
         return json.loads(row[0]) if row else None
+
+    def scenario_context(self):
+        from .scenario_context import ScenarioContext
+
+        with self._connect() as conn:
+            row = conn.execute("SELECT payload FROM scenario_context WHERE id=1").fetchone()
+        return ScenarioContext.model_validate_json(row[0]) if row else None
 
     def current(self) -> Schedule:
         with self._connect() as conn:
@@ -553,6 +647,7 @@ class DecisionStore(ManualFaultStore):
             return cursor.lastrowid
 
     def record_event(self, event: MachineFailure, expected_revision: int | None = None) -> int:
+        event = self._with_event_identity(event)
         fingerprint = digest(event)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -584,9 +679,64 @@ class DecisionStore(ManualFaultStore):
             )
             return cursor.lastrowid
 
+    def _with_event_identity(self, event: MachineFailure) -> MachineFailure:
+        if event.fault_event_id and event.fault_business_code:
+            return event
+        business_date = self._business_date(event)
+        with self._connect() as conn:
+            rows = conn.execute("SELECT payload FROM event_history").fetchall()
+        for (raw,) in rows:
+            previous = parse_event(raw)
+            if previous.machine_id == event.machine_id and previous.started_at == event.started_at:
+                return replace(
+                    event,
+                    fault_event_id=previous.fault_event_id,
+                    fault_business_code=previous.fault_business_code,
+                    fault_process_stage="001",
+                )
+        used = {
+            parse_event(raw).fault_business_code
+            for (raw,) in rows
+            if parse_event(raw).machine_id == event.machine_id
+            and self._business_date(parse_event(raw)) == business_date
+            and parse_event(raw).fault_business_code
+        }
+        sequence = 1
+        while f"{event.machine_id}-GZ{sequence:02d}" in used:
+            sequence += 1
+        return replace(
+            event,
+            fault_event_id=str(
+                uuid5(
+                    NAMESPACE_URL,
+                    "schedcopilot:fault:"
+                    f"{event.machine_id}:{event.started_at.isoformat()}"
+                    f":{event.received_at.isoformat()}",
+                )
+            ),
+            fault_business_code=f"{event.machine_id}-GZ{sequence:02d}",
+            fault_process_stage="001",
+        )
+
     def fault_review(self, revision, fingerprint):
         with self._connect() as conn:
             return fault_reviews.current_review(conn, revision, fingerprint)
+
+    def fault_review_detail(self, review_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM fault_reviews WHERE id=?", (review_id,)
+            ).fetchone()
+            return json.loads(row[0]) if row else None
+
+    def fault_review_status(self, revision: int) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM fault_reviews WHERE event_revision=? "
+                "ORDER BY sequence DESC LIMIT 1",
+                (revision,),
+            ).fetchone()
+        return row[0] if row else None
 
     def submit_fault_review(self, simulation_id, candidate_id, reason, request_id):
         with self._connect() as conn:

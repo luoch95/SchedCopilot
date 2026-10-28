@@ -1,7 +1,7 @@
 """Domain models for the first deterministic scheduling scenario."""
 
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
@@ -56,6 +56,9 @@ class MachineFailure:
     recovered_at: datetime | None
     source: str
     received_at: datetime
+    fault_event_id: str | None = field(default=None, compare=False)
+    fault_business_code: str | None = field(default=None, compare=False)
+    fault_process_stage: str = field(default="001", compare=False)
 
     def __post_init__(self) -> None:
         if not self.source.strip():
@@ -105,5 +108,11 @@ class CandidatePlan:
 
 
 def digest(record: object) -> str:
-    payload = json.dumps(asdict(record), default=str, sort_keys=True, ensure_ascii=False)
+    data = asdict(record)
+    if isinstance(record, MachineFailure):
+        # Business identity and display stage are metadata; event fingerprints
+        # must remain compatible with candidates generated before identity backfill.
+        for field in ("fault_event_id", "fault_business_code", "fault_process_stage"):
+            data.pop(field, None)
+    payload = json.dumps(data, default=str, sort_keys=True, ensure_ascii=False)
     return sha256(payload.encode()).hexdigest()

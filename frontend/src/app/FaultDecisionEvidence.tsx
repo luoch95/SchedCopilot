@@ -98,6 +98,7 @@ export function FaultDecisionEvidence({
             key={id}
             id={index === 3 ? 'fault-execution-panel' : `${id}-panel`}
             className="decision-accordion decision-system-panel"
+            open={index === 2 && chainProps.running ? true : undefined}
           >
             <summary>
               <h3 id={id}>{title}</h3>

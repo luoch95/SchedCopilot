@@ -17,7 +17,7 @@ def schedule_view(schedule: Schedule, labels=None) -> dict:
     }
 
 
-def workbench_view(snapshot: WorkbenchSnapshot) -> dict:
+def workbench_view(snapshot: WorkbenchSnapshot, *, overview: bool = False) -> dict:
     view = {**asdict(snapshot), "baseline": schedule_view(snapshot.baseline)}
     labels = view.pop("operation_labels")
     for operation in view["baseline"]["operations"]:
@@ -29,6 +29,29 @@ def workbench_view(snapshot: WorkbenchSnapshot) -> dict:
     }
     for order in view["orders"]:
         order["display_name"] = names.get(order["id"], order["id"])
+    if overview:
+        # The workbench is a first-screen endpoint. Analysis bodies remain available
+        # exclusively from their detail endpoints and must not delay role switching.
+        publication = view.get("plan_publication") or {}
+        view["plan_publication"] = {
+            key: publication[key]
+            for key in (
+                "version",
+                "published_at",
+                "published_by",
+                "version_summary",
+                "history",
+                "fault_traces",
+            )
+            if key in publication
+        }
+        review = view.get("fault_review")
+        if review:
+            view["fault_review"] = {
+                key: value
+                for key, value in review.items()
+                if key not in {"analysis", "workflow", "assessment"}
+            }
     return view
 
 

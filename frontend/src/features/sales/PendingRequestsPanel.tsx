@@ -2,9 +2,11 @@
 import { workbenchApi } from '../workbench';
 import type { ReactNode } from 'react';
 import type { InsertionRequestRecord } from '../../shared/api/contracts';
+import { RequestProgress } from './RequestProgress';
 import { AssessmentView } from './AssessmentView';
+import { InsertionProgress, useInsertionProgress } from './InsertionProgress';
 import { RequestStatusTimeline } from './RequestStatusTimeline';
-import { stamp } from '../../shared/lib/time';
+import { dateTime, stamp } from '../../shared/lib/time';
 import { Modal } from '../../shared/ui/Modal';
 import { StatusTag } from '../../shared/ui/StatusTag';
 import { statusLabel } from '../../shared/lib/status';
@@ -26,6 +28,9 @@ export function PendingRequestsPanel({
   onBusyChange,
   dateRange,
   headerActions,
+  openRequestNo,
+  onDetailsClose,
+  onActed,
 }: {
   refreshVersion?: number;
   planner?: boolean;
@@ -40,8 +45,12 @@ export function PendingRequestsPanel({
   onBusyChange?: (busy: boolean) => void;
   dateRange?: DateRange;
   headerActions?: ReactNode;
+  openRequestNo?: string;
+  onDetailsClose?: () => void;
+  onActed?: () => void;
 }) {
   const { readOnly } = useDemoAccess();
+  const assessmentProgress = useInsertionProgress();
   const [records, setRecords] = useState<InsertionRequestRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -53,12 +62,32 @@ export function PendingRequestsPanel({
   const [drawerBusy, setDrawerBusy] = useState(false);
   const [savedSummary, setSavedSummary] = useState<InsertionRequestRecord | null>(null);
   const salesList = !!onSelection && !requestId;
+  const reviewList = (leader || planner) && !!onOpen && !requestId;
+  const [statusFilter, setStatusFilter] = useState<InsertionRequestRecord['status'] | 'all'>('all');
   const labels = {
+    draft: '草稿 · 未提交审批',
     pending_approval: '待审批',
     approved: '已批准 · 待复核发布',
     rejected: '已驳回',
     published: '已发布',
   };
+  const [page, setPage] = useState(1);
+  const lastOpened = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!openRequestNo) {
+      lastOpened.current = undefined;
+      return;
+    }
+    if (lastOpened.current === openRequestNo) return;
+    const record = records.find((item) => item.request_no === openRequestNo);
+    if (record) {
+      setSelected(record);
+      lastOpened.current = openRequestNo;
+    }
+  }, [openRequestNo, records]);
+  useEffect(() => {
+    setPage(1);
+  }, [refreshVersion]);
   const active = useRef(0);
   const locked = useRef(false);
   useEffect(() => {
@@ -78,11 +107,13 @@ export function PendingRequestsPanel({
           ? items.filter((item) => item.request_no === requestId)
           : onOpen
             ? items.filter((item) =>
-                leader
-                  ? item.status === 'pending_approval'
+                leader || planner
+                  ? item.status !== 'draft'
                   : ['pending_approval', 'approved'].includes(item.status),
               )
-            : items;
+            : leader || planner
+              ? items.filter((item) => item.status !== 'draft')
+              : items;
         setRecords(visible);
         onRecord?.(visible[0] ?? null);
         onSelection?.(items.find((item) => item.assessment) ?? null, true);
@@ -99,23 +130,34 @@ export function PendingRequestsPanel({
     return () => {
       active.current += 1;
     };
-  }, [refreshVersion, reload, onSelection, onOpen, requestId, onRecord, assignedPlanner, leader]);
+  }, [
+    refreshVersion,
+    reload,
+    onSelection,
+    onOpen,
+    requestId,
+    onRecord,
+    assignedPlanner,
+    leader,
+    planner,
+  ]);
   async function assess(item: InsertionRequestRecord) {
     if (readOnly || locked.current || disabled) return;
     locked.current = true;
     const version = active.current;
     setAssessing(item.id);
+    assessmentProgress.start();
     setAssessmentError('');
     setSavedSummary(null);
     try {
-      const result = await workbenchApi.assessRequest(item.request_no);
+      const result = await assessmentProgress.run(item.request_no);
       if (version !== active.current) return;
       const updated = {
         ...item,
-        status: 'pending_approval' as const,
+        status: item.status === 'draft' ? ('draft' as const) : ('pending_approval' as const),
         assessment: result,
         assessment_stale: false,
-        approval: { status: 'pending' },
+        approval: item.status === 'draft' ? null : { status: 'pending' },
       };
       setRecords((previous) =>
         previous.map((record) => (record.id === item.id ? updated : record)),
@@ -123,6 +165,7 @@ export function PendingRequestsPanel({
       onSelection?.(updated);
       setReload((value) => value + 1);
     } catch (error) {
+      assessmentProgress.fail();
       if (version === active.current)
         setAssessmentError(error instanceof Error ? error.message : '试排失败，请刷新后重试。');
     } finally {
@@ -151,6 +194,7 @@ export function PendingRequestsPanel({
       );
       if (version !== active.current) return;
       setReload((value) => value + 1);
+      onActed?.();
       if (action === 'publish') onPublished?.();
     } catch (error) {
       if (version === active.current)
@@ -190,6 +234,7 @@ export function PendingRequestsPanel({
           {item.assessment_stale && !['published', 'rejected'].includes(item.status)
             ? '试排已过期（需重新试排并重新审批）'
             : {
+                draft: '试排评估（草稿，尚未提交审批）',
                 pending_approval: '管理者审批（待管理者审批，尚未发布）',
                 approved: '管理者审批（已批准，待排产员发布）',
                 rejected: '管理者审批（已驳回，流程结束）',
@@ -204,7 +249,7 @@ export function PendingRequestsPanel({
             </StatusTag>
           </p>
         )}
-        {requestId && <p>要求交期：{stamp(item.requested_due_at)}</p>}
+        {requestId && <p>要求交期：{dateTime(item.requested_due_at)}</p>}
         <p>最早开工：{stamp(item.earliest_start_at)}</p>
         <p>紧急原因：{item.reason}</p>
         <p>
@@ -212,6 +257,7 @@ export function PendingRequestsPanel({
           {item.plan_version}
         </p>
         <p>指派排产员：{item.assigned_planner}</p>
+        <p>申请业务员：{item.applicant_id || item.applicant_name || '未记录'}</p>
         <p>提交时间：{stamp(item.created_at)}</p>
         {!leader && !['published', 'rejected'].includes(item.status) && (
           <WriteButton disabled={!!assessing || disabled} onClick={() => assess(item)}>
@@ -306,15 +352,44 @@ export function PendingRequestsPanel({
     ? records
     : records
         .filter((item) => inDateRange(item.created_at, dateRange))
-        .sort((a, b) => newestFirst(a.created_at, b.created_at));
+        .filter((item) => !reviewList || statusFilter === 'all' || item.status === statusFilter)
+        .sort(
+          (a, b) =>
+            (reviewList
+              ? Number(b.status === 'pending_approval') - Number(a.status === 'pending_approval')
+              : 0) || newestFirst(a.created_at, b.created_at),
+        );
+  const pages = Math.max(1, Math.ceil(visibleRecords.length / 5));
+  const currentPage = Math.min(page, pages);
   return (
     <section
       className={`pending-requests${!loading && !error && !visibleRecords.length && onOpen ? ' pending-requests-empty' : ''}`}
       aria-label="插单申请与状态跟踪"
     >
       <div className="sales-section-heading">
-        <h3>{onOpen ? '待审批插单申请' : '插单申请与状态跟踪'}</h3>
-        <div className="dashboard-card-actions">
+        <h3>
+          {salesList
+            ? '插单申请记录'
+            : reviewList
+              ? '插单申请审批'
+              : onOpen
+                ? '待审批插单申请'
+                : '插单申请与状态跟踪'}
+        </h3>
+        <div className={`dashboard-card-actions${reviewList ? ' request-approval-actions' : ''}`}>
+          {reviewList && (
+            <select
+              aria-label="插单申请状态"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            >
+              <option value="all">全部</option>
+              <option value="pending_approval">待审批</option>
+              <option value="approved">已批准</option>
+              <option value="rejected">已驳回</option>
+              <option value="published">已发布</option>
+            </select>
+          )}
           {headerActions}
           <button disabled={loading || !!assessing} onClick={() => setReload((value) => value + 1)}>
             刷新申请
@@ -328,6 +403,7 @@ export function PendingRequestsPanel({
             : '演示角色共享申请列表；待审批不代表已通过交期评估或已发布排产。'}
         </p>
       )}
+      <InsertionProgress progress={assessmentProgress.progress} />
       {assessmentError && <p role="alert">{assessmentError}</p>}
       {loading ? (
         <p role="status">正在读取申请…</p>
@@ -335,16 +411,62 @@ export function PendingRequestsPanel({
         <p role="alert">{error}</p>
       ) : visibleRecords.length === 0 ? (
         <p className="sales-muted">
-          {dateRange && (dateRange.start || dateRange.end)
-            ? '所选时间范围内暂无插单申请。'
-            : leader && onOpen
-              ? '暂无待审批工单'
-              : onOpen
-                ? '暂无待审批或待发布的插单申请。'
-                : '暂无插单申请。'}
+          {reviewList && statusFilter !== 'all'
+            ? '当前筛选条件下暂无插单申请。'
+            : dateRange && (dateRange.start || dateRange.end)
+              ? '所选时间范围内暂无插单申请。'
+              : reviewList
+                ? '暂无插单申请。'
+                : onOpen
+                  ? '暂无待审批或待发布的插单申请。'
+                  : '暂无插单申请。'}
         </p>
       ) : requestId ? (
         <article>{renderDetails(records[0])}</article>
+      ) : salesList ? (
+        <>
+          <div className="sales-request-cards" aria-label="申请记录列表">
+            {visibleRecords.slice((currentPage - 1) * 5, currentPage * 5).map((item) => (
+              <article
+                className="sales-request-card"
+                key={item.id}
+                aria-label={`申请 ${item.request_no}`}
+              >
+                <div className="sales-section-heading">
+                  <strong>{item.request_no}</strong>
+                  <StatusTag status={item.status}>
+                    {labels[item.status] ?? statusLabel(item.status)}
+                    {!['published', 'rejected'].includes(item.status) &&
+                      (item.assessment
+                        ? item.assessment_stale
+                          ? ' · 试排过期'
+                          : ' · 已试排'
+                        : ' · 未试排')}
+                  </StatusTag>
+                </div>
+                <p>
+                  {item.product_id} / {item.quantity} 件 · 要求交期：
+                  {dateTime(item.requested_due_at)}
+                </p>
+                <RequestProgress record={item} />
+                <button disabled={disabled} onClick={() => setSelected(item)}>
+                  查看详情
+                </button>
+              </article>
+            ))}
+          </div>
+          <nav className="sales-request-pagination" aria-label="申请记录分页">
+            <button disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
+              上一页
+            </button>
+            <span>
+              第 {currentPage} / {pages} 页 · 共 {visibleRecords.length} 条
+            </span>
+            <button disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>
+              下一页
+            </button>
+          </nav>
+        </>
       ) : (
         <div className="table-scroll">
           <table>
@@ -363,6 +485,13 @@ export function PendingRequestsPanel({
                   </>
                 )}
                 <th className="status-column">状态</th>
+                {reviewList && (
+                  <>
+                    <th>申请业务员</th>
+                    <th>要求交期</th>
+                    <th>提交时间</th>
+                  </>
+                )}
                 {!onOpen && <th>{salesList ? '操作' : '申请详情'}</th>}
               </tr>
             </thead>
@@ -405,7 +534,7 @@ export function PendingRequestsPanel({
                       <td>
                         {item.product_id} / {item.quantity} 件
                       </td>
-                      <td>{stamp(item.requested_due_at)}</td>
+                      <td>{dateTime(item.requested_due_at)}</td>
                     </>
                   )}
                   <td className="status-column">
@@ -424,6 +553,13 @@ export function PendingRequestsPanel({
                       )}
                     </StatusTag>
                   </td>
+                  {reviewList && (
+                    <>
+                      <td>{item.applicant_id || item.applicant_name || '未记录'}</td>
+                      <td>{dateTime(item.requested_due_at)}</td>
+                      <td>{dateTime(item.created_at)}</td>
+                    </>
+                  )}
                   {!onOpen && (
                     <td>
                       {salesList ? (
@@ -452,6 +588,7 @@ export function PendingRequestsPanel({
           busy={drawerBusy}
           onClose={() => {
             setSelected(null);
+            onDetailsClose?.();
             setReload((value) => value + 1);
           }}
         >

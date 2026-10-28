@@ -5,7 +5,7 @@ import { KnowledgePanel } from '../../shared/ui/KnowledgePanel';
 import { useGanttSelection } from '../../shared/ui/GanttSelection';
 import type { InsertionAssessment } from '../../shared/api/contracts';
 import { operationLabels } from './presentation';
-import { localInput, stamp } from '../../shared/lib/time';
+import { localInput, readableDateTimes, stamp } from '../../shared/lib/time';
 import { BusinessLabelProvider, useBusinessText } from '../../shared/lib/BusinessLabelProvider';
 
 interface AssessmentProps {
@@ -36,7 +36,8 @@ function AssessmentContent({
   stale = false,
   published = false,
 }: AssessmentProps) {
-  const format = useBusinessText();
+  const businessFormat = useBusinessText();
+  const format = (text: string) => readableDateTimes(businessFormat(text));
   const summary = result.summary;
   const selection = useGanttSelection();
   const operationsDetails = useRef<HTMLDetailsElement>(null);

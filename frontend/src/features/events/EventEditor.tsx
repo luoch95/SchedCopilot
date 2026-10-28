@@ -1,4 +1,4 @@
-import { localInput, stamp } from '../../shared/lib/time';
+import { fullStamp, localInput, stamp } from '../../shared/lib/time';
 import type { Workbench } from '../../shared/api/contracts';
 import type { EventDraft } from './model';
 import { WriteButton } from '../../shared/ui/WriteButton';
@@ -82,7 +82,7 @@ export function EventEditor({ state, draft, busy, stale, draftInvalid, onEdit, o
             className="text-button"
             onClick={() => onEdit({ started_at: localInput(state.snapshot_time) })}
           >
-            使用13:00快照时间
+            使用{fullStamp(state.snapshot_time)}快照时间
           </WriteButton>
           <label className="check-label">
             <input
@@ -91,12 +91,12 @@ export function EventEditor({ state, draft, busy, stale, draftInvalid, onEdit, o
               checked={draft.unknown}
               onChange={(e) => onEdit({ unknown: e.target.checked })}
             />
-            恢复时间未知
+            预计恢复时间未知
           </label>
           {!draft.unknown && (
             <div className="event-datetime" role="group" aria-label="预计恢复时间">
               <label>
-                恢复日期
+                预计恢复日期
                 <input
                   type="date"
                   disabled={readOnly}
@@ -109,7 +109,7 @@ export function EventEditor({ state, draft, busy, stale, draftInvalid, onEdit, o
                 />
               </label>
               <label>
-                恢复时间
+                预计恢复时间
                 <input
                   type="time"
                   disabled={readOnly}
@@ -124,7 +124,7 @@ export function EventEditor({ state, draft, busy, stale, draftInvalid, onEdit, o
             </div>
           )}
           {draft.unknown && (
-            <p className="hint">暂时只展示潜在风险；补充恢复时间后才能生成正式候选。</p>
+            <p className="hint">暂时只展示潜在风险；补充预计恢复时间后才能生成正式候选。</p>
           )}
           <label>
             事件来源
@@ -136,9 +136,11 @@ export function EventEditor({ state, draft, busy, stale, draftInvalid, onEdit, o
               placeholder="例如：维修班组人工估计"
             />
           </label>
-          <p className="hint">时间均为 UTC+08:00，恢复时间由人工估计。</p>
+          <p className="hint">时间均为 UTC+08:00，预计恢复时间由人工估计。</p>
           {draftInvalid && (
-            <p className="inline-error">请填写开始时间、事件来源，并确保恢复时间晚于开始时间。</p>
+            <p className="inline-error">
+              请填写开始时间、事件来源，并确保预计恢复时间晚于开始时间。
+            </p>
           )}
           <WriteButton
             className="primary full-width"

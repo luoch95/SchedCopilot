@@ -22,6 +22,9 @@ class EventRequest(SnapshotRequest):
     started_at: AwareDatetime
     recovered_at: AwareDatetime | None
     source: str = Field(min_length=1, max_length=200)
+    fault_event_id: str | None = None
+    fault_business_code: str | None = None
+    fault_process_stage: str | None = None
 
 
 class DecisionRequest(BaseModel):
@@ -71,6 +74,7 @@ class SalesRequestCreate(BaseModel):
     requested_due_at: AwareDatetime
     reason: str = Field(min_length=1, max_length=1000)
     submission_key: str = Field(min_length=1, max_length=100)
+    draft_only: bool = Field(default=False, strict=True)
     applicant_session_id: str | None = Field(default=None, max_length=100)
 
     @model_validator(mode="after")
@@ -83,6 +87,8 @@ class SalesRequestCreate(BaseModel):
 
 
 class SalesRequestView(BaseModel):
+    applicant_id: str | None = None
+    applicant_name: str | None = None
     id: str
     request_no: str
     assigned_planner: str
@@ -103,7 +109,7 @@ class SalesRequestView(BaseModel):
 
 class InsertionAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["approve", "reject", "publish"]
+    action: Literal["submit", "approve", "reject", "publish"]
     reason: str = Field(min_length=1, max_length=2000)
     assessment_id: str | None = Field(default=None, max_length=100)
     operator_role: Literal["sales", "planner", "leader"]

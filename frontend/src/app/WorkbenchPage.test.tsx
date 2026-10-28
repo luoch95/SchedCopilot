@@ -186,6 +186,82 @@ beforeEach(() => {
 });
 
 describe('Schedule Copilot workflow', () => {
+  it.each(['available', 'missing', 'mismatched', 'failed'])(
+    'loads published fault details from an overview response: %s',
+    async (mode) => {
+      const original = vi.mocked(fetch).getMockImplementation()!;
+      let resolveArchive!: (response: Response) => void;
+      const archiveResponse = new Promise<Response>((resolve) => {
+        resolveArchive = resolve;
+      });
+      vi.mocked(fetch).mockImplementation(async (...args) => {
+        if (args[0] === '/api/workbench')
+          return new Response(
+            JSON.stringify({
+              ...workbench,
+              baseline: { ...workbench.baseline, version: 2 },
+              plan_publication: {
+                version: 2,
+                published_at: '2026-10-19T06:00:00Z',
+                published_by: 'planner_01',
+                version_summary: '故障调整',
+                fault_traces: [
+                  {
+                    version: 2,
+                    event_revision: workbench.event_revision,
+                    failure: workbench.event,
+                  },
+                ],
+              },
+            }),
+          );
+        if (args[0] === `/api/events/${workbench.event_revision}/analysis`) return archiveResponse;
+        return original(...args);
+      });
+      render(<App />);
+      await screen.findByText('正在加载历史评估方案…');
+      expect(screen.queryByRole('button', { name: /生成评估方案|提交管理者审批/ })).toBeNull();
+      await act(async () => {
+        resolveArchive(
+          new Response(
+            JSON.stringify(
+              mode === 'missing'
+                ? null
+                : {
+                    event_revision:
+                      mode === 'mismatched'
+                        ? workbench.event_revision + 1
+                        : workbench.event_revision,
+                    baseline_version: workbench.baseline.version,
+                    baseline: workbench.baseline,
+                    affected: workbench.affected,
+                    workflow: workflowFixture.workflow,
+                    simulation,
+                    selected_variant: 'ai',
+                    selected_candidate_id: 'transfer',
+                    published_version: 2,
+                  },
+            ),
+            { status: mode === 'failed' ? 500 : 200 },
+          ),
+        );
+      });
+      if (mode === 'available') {
+        const archive = await screen.findByLabelText('已发布故障方案存档');
+        expect(within(archive).getByText('原 AI 方案 · 历史分析存档')).toBeTruthy();
+        expect(within(archive).getByRole('heading', { name: '3　候选排产计划' })).toBeTruthy();
+        expect(archive.querySelectorAll('.gantt').length).toBeGreaterThan(0);
+        expect(screen.queryByText('方案尚未生成，请确认故障信息后生成候选。')).toBeNull();
+      } else {
+        await screen.findByRole('alert');
+        expect(screen.queryByText('原 AI 方案 · 历史分析存档')).toBeNull();
+      }
+      expect(
+        screen.queryByRole('button', { name: /生成评估方案|提交管理者审批|发布计划|手动调整/ }),
+      ).toBeNull();
+    },
+  );
+
   it('shares published card layout and keeps each fault publication metrics and permissions separate', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation(async (...args) => {
@@ -198,6 +274,8 @@ describe('Schedule Copilot workflow', () => {
               ...[0, -1, -2].map((revision) => ({
                 ...workbench.event,
                 machine_id: revision === 0 ? 'M2' : 'M3',
+                fault_business_code:
+                  revision === 0 ? 'M2-GZ01' : revision === -1 ? 'M3-GZ01' : 'M3-GZ02',
                 started_at:
                   revision === -2 ? '2026-10-18T13:00:00+08:00' : workbench.event.started_at,
                 revision,
@@ -262,8 +340,8 @@ describe('Schedule Copilot workflow', () => {
     await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
     fireEvent.click(screen.getByRole('button', { name: '← 工作台总览' }));
     const current = await screen.findByRole('article', { name: '已登记设备故障' });
-    const historical = screen.getByRole('article', { name: '历史故障 M2 R0' });
-    const missingMetrics = screen.getByRole('article', { name: '历史故障 M3 R-1' });
+    const historical = screen.getByRole('article', { name: '历史故障 M2-GZ01-001' });
+    const missingMetrics = screen.getByRole('article', { name: '历史故障 M3-GZ01-001' });
     for (const card of [current, historical, missingMetrics]) {
       expect(card.className).toBe('fault-event-banner is-published');
       expect(within(card).getAllByRole('listitem')).toHaveLength(4);
@@ -281,18 +359,53 @@ describe('Schedule Copilot workflow', () => {
       ),
     ).toBeTruthy();
     expect(
-      within(historical).getByRole('heading', { name: /M2 停机 · R0 · 已发布 V2/ }),
+      within(historical).getByRole('heading', { name: /M2 停机 · M2-GZ01-004 · 已发布 V2/ }),
     ).toBeTruthy();
     expect(within(historical).getByRole('button', { name: '查看历史 AI 分析' })).toBeTruthy();
     expect(within(missingMetrics).getByText(/历史指标记录缺失/)).toBeTruthy();
     expect(within(missingMetrics).queryByText(/总延期 0/)).toBeNull();
-    const unpublished = screen.getByRole('article', { name: '历史故障 M3 R-2' });
+    const unpublished = screen.getByRole('article', { name: '历史故障 M3-GZ02-001' });
     expect(unpublished.className).toBe('fault-history-item');
     expect(within(unpublished).getByRole('button', { name: '撤销' })).toBeTruthy();
     expect(within(unpublished).queryByText(/已发布|已批准/)).toBeNull();
-    expect(screen.queryByRole('article', { name: '历史故障 M1 R-3' })).toBeNull();
-    expect(screen.queryByRole('article', { name: '历史故障 M2 R-4' })).toBeNull();
+    expect(screen.queryByRole('article', { name: '历史故障 M1 · 编号缺失' })).toBeNull();
+    expect(screen.queryByRole('article', { name: '历史故障 M2 · 编号缺失' })).toBeNull();
     expect(screen.getAllByRole('button', { name: '撤销' })).toHaveLength(1);
+  });
+
+  it('shows actions for a saved non-current fault event and targets its revision', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (...args) => {
+      if (args[0] === '/api/workbench')
+        return new Response(
+          JSON.stringify({
+            ...workbench,
+            event_history: [
+              {
+                ...workbench.event,
+                machine_id: 'M1',
+                started_at: '2026-10-19T12:00:00+08:00',
+                revision: 0,
+                event_status: 'registered',
+                created_at: workbench.snapshot_time,
+              },
+            ],
+          }),
+        );
+      return original(...args);
+    });
+    render(<App />);
+    await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
+    fireEvent.click(screen.getByRole('button', { name: '← 工作台总览' }));
+    const event = await screen.findByRole('article', { name: '待处理故障 M1 · 编号缺失' });
+    expect(within(event).getByRole('button', { name: '撤销' })).toBeTruthy();
+    expect(within(event).getByRole('button', { name: 'AI生成评估方案' })).toBeTruthy();
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(within(event).getByRole('button', { name: '撤销' }));
+    await waitFor(() => {
+      expect(calls.some((call) => call.path === '/api/events/0/cancel')).toBe(true);
+    });
   });
 
   it('keeps historical fault reports in a read-only drawer without generating again', async () => {
@@ -330,7 +443,7 @@ describe('Schedule Copilot workflow', () => {
     await screen.findByRole('heading', { name: '故障影响与方案决策', level: 1 });
     await user.click(screen.getByRole('button', { name: '← 工作台总览' }));
     await user.click(await screen.findByRole('button', { name: '查看历史 AI 分析' }));
-    const drawer = await screen.findByRole('dialog', { name: 'M2故障 R0 · 历史智能分析明细' });
+    const drawer = await screen.findByRole('dialog', { name: 'M2 · 编号缺失 · 历史智能分析明细' });
     await within(drawer).findByText('工作流：已完成');
     expect(within(drawer).getAllByRole('img', { name: '设备工序甘特图' })).toHaveLength(2);
     expect(within(drawer).queryByRole('button', { name: /采纳|发布|生成|提交审批/ })).toBeNull();
@@ -1131,10 +1244,19 @@ describe('Schedule Copilot workflow', () => {
     expect(screen.queryByText('已比较两个候选方案。')).toBeNull();
     expect(screen.getByRole('heading', { name: '2　方案对比' })).toBeTruthy();
     await openFaultEditor();
-    expect((screen.getByLabelText('恢复日期') as HTMLInputElement).type).toBe('date');
-    expect((screen.getByLabelText('恢复时间') as HTMLInputElement).type).toBe('time');
+    expect((screen.getByLabelText('预计恢复日期') as HTMLInputElement).type).toBe('date');
+    expect(
+      (
+        within(screen.getByRole('group', { name: '预计恢复时间' })).getByLabelText(
+          '预计恢复时间',
+        ) as HTMLInputElement
+      ).type,
+    ).toBe('time');
     expect(document.querySelector('.event-editor input[type="datetime-local"]')).toBeNull();
-    fireEvent.change(screen.getByLabelText('恢复时间'), { target: { value: '18:00' } });
+    fireEvent.change(
+      within(screen.getByRole('group', { name: '预计恢复时间' })).getByLabelText('预计恢复时间'),
+      { target: { value: '18:00' } },
+    );
     expect(screen.queryByText('工作流：已完成')).toBeNull();
     expect(
       (
@@ -1340,7 +1462,10 @@ describe('Schedule Copilot workflow', () => {
     await user.click(screen.getByRole('button', { name: /生成候选方案|开始 AI 分析并生成方案/ }));
     await screen.findByRole('heading', { name: '2　方案对比' });
     await openFaultEditor();
-    fireEvent.change(screen.getByLabelText('恢复时间'), { target: { value: '18:00' } });
+    fireEvent.change(
+      within(screen.getByRole('group', { name: '预计恢复时间' })).getByLabelText('预计恢复时间'),
+      { target: { value: '18:00' } },
+    );
     expect(screen.queryByRole('heading', { name: '2　方案对比' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^采纳/ })).toBeNull();
     expect(
@@ -1404,7 +1529,7 @@ describe('Schedule Copilot workflow', () => {
     render(<App />);
     await screen.findByRole('heading', { name: '当前执行计划' });
     await openFaultEditor();
-    await user.click(screen.getByLabelText('恢复时间未知'));
+    await user.click(screen.getByLabelText('预计恢复时间未知'));
     expect(screen.queryByRole('group', { name: '预计恢复时间' })).toBeNull();
     await user.click(screen.getByRole('button', { name: '保存故障事件' }));
     await screen.findByText('故障事件已保存。请重新生成候选方案，执行计划未改变。');
@@ -1417,7 +1542,7 @@ describe('Schedule Copilot workflow', () => {
     ).toBe(true);
     expect(calls.find((call) => call.path === '/api/event')!.body!.recovered_at).toBeNull();
     await openFaultEditor();
-    await user.click(screen.getByLabelText('恢复时间未知'));
+    await user.click(screen.getByLabelText('预计恢复时间未知'));
     expect(screen.getByRole('group', { name: '预计恢复时间' })).toBeTruthy();
     expect(calls.some((call) => call.path === '/api/event/recover')).toBe(false);
   });

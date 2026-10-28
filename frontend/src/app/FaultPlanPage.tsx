@@ -10,12 +10,19 @@ import { DecisionPanel } from '../features/decisions';
 import { SimulationActions } from '../features/events';
 import { DecisionHistory } from '../features/history';
 import type { useWorkbench } from '../features/workbench';
-import { publishedFault, ManualFaultPanel, ManualBasisPicker } from '../features/workbench';
+import {
+  publishedFault,
+  publishedFaultSummary,
+  useHistoricalFaultAnalysis,
+  ManualFaultPanel,
+  ManualBasisPicker,
+} from '../features/workbench';
 import { ContributionReport } from '../shared/ui/ContributionReport';
 import { DecisionText } from '../shared/ui/DecisionText';
 import { WriteButton } from '../shared/ui/WriteButton';
 import { TraceBadge } from '../shared/ui/TraceTree';
 import { GenerationLoading } from '../shared/ui/GenerationLoading';
+import { faultBusinessLabel } from '../shared/lib/visibleFaultEvents';
 import { stamp } from '../shared/lib/time';
 import { TrustScore } from '../shared/ui/TrustScore';
 import { FaultPlanSwitch } from '../shared/ui/FaultPlanSwitch';
@@ -93,8 +100,19 @@ export function FaultPlanPage({
     approvalRef.current?.focus({ preventScroll: true });
   }, [showApproval, state.fault_review?.id]);
   const { currentSimulation } = controller;
-  const publication = publishedFault(state);
-  const published = !!publication;
+  const inlinePublication = publishedFault(state);
+  const publicationSummary = publishedFaultSummary(state);
+  const published = !!publicationSummary;
+  const history = useHistoricalFaultAnalysis(
+    published && !inlinePublication ? state.event_revision : undefined,
+  );
+  const fetchedPublication = history.analysis;
+  const publication =
+    inlinePublication ??
+    (fetchedPublication?.event_revision === state.event_revision &&
+    fetchedPublication.published_version === publicationSummary?.published_version
+      ? fetchedPublication
+      : null);
   const archiveView =
     archiveChoice?.revision === state.event_revision
       ? archiveChoice.view
@@ -216,7 +234,7 @@ export function FaultPlanPage({
       ? { ...state, baseline: archive.baseline, affected: archive.affected ?? [] }
       : state;
   const analysisTime = displayWorkflow?.created_at;
-  const hasDisplayCandidates = !!displaySimulation?.candidates.length && !generating;
+  const hasDisplayCandidates = !!displaySimulation?.candidates.length && (archived || !generating);
   const aiCandidates = archived
     ? (publication?.variants?.ai?.simulation?.candidates ??
       (publication?.selected_variant === 'manual' ? [] : (displaySimulation?.candidates ?? [])))
@@ -282,6 +300,23 @@ export function FaultPlanPage({
         ? '原 AI 来源方案（当前不可用）'
         : `当前执行计划 V${state.baseline.version}`;
   };
+  if (published && !publication) {
+    return (
+      <div aria-label="已发布故障方案存档" className="fault-stage">
+        <DecisionPageHeader
+          title="故障影响与方案决策"
+          breadcrumb={breadcrumb}
+          description="方案已发布，以下分析存档仅供查阅。"
+          actions={<button onClick={onBack}>← 工作台总览</button>}
+        />
+        <p role={history.loading ? 'status' : 'alert'}>
+          {history.loading
+            ? '正在加载历史评估方案…'
+            : history.error || '未找到匹配的历史评估存档，请返回工作台后重试。'}
+        </p>
+      </div>
+    );
+  }
   return (
     <div
       aria-label={archived ? '已发布故障方案存档' : undefined}
@@ -294,7 +329,7 @@ export function FaultPlanPage({
             className={`fault-stage-status${hasDisplayCandidates || assessment ? ' is-ready' : ''}`}
           >
             {published
-              ? `计划已发布 V${publication.published_version ?? state.baseline.version}`
+              ? `计划已发布 V${publication?.published_version ?? state.baseline.version}`
               : hasCandidates
                 ? review?.status === 'approved'
                   ? '管理者已批准，待排产员发布'
@@ -441,8 +476,8 @@ export function FaultPlanPage({
                 {!published && !manualView && generationControls}
                 <footer className="fault-conclusion-metadata" aria-label="方案分析标识">
                   <span>
-                    基线 V{displayState.baseline.version} · 故障 R
-                    {archived ? publication.event_revision : state.event_revision}
+                    基线 V{displayState.baseline.version} · 故障{' '}
+                    {faultBusinessLabel(displayState.event)}
                   </span>
                   <span>
                     {analysisTime && Number.isFinite(Date.parse(analysisTime))
@@ -621,7 +656,9 @@ export function FaultPlanPage({
                     <span>故障时段</span>
                     <strong>
                       {stamp(state.event.started_at)} —{' '}
-                      {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复时间未知'}
+                      {state.event.recovered_at
+                        ? stamp(state.event.recovered_at)
+                        : '预计恢复时间未知'}
                     </strong>
                   </div>
                   <div>
@@ -630,7 +667,7 @@ export function FaultPlanPage({
                   </div>
                 </div>
                 <p className="fault-stage-note">
-                  故障 R{state.event_revision} · 来源：{state.event.source}
+                  故障 {faultBusinessLabel(state.event)} · 来源：{state.event.source}
                 </p>
                 {!manualView && generationControls}
                 <GenerationLoading running={generating} />

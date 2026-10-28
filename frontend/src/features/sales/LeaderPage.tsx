@@ -1,3 +1,4 @@
+import { faultBusinessLabel } from '../../shared/lib/visibleFaultEvents';
 import { DemoAccessBar, SessionBar } from '../session';
 import { useEffect, useState } from 'react';
 import type {
@@ -33,6 +34,9 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [historicalEvent, setHistoricalEvent] = useState<FaultEvent | null>(null);
   const historical = useHistoricalFaultAnalysis(historicalEvent?.revision);
+  const currentAnalysis = useHistoricalFaultAnalysis(
+    analysisOpen && state && !state.event_cancelled ? state.event_revision : undefined,
+  );
   const [planOpen, setPlanOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState(0);
@@ -54,17 +58,6 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
       .then((value) => {
         if (!active) return;
         setState(value);
-        return workbenchApi
-          .latestWorkflow()
-          .then((saved) => {
-            if (active) {
-              setWorkflow(saved?.workflow ?? null);
-              setSimulation(saved?.simulation ?? null);
-            }
-          })
-          .catch(() => {
-            if (active) setAnalysisError(true);
-          });
       })
       .catch(() => {
         if (active) setError('执行计划读取失败，请重试。');
@@ -78,7 +71,6 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   }, [planRevision]);
   const fault = state?.event_cancelled ? undefined : state?.event;
   const publication = publishedFault(state);
-  const analysisWorkflow = publication?.workflow ?? workflow;
   const step = publication
     ? `调整方案已发布（V${state!.baseline.version}）`
     : state?.fault_review?.status === 'pending'
@@ -198,7 +190,13 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
         </div>
       </details>
       {reviewOpen && state?.fault_review && (
-        <Modal drawer busy={busy} title="故障方案审批详情" onClose={() => setReviewOpen(false)}>
+        <Modal
+          drawer
+          drawerWidth="min(1120px, 100vw)"
+          busy={busy}
+          title="故障方案审批详情"
+          onClose={() => setReviewOpen(false)}
+        >
           <FaultReviewPanel state={state} onChange={setState} onBusyChange={setBusy} />
         </Modal>
       )}
@@ -206,7 +204,7 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
         <Modal
           drawer
           drawerWidth="min(1120px, 100vw)"
-          title={`${historicalEvent.machine_id}故障 R${historicalEvent.revision} · 历史智能分析明细`}
+          title={`${faultBusinessLabel(historicalEvent)} · 历史智能分析明细`}
           onClose={() => setHistoricalEvent(null)}
         >
           {historical.loading ? (
@@ -243,15 +241,33 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
         <Modal
           drawer
           drawerWidth="min(1120px, 100vw)"
-          title={`${state.event.machine_id}故障 R${state.event_revision} · 智能分析明细`}
+          title={`${faultBusinessLabel(state.event)} · 智能分析明细`}
           onClose={() => setAnalysisOpen(false)}
         >
-          {analysisError && <p role="alert">分析记录读取失败，请关闭后同步最新计划重试。</p>}
-          <FaultAnalysisDetails
-            state={state}
-            workflow={analysisWorkflow}
-            simulation={state.fault_review?.analysis?.simulation ?? simulation}
-          />
+          {currentAnalysis.loading ? (
+            <p role="status">正在加载 AI 分析…</p>
+          ) : currentAnalysis.error || analysisError ? (
+            <p role="alert">分析记录读取失败，请关闭后同步最新计划重试。</p>
+          ) : currentAnalysis.analysis ? (
+            <FaultAnalysisDetails
+              state={{
+                ...state,
+                baseline: currentAnalysis.analysis.baseline ?? state.baseline,
+                affected: currentAnalysis.analysis.affected ?? [],
+                plan_publication: {
+                  version: currentAnalysis.analysis.published_version ?? state.baseline.version,
+                  published_at: currentAnalysis.analysis.published_at ?? null,
+                  published_by: null,
+                  version_summary: '',
+                  fault_analysis: currentAnalysis.analysis,
+                },
+              }}
+              workflow={currentAnalysis.analysis.workflow}
+              simulation={currentAnalysis.analysis.simulation}
+            />
+          ) : (
+            <p role="status">该故障尚未生成 AI 分析，暂无分析记录。</p>
+          )}
         </Modal>
       )}
       {selected && (
@@ -267,7 +283,12 @@ export function LeaderPage({ onSwitchRole }: { onSwitchRole: () => void }) {
           <p className="console-request-context">
             {selected.request_no} · {selected.product_id} / {selected.quantity} 件
           </p>
-          <PendingRequestsPanel leader requestId={selected.request_no} onBusyChange={setBusy} />
+          <PendingRequestsPanel
+            leader
+            requestId={selected.request_no}
+            onBusyChange={setBusy}
+            onActed={() => setRefresh((value) => value + 1)}
+          />
         </Modal>
       )}
     </main>

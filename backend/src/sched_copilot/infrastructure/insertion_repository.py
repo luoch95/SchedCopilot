@@ -37,8 +37,36 @@ class InsertionStore:
 
         Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, expire_on_commit=False)
+        self._migrate_applicant_name()
+        self._migrate_applicant_id()
         self._migrate_planner_assignment()
         self._migrate_request_numbers()
+
+    def _migrate_applicant_id(self):
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            columns = connection.exec_driver_sql("PRAGMA table_info(insertion_requests)").all()
+            if "applicant_id" not in {column[1] for column in columns}:
+                from .sqlite_repository import backup_database
+
+                backup_database(Path(self.engine.url.database))
+                connection.exec_driver_sql(
+                    "ALTER TABLE insertion_requests ADD COLUMN applicant_id VARCHAR(100)"
+                )
+            connection.commit()
+
+    def _migrate_applicant_name(self):
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            columns = connection.exec_driver_sql("PRAGMA table_info(insertion_requests)").all()
+            if "applicant_name" not in {column[1] for column in columns}:
+                from .sqlite_repository import backup_database
+
+                backup_database(Path(self.engine.url.database))
+                connection.exec_driver_sql(
+                    "ALTER TABLE insertion_requests ADD COLUMN applicant_name VARCHAR(100)"
+                )
+            connection.commit()
 
     def _migrate_planner_assignment(self):
         # create_all cannot add columns to existing SQLite tables.
@@ -116,7 +144,17 @@ class InsertionStore:
                 raise RuleViolation("提交标识已被其他申请内容使用")
             return self._full_view(session, row)
 
-    def submit(self, values, key, fingerprint, estimate, plan_version, plan_fingerprint):
+    def submit(
+        self,
+        values,
+        key,
+        fingerprint,
+        estimate,
+        plan_version,
+        plan_fingerprint,
+        *,
+        draft_only=False,
+    ):
         # Serialize writes and check idempotency inside the transaction as well.
         with self.sessions() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
@@ -149,6 +187,9 @@ class InsertionStore:
             )
             session.add(row)
             session.flush()
+            if draft_only:
+                session.commit()
+                return self._full_view(session, row)
             row.status = "pending_approval"
             session.add(
                 RequestStatusHistory(
@@ -225,7 +266,7 @@ class InsertionStore:
             row = session.get(InsertionRequest, request_id)
             if row is None:
                 raise RuleViolation("插单申请已不存在")
-            if row.status not in {"pending_approval", "approved"}:
+            if row.status not in {"draft", "pending_approval", "approved"}:
                 raise RuleViolation("当前申请状态不允许试排")
             if row.status == "approved":
                 self._status(
@@ -234,8 +275,9 @@ class InsertionStore:
             approval = session.scalar(
                 select(ApprovalRecord).where(ApprovalRecord.request_id == request_id)
             )
-            approval.status = "pending"
-            approval.comment = None
+            if approval is not None:
+                approval.status = "pending"
+                approval.comment = None
             result["assessment_id"] = str(uuid4())
             row.assessment_json = json.dumps(result, ensure_ascii=False)
             row.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -280,7 +322,12 @@ class InsertionStore:
         row.updated_at = now
 
     def transition(self, request_id, action, reason, assessment_id, schedule=None, production=None):
-        targets = {"approve": "approved", "reject": "rejected", "publish": "published"}
+        targets = {
+            "submit": "pending_approval",
+            "approve": "approved",
+            "reject": "rejected",
+            "publish": "published",
+        }
         if action not in targets:
             raise RuleViolation("无效插单操作")
         with self.sessions() as session:
@@ -292,7 +339,29 @@ class InsertionStore:
             approval = session.scalar(
                 select(ApprovalRecord).where(ApprovalRecord.request_id == request_id)
             )
-            binding = json.loads(approval.comment) if approval.comment else {}
+            binding = json.loads(approval.comment) if approval and approval.comment else {}
+            if action == "submit":
+                if row.status not in {"draft", "pending_approval"}:
+                    raise RuleViolation("当前申请状态不允许提交审批")
+                if not result or not assessment_id or result.get("assessment_id") != assessment_id:
+                    raise RuleViolation("请先完成插单评估，再提交审批")
+                self._fresh(session, result)
+                if row.status == "draft":
+                    session.add(
+                        ApprovalRecord(
+                            id=str(uuid4()),
+                            request_id=row.id,
+                            status="pending",
+                            approver_role="leader",
+                            comment=None,
+                            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                        )
+                    )
+                    self._status(session, row, "pending_approval", "sales", reason)
+                    session.flush()
+                view = self._full_view(session, row)
+                session.commit()
+                return view
             # Exact repeat returns the existing state even after publication changed the baseline.
             if (
                 row.status == targets[action]
@@ -421,6 +490,8 @@ class InsertionStore:
             id=row.id,
             request_no=row.request_no,
             assigned_planner=row.assigned_planner,
+            applicant_name=row.applicant_name,
+            applicant_id=row.applicant_id,
             status=row.status,
             product_id=row.product_id,
             quantity=row.quantity,

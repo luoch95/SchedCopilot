@@ -1,6 +1,7 @@
 """Orchestrate the scheduling workflow without HTTP or database implementation details."""
 
 import logging
+from dataclasses import replace
 from datetime import datetime
 from uuid import uuid4
 
@@ -63,9 +64,47 @@ class WorkbenchService:
             raise InvalidInput("故障已撤销，请先录入新的故障")
         return baseline, event, revision
 
-    def workbench(self) -> WorkbenchSnapshot:
+    def workbench(self, *, overview=False) -> WorkbenchSnapshot:
         baseline, event, revision = self.repository.snapshot()
         cancelled = self.repository.event_cancelled(revision)
+        event_history = self.repository.event_history()
+        publication = self.repository.plan_metadata(
+            baseline.version, revision, include_analysis=not overview
+        )
+        published_revisions = {
+            trace.get("event_revision")
+            for trace in publication.get("fault_traces", [])
+            if trace.get("event_revision") is not None
+        }
+        review_status = getattr(self.repository, "fault_review_status", lambda _: None)
+        for item in event_history:
+            if item.get("cancelled"):
+                item["event_status"] = "cancelled"
+            elif item["revision"] in published_revisions:
+                item["event_status"] = "published"
+            else:
+                item["event_status"] = {
+                    "pending": "pending_approval",
+                    "approved": "approved",
+                    "rejected": "registered",
+                    "superseded": "registered",
+                    "published": "published",
+                }.get(review_status(item["revision"]), "registered")
+            item["fault_process_stage"] = {
+                "registered": "001",
+                "pending_approval": "002",
+                "approved": "003",
+                "published": "004",
+                "cancelled": "004",
+            }[item["event_status"]]
+        current_item = next(
+            (item for item in event_history if item.get("revision") == revision), None
+        )
+        if current_item and event.fault_business_code:
+            event = replace(
+                event,
+                fault_process_stage=current_item.get("fault_process_stage", "001"),
+            )
         return WorkbenchSnapshot(
             baseline,
             event,
@@ -76,9 +115,9 @@ class WorkbenchService:
             () if cancelled else tuple(op.id for op in affected_operations(baseline, event)),
             () if cancelled else failure_issues(baseline, event, self.machines),
             self.repository.history(),
-            self.repository.plan_metadata(baseline.version, revision),
+            publication,
             self.repository.operation_labels(baseline),
-            self.repository.event_history(),
+            event_history,
             self.repository.fault_review(revision, baseline.fingerprint),
             cancelled,
         )
@@ -160,6 +199,12 @@ class WorkbenchService:
             ),
             self.repository.operation_labels(baseline),
         )
+
+    def fault_review_detail(self, review_id):
+        review = self.repository.fault_review_detail(review_id)
+        if review is None:
+            raise ResourceNotFound("审批申请不存在")
+        return review
 
     def submit_fault_review(self, simulation_id, candidate_id, reason, request_id):
         self.manual_faults.check_simulation(simulation_id)

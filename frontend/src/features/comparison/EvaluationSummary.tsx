@@ -12,6 +12,19 @@ const metrics: Record<string, string> = {
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+const setupTotal = (values: Record<string, unknown>) => {
+  const count = values.changeovers;
+  const total = values.changeover_minutes;
+  if (
+    typeof count !== 'number' ||
+    typeof total !== 'number' ||
+    !Number.isFinite(count) ||
+    !Number.isFinite(total)
+  )
+    return '未计算';
+  if (count <= 0) return quantity(total, '分钟');
+  return `${count} 次 × ${Number((total / count).toFixed(2))} 分钟＝${total} 分钟`;
+};
 const quantity = (value: unknown, unit: string) =>
   typeof value === 'number' && Number.isFinite(value) ? `${value} ${unit}` : '未计算';
 
@@ -58,7 +71,7 @@ export function EvaluationSummary({
     },
     {
       label: '换型总时长',
-      values: columns.map(({ values }) => quantity(values.changeover_minutes, '分钟')),
+      values: columns.map(({ values }) => setupTotal(values)),
     },
     ...machineIds.map((id) => ({
       label: `${id} 换型次数 / 时长`,
@@ -104,6 +117,7 @@ export function EvaluationSummary({
         评估说明与差异
       </h3>
       <p className="hint">
+        换型总量统计整个候选计划的全部设备，包含已完成工序及设备初始模具切换；每次时长依据当前统一换型规则。
         班次利用率＝（加工时间＋换型时间）÷可用班次时间，已扣除故障停机时间。
         {reference && `箭头表示相对“${reference.candidate.label}”同一设备的变化。`}
         利用率升高不代表方案一定更优，需结合延期和设备负荷判断。

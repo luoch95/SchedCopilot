@@ -62,6 +62,7 @@ describe('evaluation comparison', () => {
         .map((node) => node.textContent),
     ).toEqual(['2 次 / 30 分钟', '1 次 / 15 分钟']);
     expect(within(table).getAllByText('5 次')).toHaveLength(2);
+    expect(within(table).getAllByText('5 次 × 15 分钟＝75 分钟')).toHaveLength(2);
     expect(screen.getByText(/换型总量相同/)).toBeTruthy();
   });
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SalesPage } from './SalesPage';
 import type {
   InsertionAssessment,
@@ -99,7 +99,7 @@ beforeEach(() => {
           id: 'persisted-request',
           request_no: 'URG-TEST-0001',
           assigned_planner: 'planner_01',
-          status: 'pending_approval',
+          status: body.draft_only ? 'draft' : 'pending_approval',
           plan_version: 1,
           estimate,
           created_at: '2026-10-19T13:00:00+08:00',
@@ -111,6 +111,20 @@ beforeEach(() => {
         url === '/api/sales/requests?assigned_planner=planner_01'
       )
         data = savedRequests;
+      else if (url.endsWith('/assessment')) {
+        const record = savedRequests.find((item) => url.includes(item.request_no))!;
+        record.assessment = {
+          ...presetAssessment,
+          request_id: record.id,
+          assessment_id: 'assessment-1',
+        };
+        data = record.assessment;
+      } else if (url.endsWith('/actions')) {
+        const record = savedRequests.find((item) => url.includes(item.request_no))!;
+        record.status = 'pending_approval';
+        data = record;
+      } else if (url.startsWith('/api/sales/requests/'))
+        data = savedRequests.find((record) => url.endsWith('/' + record.request_no));
       else if (url === '/api/demo/session') data = { admin: true, read_only: false };
       else if (url === '/api/sales/overview') data = overview;
       else if (url === '/api/sales/processing-estimate') data = estimate;
@@ -127,10 +141,9 @@ beforeEach(() => {
 async function openPage() {
   render(<SalesPage onSwitchRole={vi.fn()} />);
   await waitFor(() =>
-    expect(
-      (screen.getByRole('button', { name: '检查填写并预估加工时长' }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false),
+    expect((screen.getByRole('button', { name: '评估插单' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
   );
 }
 function fill() {
@@ -143,6 +156,97 @@ function fill() {
 }
 
 describe('sales page framework (URG-02 / DISC-02)', () => {
+  it('shows actual streamed stages while assessment is still running', async () => {
+    await openPage();
+    fill();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, options) =>
+      String(url).endsWith('/assessment')
+        ? Promise.resolve(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(value) {
+                  controller = value;
+                },
+              }),
+              { headers: { 'Content-Type': 'application/x-ndjson' } },
+            ),
+          )
+        : original(url, options),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
+    const chain = await screen.findByRole('region', { name: '插单评估链路' });
+    await waitFor(() => expect(controller).toBeTruthy());
+    const send = (event: unknown) =>
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(event) + '\n'));
+    send({ type: 'insertion_stage_started', agent: 'validation' });
+    await within(chain).findByText('正在数据校验…');
+    expect(within(chain).getByText('方案评估').closest('li')?.dataset.status).toBe('waiting');
+    for (const agent of ['validation', 'scheduling', 'evaluation', 'explanation']) {
+      if (agent !== 'validation') send({ type: 'insertion_stage_started', agent });
+      send({
+        type: 'insertion_stage_completed',
+        agent,
+        mode: agent === 'explanation' ? 'fallback' : 'rules',
+      });
+    }
+    send({ type: 'insertion_stage_started', agent: 'saving' });
+    await within(chain).findByText('正在保存评估结果…');
+    expect(
+      (screen.getByRole('button', { name: '提交管理者审批' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    savedRequests[0].assessment = { ...presetAssessment, assessment_id: 'streamed' };
+    send({ type: 'insertion_stage_completed', agent: 'saving' });
+    send({ type: 'result', data: savedRequests[0].assessment });
+    controller.close();
+    await within(chain).findByText('评估结果已保存，可查看摘要后提交审批。');
+    expect(within(chain).getAllByText('已完成')).toHaveLength(5);
+    expect(screen.getByRole('button', { name: '重新评估' })).toBeTruthy();
+    expect(within(chain).getByText('已降级为规则结果')).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: '提交管理者审批' }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.change(screen.getByLabelText('数量（件）'), { target: { value: '1002' } });
+    expect(screen.queryByRole('region', { name: '插单评估链路' })).toBeNull();
+    expect(screen.getByRole('button', { name: '评估插单' })).toBeTruthy();
+  });
+
+  it('retains the failed stage and leaves later stages waiting', async () => {
+    await openPage();
+    fill();
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, options) =>
+      String(url).endsWith('/assessment')
+        ? Promise.resolve(
+            new Response(
+              [
+                { type: 'insertion_stage_started', agent: 'validation' },
+                { type: 'insertion_stage_completed', agent: 'validation', mode: 'rules' },
+                { type: 'insertion_stage_started', agent: 'scheduling' },
+                { type: 'insertion_stage_failed', agent: 'scheduling' },
+                { type: 'error', status: 409, detail: '当前班次内无可用时段' },
+              ]
+                .map((event) => JSON.stringify(event))
+                .join('\n'),
+              { headers: { 'Content-Type': 'application/x-ndjson' } },
+            ),
+          )
+        : original(url, options),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
+    await screen.findByText('插单评估失败：当前班次内无可用时段');
+    const chain = screen.getByRole('region', { name: '插单评估链路' });
+    expect(within(chain).getByText('数据校验').closest('li')?.dataset.status).toBe('completed');
+    expect(within(chain).getByText('排产试算').closest('li')?.dataset.status).toBe('failed');
+    expect(within(chain).getByText('结果解释').closest('li')?.dataset.status).toBe('waiting');
+    expect(
+      (screen.getByRole('button', { name: '提交管理者审批' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it('restores the preset form in guest mode, then unlocks, estimates and submits it', async () => {
     savedRequests = [preset()];
     render(<App />);
@@ -162,7 +266,7 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
     fireEvent.change(screen.getByLabelText('演示密码'), { target: { value: 'admin123' } });
     fireEvent.click(screen.getAllByRole('button', { name: '解锁' }).at(-1)!);
     await screen.findByText('✓ 已解锁操作权限');
-    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
     await screen.findByRole('heading', { name: '加工时长预估' });
     fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText('申请 URG-TEST-0001 已保存，待审批。');
@@ -266,30 +370,36 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
   });
   it('validates missing fields before making an estimate request', async () => {
     await openPage();
-    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
     expect(screen.getByRole('alert').textContent).toContain('请修正');
     expect(calls.filter((call) => call.url !== '/api/sales/requests')).toHaveLength(1);
   });
   it('estimates using server parameters and clears the old preview after an edit', async () => {
     await openPage();
     fill();
-    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
     await screen.findByRole('heading', { name: '加工时长预估' });
     expect(screen.getByText('414 分钟')).toBeTruthy();
     expect(screen.getByText('经验冗余（10%）')).toBeTruthy();
-    expect(screen.getByText('填写检查通过，尚未试排。')).toBeTruthy();
-    expect(calls.find((call) => call.url === '/api/sales/processing-estimate')).toEqual({
-      url: '/api/sales/processing-estimate',
-      body: { product_id: 'P-DEMO-001', quantity: 1001 },
-    });
+    expect(screen.getByText('已完成试排评估；审批与发布需另行操作。')).toBeTruthy();
+    expect(
+      calls.find((call) => call.url === '/api/sales/requests' && call.body)?.body,
+    ).toMatchObject({ product_id: 'P-DEMO-001', quantity: 1001, draft_only: true });
+    expect(calls.some((call) => call.url.endsWith('/assessment'))).toBe(true);
+    expect(savedRequests[0].status).toBe('draft');
+    expect(calls.some((call) => call.url.endsWith('/actions'))).toBe(false);
     fireEvent.change(screen.getByLabelText('数量（件）'), { target: { value: '1002' } });
     expect(screen.queryByRole('heading', { name: '加工时长预估' })).toBeNull();
+    expect(
+      (screen.getByRole('button', { name: '提交管理者审批' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getAllByText('待评估')).toHaveLength(3);
     expect(calls.every((call) => call.url.startsWith('/api/sales/'))).toBe(true);
   });
   it('submits one persisted pending approval after the estimate', async () => {
     await openPage();
     fill();
-    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
     await screen.findByRole('heading', { name: '加工时长预估' });
     fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText(/申请 URG-/);
@@ -298,7 +408,14 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
       product_id: 'P-DEMO-001',
       quantity: 1001,
       reason: '客户紧急补货',
+      draft_only: true,
     });
+    expect(calls.find((call) => call.url.endsWith('/actions'))?.body).toMatchObject({
+      action: 'submit',
+      operator_role: 'sales',
+      assessment_id: 'assessment-1',
+    });
+    expect(calls.filter((call) => call.url.endsWith('/assessment'))).toHaveLength(1);
   });
   it('restores submitted requests after remount and shows them in the real planner workbench', async () => {
     const first = render(<App />);
@@ -308,14 +425,14 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
     fireEvent.change(screen.getByLabelText('演示密码'), { target: { value: 'admin123' } });
     fireEvent.click(screen.getAllByRole('button', { name: '解锁' }).at(-1)!);
     fill();
-    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
     await screen.findByRole('heading', { name: '加工时长预估' });
     fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText('URG-TEST-0001');
     first.unmount();
     render(<App />);
     await screen.findByText('URG-TEST-0001');
-    expect(screen.getByText('待审批 · 未试排')).toBeTruthy();
+    expect(screen.getByText('待审批 · 已试排')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '切换角色' }));
     await screen.findByRole('heading', { name: '选择你的工作角色' });
     fireEvent.click(screen.getByRole('button', { name: /进入排产工作台/ }));
@@ -326,24 +443,22 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
   it('retries failed submissions with the same key and shows no false success', async () => {
     await openPage();
     fill();
-    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
     await screen.findByRole('heading', { name: '加工时长预估' });
-    let key = '';
+    let actionBody: unknown;
     const original = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementationOnce(async (url, options) => {
-      expect(url).toBe('/api/sales/requests');
-      key = JSON.parse(String(options?.body)).submission_key;
+      expect(url).toBe('/api/sales/requests/URG-TEST-0001/actions');
+      actionBody = JSON.parse(String(options?.body));
       throw new TypeError('network error');
     });
     fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText(/提交失败，请重试/);
-    expect(screen.queryByText('URG-TEST-0001')).toBeNull();
+    expect(screen.queryByText('申请 URG-TEST-0001 已保存，待审批。')).toBeNull();
     vi.mocked(fetch).mockImplementation(original);
     fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
     await screen.findByText('URG-TEST-0001');
-    expect(
-      calls.find((call) => call.url === '/api/sales/requests' && call.body)?.body,
-    ).toMatchObject({ submission_key: key });
+    expect(calls.find((call) => call.url.endsWith('/actions'))?.body).toEqual(actionBody);
   });
   it('rejects fractional quantities and a deadline before the start', async () => {
     await openPage();
@@ -352,7 +467,7 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
     fireEvent.change(screen.getByLabelText('要求交期（北京时间）'), {
       target: { value: '2026-10-19T11:00' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
     expect(screen.getByText('数量必须是 1 至 1000000 的整数。')).toBeTruthy();
     expect(screen.getByText('要求交期必须晚于最早开工时间。')).toBeTruthy();
     expect(calls.filter((call) => call.url !== '/api/sales/requests')).toHaveLength(1);
@@ -376,8 +491,60 @@ describe('sales page framework (URG-02 / DISC-02)', () => {
     await openPage();
     fill();
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError('offline'));
-    fireEvent.click(screen.getByRole('button', { name: '检查填写并预估加工时长' }));
-    await screen.findByText('加工时长预估失败，请稍后重试。');
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
+    await screen.findByText(/插单评估失败：/);
     expect(screen.queryByRole('heading', { name: '加工时长预估' })).toBeNull();
   });
+
+  it('keeps a failed assessment as a draft and blocks submission', async () => {
+    await openPage();
+    fill();
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, options) =>
+      String(url).endsWith('/assessment')
+        ? Promise.resolve(
+            new Response(JSON.stringify({ detail: '当前班次内无可用时段' }), { status: 409 }),
+          )
+        : original(url, options),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
+    await screen.findByText('插单评估失败：当前班次内无可用时段');
+    expect(savedRequests[0].status).toBe('draft');
+    expect(
+      (screen.getByRole('button', { name: '提交管理者审批' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getAllByText('待评估')).toHaveLength(3);
+    expect(calls.some((call) => call.url.endsWith('/actions'))).toBe(false);
+  });
+});
+
+it('places request records above the form and starts a clean draft', async () => {
+  savedRequests = [preset()];
+  await openPage();
+  await screen.findByText('申请：URG-20261020-001');
+  const records = screen.getByRole('region', { name: '插单申请记录' });
+  const form = screen.getByRole('region', { name: '插单需求' });
+  expect(records.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '新建插单' }));
+  expect((screen.getByLabelText('模拟产品') as HTMLSelectElement).value).toBe('');
+  expect((screen.getByLabelText('数量（件）') as HTMLInputElement).value).toBe('');
+  expect(document.activeElement).toBe(screen.getByLabelText('模拟产品'));
+  expect(screen.queryByText('申请：URG-20261020-001')).toBeNull();
+});
+
+it('opens the submitted request from its success message and can reopen it', async () => {
+  await openPage();
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '评估插单' }));
+  await screen.findByRole('heading', { name: '加工时长预估' });
+  fireEvent.click(screen.getByRole('button', { name: '提交管理者审批' }));
+  await screen.findByText('申请 URG-TEST-0001 已保存，待审批。');
+  const success = screen.getByText('申请 URG-TEST-0001 已保存，待审批。').parentElement!;
+  fireEvent.click(within(success).getByRole('button', { name: '查看详情' }));
+  const drawer = await screen.findByRole('dialog', { name: '插单申请详情' });
+  expect(await within(drawer).findByText('申请业务员：未记录')).toBeTruthy();
+  fireEvent.click(within(drawer).getByRole('button', { name: '关闭' }));
+  fireEvent.click(within(success).getByRole('button', { name: '查看详情' }));
+  expect(await screen.findByRole('dialog', { name: '插单申请详情' })).toBeTruthy();
+  expect(calls.filter((call) => call.url === '/api/sales/requests' && call.body)).toHaveLength(1);
 });

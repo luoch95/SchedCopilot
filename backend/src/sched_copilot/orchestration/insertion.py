@@ -17,11 +17,33 @@ class InsertionWorkflow:
         self.evaluation = EvaluationAgent()
         self.explanation = ExplanationAgent(knowledge_tool=knowledge_tool)
 
-    def __call__(self, request, snapshot, calculate):
+    def __call__(self, request, snapshot, calculate, *, on_progress=None):
         trace_id = f"TRC-{uuid4().hex.upper()}"
         trace = []
         started = monotonic()
         model_error = None
+
+        def emit(event):
+            if on_progress:
+                on_progress(event)
+
+        def run(role, execute, fact=None):
+            emit(dict(type="insertion_stage_started", agent=role))
+            try:
+                output = execute()
+                record(role, None if role == "validation" else fact if fact is not None else output)
+            except Exception:
+                emit(dict(type="insertion_stage_failed", agent=role))
+                raise
+            emit(
+                dict(
+                    type="insertion_stage_completed",
+                    agent=role,
+                    mode=trace[-1]["mode"],
+                    elapsed_ms=trace[-1]["elapsed_ms"],
+                )
+            )
+            return output
 
         def record(role, result=None):
             nonlocal model_error, started
@@ -37,14 +59,16 @@ class InsertionWorkflow:
             trace.append(step)
             started = monotonic()
 
-        validated = self.validation.run_insertion(request, snapshot)
-        record("validation")
-        result = self.scheduling.run_insertion(calculate, snapshot)
-        record("scheduling", result)
-        evaluated = self.evaluation.run_insertion(result, snapshot, request)
-        record("evaluation", result)
-        explanation = self.explanation.run_insertion(result, request, skip_model_code=model_error)
-        record("explanation", result)
+        validated = run("validation", lambda: self.validation.run_insertion(request, snapshot))
+        result = run("scheduling", lambda: self.scheduling.run_insertion(calculate, snapshot))
+        evaluated = run(
+            "evaluation", lambda: self.evaluation.run_insertion(result, snapshot, request), result
+        )
+        explanation = run(
+            "explanation",
+            lambda: self.explanation.run_insertion(result, request, skip_model_code=model_error),
+            result,
+        )
         result["workflow"] = dict(
             trace_id=trace_id,
             mode=("fallback" if model_error else "live") if self.model_assistant else "rules",

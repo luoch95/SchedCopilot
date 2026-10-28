@@ -38,6 +38,8 @@
   font:
     11px 'IBM Plex Sans',
     sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .fault-label {
   fill: #8c8587;
@@ -109,7 +111,7 @@
   color: var(--muted);
 }
 
-/* Keep native SVG text selection and copying available in every chart. */
+/* Keep explanatory chart text selectable while operation labels remain controls. */
 .gantt text,
 .gantt-inspector,
 .gantt .order-legend {
@@ -119,6 +121,10 @@
 .gantt text {
   cursor: text;
   pointer-events: auto;
+}
+.gantt .bar-label {
+  -webkit-user-select: none;
+  user-select: none;
 }
 .gantt-operation {
   transform-box: fill-box;

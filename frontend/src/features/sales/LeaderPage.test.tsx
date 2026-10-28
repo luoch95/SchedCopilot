@@ -36,6 +36,22 @@ beforeEach(() => {
             simulation: null,
           }),
         );
+      if (url === '/api/events/1/analysis')
+        return new Response(
+          JSON.stringify({
+            event_revision: 1,
+            workflow: {
+              id: 'leader-analysis',
+              trace_id: 'TRC-LEADER',
+              intent: 'generate_candidates',
+              status: 'completed',
+              trace: [],
+              results: {},
+              evidence_catalog: {},
+            },
+            simulation,
+          }),
+        );
       throw new Error(`Unexpected endpoint: ${url}`);
     }),
   );
@@ -48,7 +64,7 @@ it('shows ticker, KPI cards, two task cards and a collapsed read-only plan in or
     screen.getByRole('heading', { name: '车间运营驾驶舱 Workshop Operations Cockpit' }),
   ).toBeTruthy();
   expect(screen.getByLabelText('当前视角').textContent).toContain('当前视角 · 生产总监');
-  await screen.findByText('暂无待审批工单');
+  await screen.findByText('暂无插单申请。');
   const summary = await screen.findByText('展开查看底层排产执行计划（当前版本 V2）');
   const approvals = screen.getByRole('region', { name: '插单申请与状态跟踪' });
   const overview = screen.getByRole('region', { name: '生产车间概况' });
@@ -85,7 +101,7 @@ it('shows ticker, KPI cards, two task cards and a collapsed read-only plan in or
 it('shows alert line details on hover and keyboard focus', async () => {
   const user = userEvent.setup();
   render(<LeaderPage onSwitchRole={() => {}} />);
-  await screen.findByText('暂无待审批工单');
+  await screen.findByText('暂无插单申请。');
   const m2 = screen.getByRole('button', { name: 'M2产线' });
   await user.hover(m2);
   expect(screen.getByRole('tooltip').textContent).toContain('插单 URG-20261020-001 影响了 M2');
@@ -129,9 +145,9 @@ it('opens the same fault analysis in a read-only drawer without navigating or wr
   await screen.findByRole('list', { name: '故障处理流程' });
   const hash = location.hash;
   fireEvent.click(trigger);
-  const dialog = screen.getByRole('dialog', { name: 'M1故障 R1 · 智能分析明细' });
+  const dialog = screen.getByRole('dialog', { name: 'M1 · 编号缺失 · 智能分析明细' });
   expect(dialog.classList.contains('console-drawer')).toBe(true);
-  expect(within(dialog).getAllByText('TRC-LEADER').length).toBeGreaterThan(0);
+  expect((await within(dialog).findAllByText('TRC-LEADER')).length).toBeGreaterThan(0);
   for (const label of ['数据校验', '排产执行', '方案评估', '结果解释'])
     expect(within(dialog).getByText(label)).toBeTruthy();
   expect(location.hash).toBe(hash);
@@ -153,6 +169,8 @@ function serveAlerts(value: Workbench) {
       if (url === '/api/sales/requests') return new Response('[]');
       if (url === '/api/workflow/latest' || url === '/api/events/2/analysis')
         return new Response('null');
+      if (url === '/api/fault-reviews/review-1')
+        return new Response(JSON.stringify(value.fault_review));
       if (url === '/api/fault-reviews/review-1/actions') {
         expect(JSON.parse(options!.body as string)).toEqual({
           action: 'approve',
@@ -171,6 +189,7 @@ function serveAlerts(value: Workbench) {
 it('uses the published card and its archived candidate metrics without an inline report', async () => {
   serveAlerts({
     ...published,
+    event: { ...published.event, fault_business_code: 'M1-GZ01', fault_process_stage: '001' },
     plan_publication: {
       ...published.plan_publication,
       fault_analysis: {
@@ -184,7 +203,7 @@ it('uses the published card and its archived candidate metrics without an inline
     },
   });
   render(<LeaderPage onSwitchRole={() => {}} />);
-  const title = await screen.findByRole('heading', { name: /M1 停机 · R1 · 已发布 V2/ });
+  const title = await screen.findByRole('heading', { name: /M1 停机 · M1-GZ01-004 · 已发布 V2/ });
   const card = title.closest('article')!;
   expect(card.classList.contains('is-published')).toBe(true);
   expect(within(card).getByText('已发布方案的预计结果：')).toBeTruthy();
@@ -220,6 +239,7 @@ it('keeps approval forms in a drawer and still sends the leader approval action'
   );
   fireEvent.click(trigger);
   const drawer = screen.getByRole('dialog', { name: '故障方案审批详情' });
+  await within(drawer).findByRole('region', { name: '候选方案比较' });
   fireEvent.change(within(drawer).getByRole('textbox', { name: '审批意见（必填）' }), {
     target: { value: '核验通过' },
   });
@@ -234,8 +254,13 @@ it('lists published history, filters duplicate outage revisions and isolates mis
     ...workbench,
     event_revision: 3,
     event_history: [
-      { ...workbench.event, revision: 1, created_at: workbench.snapshot_time },
-      { ...other, revision: 2, created_at: other.started_at },
+      {
+        ...workbench.event,
+        revision: 1,
+        created_at: workbench.snapshot_time,
+        event_status: 'registered',
+      },
+      { ...other, revision: 2, created_at: other.started_at, event_status: 'published' },
     ],
     plan_publication: {
       ...published.plan_publication,
@@ -244,11 +269,11 @@ it('lists published history, filters duplicate outage revisions and isolates mis
     },
   });
   render(<LeaderPage onSwitchRole={() => {}} />);
-  const history = await screen.findByRole('article', { name: '历史故障 M2 R2' });
-  expect(screen.queryByRole('article', { name: '历史故障 M1 R1' })).toBeNull();
+  const history = await screen.findByRole('article', { name: '历史故障 M2 · 编号缺失' });
+  expect(screen.queryByRole('article', { name: '历史故障 M1 · 编号缺失' })).toBeNull();
   expect(history.textContent).toContain('历史指标记录缺失');
   fireEvent.click(within(history).getByRole('button', { name: '查看历史 AI 分析' }));
-  const drawer = screen.getByRole('dialog', { name: 'M2故障 R2 · 历史智能分析明细' });
+  const drawer = screen.getByRole('dialog', { name: 'M2 · 编号缺失 · 历史智能分析明细' });
   await within(drawer).findByText('该历史修订尚未生成 AI 分析，暂无分析记录。');
   expect(within(drawer).queryByText('TRC-LEADER')).toBeNull();
   expect(

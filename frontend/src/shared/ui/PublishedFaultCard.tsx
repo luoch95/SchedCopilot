@@ -1,4 +1,5 @@
 import type { Candidate, Failure } from '../api/contracts';
+import { faultBusinessLabel } from '../lib/visibleFaultEvents';
 import { planReport } from '../lib/planReport';
 import { stamp } from '../lib/time';
 import { AiAnalysisButton } from './AiAnalysisButton';
@@ -6,7 +7,6 @@ import { AiAnalysisButton } from './AiAnalysisButton';
 /** Only render for faults backed by an actual publication archive or trace. */
 export function PublishedFaultCard({
   failure,
-  revision,
   version,
   candidateLabel,
   metrics,
@@ -17,7 +17,6 @@ export function PublishedFaultCard({
   onReview,
 }: {
   failure: Failure;
-  revision: number;
   version?: number;
   candidateLabel?: string;
   metrics?: Candidate['metrics'];
@@ -40,12 +39,12 @@ export function PublishedFaultCard({
       <div className="fault-card-heading">
         <div className="fault-card-identity">
           <h2>
-            <span aria-hidden="true">✓</span> {failure.machine_id} 停机 · R{revision} ·{' '}
-            {publishedLabel}
+            <span aria-hidden="true">✓</span> {failure.machine_id} 停机 ·{' '}
+            {faultBusinessLabel({ ...failure, fault_process_stage: '004' })} · {publishedLabel}
           </h2>
           <p className="fault-analysis-window">
             分析窗口：{stamp(failure.started_at)} —{' '}
-            {failure.recovered_at ? stamp(failure.recovered_at) : '恢复时间未知'}
+            {failure.recovered_at ? stamp(failure.recovered_at) : '预计恢复时间未知'}
           </p>
         </div>
         <div className="fault-task-actions">

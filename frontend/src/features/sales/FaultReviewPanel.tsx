@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Workbench } from '../../shared/api/contracts';
 import { WriteButton } from '../../shared/ui/WriteButton';
-import { ContributionReport } from '../../shared/ui/ContributionReport';
+import { FaultAnalysisDetails } from '../analysis';
 import { workbenchApi } from '../workbench';
 
 export function FaultReviewPanel({
@@ -16,10 +16,59 @@ export function FaultReviewPanel({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const review = state.fault_review;
+  const summary = state.fault_review;
+  const [loaded, setLoaded] = useState<Workbench['fault_review']>(null);
+  const [loadError, setLoadError] = useState('');
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setLoaded(null);
+    setLoadError('');
+    if (summary) {
+      void workbenchApi
+        .faultReviewDetail(summary.id)
+        .then((detail) => {
+          if (!active) return;
+          if (
+            detail.id !== summary.id ||
+            detail.status !== summary.status ||
+            detail.event_revision !== summary.event_revision ||
+            detail.baseline_fingerprint !== summary.baseline_fingerprint
+          ) {
+            throw new Error('审批详情与当前申请不匹配，请同步最新数据。');
+          }
+          if (
+            detail.kind === 'assessment'
+              ? !detail.assessment || !detail.workflow
+              : !detail.analysis?.simulation ||
+                !detail.analysis.simulation.candidates.some(
+                  (candidate) => candidate.id === detail.candidate_id,
+                )
+          ) {
+            throw new Error('该审批缺少完整评估记录，请排产员重新评估并提交。');
+          }
+          setLoaded(detail);
+        })
+        .catch((err) => {
+          if (active)
+            setLoadError(err instanceof Error ? err.message : '审批详情加载失败，请重试。');
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [summary?.id, summary?.status, summary?.event_revision, summary?.baseline_fingerprint, retry]);
+  const ready =
+    !!loaded &&
+    loaded.id === summary?.id &&
+    loaded.status === summary?.status &&
+    loaded.event_revision === summary?.event_revision &&
+    loaded.baseline_fingerprint === summary?.baseline_fingerprint;
+  const review = ready ? loaded : summary;
+
   if (!review) return null;
   async function act(action: 'approve' | 'reject') {
-    if (!review || busy || !reason.trim()) return;
+    if (!review || !ready || busy || !reason.trim()) return;
     setBusy(true);
     onBusyChange?.(true);
     setError('');
@@ -78,23 +127,44 @@ export function FaultReviewPanel({
         </>
       )}
       <p>提交理由：{review.reason}</p>
-      <ContributionReport
-        report={review.analysis?.report ?? review.workflow?.contribution_report}
-      />
+      {!ready && !loadError && <p role="status">正在加载审批评估详情…</p>}
+      {loadError && (
+        <div role="alert">
+          <p>{loadError}</p>
+          <button onClick={() => setRetry((value) => value + 1)}>重试加载详情</button>
+        </div>
+      )}
+      {ready && (
+        <FaultAnalysisDetails
+          state={{
+            ...state,
+            fault_review: review,
+            plan_publication: undefined,
+            event_revision: review.event_revision,
+            baseline: review.analysis?.baseline ?? state.baseline,
+            affected: review.analysis?.affected ?? state.affected,
+          }}
+          workflow={review.analysis?.workflow ?? review.workflow ?? null}
+          simulation={review.analysis?.simulation}
+        />
+      )}
       {review.review_reason && <p>审批意见：{review.review_reason}</p>}
       {review.status === 'pending' && (
-        <fieldset disabled={busy}>
+        <fieldset disabled={busy || !ready}>
           <label>
             审批意见（必填）
             <textarea value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} />
           </label>
           <div className="inline-actions">
-            <WriteButton disabled={!reason.trim() || busy} onClick={() => void act('reject')}>
+            <WriteButton
+              disabled={!ready || !reason.trim() || busy}
+              onClick={() => void act('reject')}
+            >
               退回修改
             </WriteButton>
             <WriteButton
               className="primary"
-              disabled={!reason.trim() || busy}
+              disabled={!ready || !reason.trim() || busy}
               onClick={() => void act('approve')}
             >
               {review.kind === 'assessment' ? '同意评估结论' : '同意方案并交回排产员'}

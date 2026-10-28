@@ -59,3 +59,14 @@ GitHub 发布前先确认仓库根目录、许可证和公开内容。没有远�
 主界面已迁移为 React + FastAPI，见 [ADR 0003](decisions/0003-react-fastapi.md) 和根目录 README 的双终端启动方式。前端项目在 `frontend/`，后端项目在 `backend/`，API 工厂为 `backend/src/sched_copilot/api/__init__.py`。内部依赖、职责和新增功能位置见 [代码结构与扩展规则](code-structure.md)。旧 Streamlit 已从当前实现移除，Git 保留历史。
 
 在根目录运行前端命令 `npm --prefix frontend run format:check`、`npm --prefix frontend run lint:architecture`、`npm --prefix frontend test` 和 `npm --prefix frontend run build`；后端命令使用 `uv --directory backend run ruff check .`、`uv --directory backend run pytest` 和 `uv --directory backend build`。也可进入 `backend/` 后直接运行 uv 命令。CI 分别执行两组检查。业务规则不得搬到前端作为唯一校验，人工发布必须经过后端版本与约束校验。
+
+
+## 紧急插单申请记录
+
+业务员记录布局、审批节点语义和申请姓名兼容方案见 [紧急插单申请记录改造](insertion-request-tracking.md)。沿用现有审批流程与试排权限。
+
+## 多设备故障并行处理
+
+新版故障业务编号、稳定 `fault_event_id`、设备当天 `GZ` 序号和流程节点规则见 [多设备故障并行处理](failure-multi-event.md)。实现必须保留旧 `event_revision` 作为内部兼容字段，不得用全局最新 revision 推断其他事件已完成或历史化。
+
+故障事件的并行处理、保存后生成修订号和流程驱动历史状态见 [多设备故障并行处理](failure-multi-event.md)。故障草稿不得写入事件历史；新事件不得仅因修订号更新而使未完成旧事件进入历史。

@@ -1,4 +1,5 @@
 import { api, workflowStream } from '../../shared/api/http';
+import type { InsertionProgressEvent } from '../../shared/api/contracts';
 import type { Metrics } from '../../shared/api/metrics';
 import { orderLabel } from '../../shared/lib/orderLabels';
 import type {
@@ -84,6 +85,8 @@ export const workbenchApi = {
       request_id,
       operator_role: 'planner',
     }),
+  faultReviewDetail: (id: string) =>
+    api<NonNullable<Workbench['fault_review']>>(`/fault-reviews/${encodeURIComponent(id)}`),
   reviewFault: (id: string, action: 'approve' | 'reject', reason: string) =>
     api<Workbench>(`/fault-reviews/${encodeURIComponent(id)}/actions`, {
       action,
@@ -92,6 +95,13 @@ export const workbenchApi = {
     }),
   assessRequest: (id: string) =>
     api<InsertionAssessment>(`/sales/requests/${encodeURIComponent(id)}/assessment`, {}),
+  assessRequestStream: (id: string, onProgress: (event: InsertionProgressEvent) => void) =>
+    workflowStream<InsertionAssessment, InsertionProgressEvent>(
+      {},
+      onProgress,
+      undefined,
+      `/sales/requests/${encodeURIComponent(id)}/assessment`,
+    ),
   pendingRequests: (assignedPlanner?: string) =>
     api<InsertionRequestRecord[]>(
       `/sales/requests${assignedPlanner ? `?assigned_planner=${encodeURIComponent(assignedPlanner)}` : ''}`,
@@ -100,10 +110,10 @@ export const workbenchApi = {
     api<InsertionRequestRecord>(`/sales/requests/${encodeURIComponent(requestNo)}`),
   actOnRequest: (
     id: string,
-    action: 'approve' | 'reject' | 'publish',
+    action: 'submit' | 'approve' | 'reject' | 'publish',
     reason: string,
     assessment_id: string | undefined,
-    operator_role: 'leader' | 'planner',
+    operator_role: 'sales' | 'leader' | 'planner',
   ) =>
     api<InsertionRequestRecord>(`/sales/requests/${encodeURIComponent(id)}/actions`, {
       action,

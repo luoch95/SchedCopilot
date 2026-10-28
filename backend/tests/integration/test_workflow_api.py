@@ -115,7 +115,10 @@ def test_published_fault_preserves_analysis_and_original_impact_after_reload(cli
     assert analysis["affected"] == before["affected"]
     assert analysis["workflow"]["trace_id"] == data["workflow"]["trace_id"]
     assert len(analysis["workflow"]["trace"]) == 4
-    assert client.get("/api/workbench").json()["plan_publication"] == publication
+    overview = client.get("/api/workbench").json()["plan_publication"]
+    assert "fault_analysis" not in overview
+    assert "current_fault_analysis" not in overview
+    assert client.get(f"/api/events/{before['event_revision']}/analysis").json() == analysis
     # Existing V4 decisions must work without a database migration/reset.
     repository = client.app.state.workbench.repository
     with repository._connect() as conn:
@@ -128,7 +131,10 @@ def test_published_fault_preserves_analysis_and_original_impact_after_reload(cli
             "UPDATE decisions SET evidence=? WHERE request_id='fault-provenance'",
             (json.dumps(evidence),),
         )
-    assert client.get("/api/workbench").json()["plan_publication"] == publication
+    overview = client.get("/api/workbench").json()["plan_publication"]
+    assert "fault_analysis" not in overview
+    assert "current_fault_analysis" not in overview
+    assert overview["fault_traces"][0]["event_revision"] == state["event_revision"]
     updated = client.put(
         "/api/event",
         json={
@@ -205,7 +211,10 @@ def test_historical_analysis_survives_new_fault_and_restart_without_publication(
         ] == [{k: v for k, v in item.items() if k != "名称"} for item in original["order_impacts"]]
     assert client.get(f"/api/events/{updated['event_revision']}/analysis").json() is None
     assert client.get("/api/events/99999/analysis").json() is None
-    assert client.get("/api/workbench").json() == updated
+    overview = client.get("/api/workbench").json()
+    assert overview["baseline"] == updated["baseline"]
+    assert overview["event"] == updated["event"]
+    assert "current_fault_analysis" not in overview["plan_publication"]
     with TestClient(create_app(client.app.state.workbench.repository.path)) as restarted:
         assert restarted.get(path).json() == archive
 

@@ -9,6 +9,7 @@ import type {
   SalesOverview,
 } from '../../shared/api/contracts';
 import { AssessmentView } from './AssessmentView';
+import { InsertionProgress, useInsertionProgress } from './InsertionProgress';
 import { PendingRequestsPanel } from './PendingRequestsPanel';
 import { localInput, stamp } from '../../shared/lib/time';
 import { orderLabel } from '../../shared/lib/orderLabels';
@@ -26,6 +27,7 @@ const minutes = (seconds: number) =>
   (seconds / 60).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 
 export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
+  const assessmentProgress = useInsertionProgress();
   const { readOnly } = useDemoAccess();
   const [overview, setOverview] = useState<SalesOverview | null>(null);
   const [loadVersion, setLoadVersion] = useState(0);
@@ -37,11 +39,14 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   const [estimateError, setEstimateError] = useState('');
   const [checking, setChecking] = useState(false);
   const requestId = useRef(0);
+  const checkingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submitted, setSubmitted] = useState('');
   const [requestsVersion, setRequestsVersion] = useState(0);
   const [selectedAssessment, setSelectedAssessment] = useState<InsertionRequestRecord | null>(null);
+  const formRef = useRef<HTMLElement>(null);
+  const [openRequestNo, setOpenRequestNo] = useState<string | undefined>();
   const submissionKey = useRef<string | null>(null);
   const submittingRef = useRef(false);
   const selectedId = useRef<string | null>(null);
@@ -49,6 +54,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
 
   const selectAssessment = useCallback(
     (record: InsertionRequestRecord | null, automatic = false) => {
+      if (checkingRef.current || submittingRef.current) return;
       // A list refresh must not replace an in-progress draft or a just-submitted form.
       if (automatic && (draftEdited.current || selectedId.current === record?.id)) return;
       draftEdited.current = false;
@@ -64,7 +70,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
         due: localInput(record.requested_due_at),
         reason: record.reason,
       });
-      setEstimate(null);
+      setEstimate(record.status === 'draft' ? record.estimate : null);
       setChecking(false);
       setErrors({});
       setEstimateError('');
@@ -101,6 +107,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
   }, [loadVersion]);
 
   function edit(key: keyof SalesDraft, value: string) {
+    assessmentProgress.reset();
     draftEdited.current = true;
     setSelectedAssessment(null);
     requestId.current += 1;
@@ -113,14 +120,17 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     setEstimateError('');
   }
   function refresh() {
+    assessmentProgress.reset();
     requestId.current += 1;
     setEstimate(null);
+    setSelectedAssessment(null);
+    draftEdited.current = true;
     setChecking(false);
     setLoadVersion((value) => value + 1);
   }
   async function checkDraft(event: FormEvent) {
     event.preventDefault();
-    if (readOnly || !overview || checking) return;
+    if (readOnly || !overview || checkingRef.current || submittingRef.current || submitted) return;
     const found = validateDraft(
       draft,
       overview.products.map((item) => item.id),
@@ -130,21 +140,57 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     setEstimate(null);
     setEstimateError('');
     if (Object.keys(found).length) return;
+    const existingDraft = selectedAssessment?.status === 'draft' ? selectedAssessment : null;
     setSelectedAssessment(null);
     draftEdited.current = true;
     const current = ++requestId.current;
     setChecking(true);
+    assessmentProgress.start();
+    checkingRef.current = true;
+    submissionKey.current ??= crypto.randomUUID();
     try {
-      const result = await workbenchApi.processingEstimate(draft.productId, Number(draft.quantity));
-      if (requestId.current === current) setEstimate(result);
-    } catch {
-      if (requestId.current === current) setEstimateError('加工时长预估失败，请稍后重试。');
+      const record =
+        existingDraft ??
+        (await workbenchApi.submitRequest({
+          product_id: draft.productId,
+          quantity: Number(draft.quantity),
+          earliest_start_at: `${draft.earliestStart}:00+08:00`,
+          requested_due_at: `${draft.due}:00+08:00`,
+          reason: draft.reason.trim(),
+          submission_key: submissionKey.current,
+          draft_only: true,
+        }));
+      if (requestId.current !== current) return;
+      await assessmentProgress.run(record.request_no);
+      const assessed = await workbenchApi.requestDetail(record.request_no);
+      if (requestId.current === current) {
+        setEstimate(assessed.estimate);
+        setSelectedAssessment(assessed);
+        setRequestsVersion((value) => value + 1);
+      }
+    } catch (error) {
+      assessmentProgress.fail();
+      if (requestId.current === current)
+        setEstimateError(
+          error instanceof Error ? `插单评估失败：${error.message}` : '插单评估失败，请重试。',
+        );
     } finally {
+      checkingRef.current = false;
       if (requestId.current === current) setChecking(false);
     }
   }
   async function submit() {
-    if (readOnly || !overview || !estimate || submittingRef.current || submitted) return;
+    if (
+      readOnly ||
+      !overview ||
+      !selectedAssessment?.assessment?.assessment_id ||
+      selectedAssessment.status !== 'draft' ||
+      selectedAssessment.assessment_stale ||
+      checkingRef.current ||
+      submittingRef.current ||
+      submitted
+    )
+      return;
     const found = validateDraft(
       draft,
       overview.products.map((item) => item.id),
@@ -157,18 +203,20 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
     setSubmitError('');
     submissionKey.current ??= crypto.randomUUID();
     try {
-      const record = await workbenchApi.submitRequest({
-        product_id: draft.productId,
-        quantity: Number(draft.quantity),
-        earliest_start_at: `${draft.earliestStart}:00+08:00`,
-        requested_due_at: `${draft.due}:00+08:00`,
-        reason: draft.reason.trim(),
-        submission_key: submissionKey.current,
-      });
+      const record = await workbenchApi.actOnRequest(
+        selectedAssessment.request_no,
+        'submit',
+        draft.reason.trim(),
+        selectedAssessment.assessment.assessment_id,
+        'sales',
+      );
+      setSelectedAssessment(record);
       setSubmitted(record.request_no);
       setRequestsVersion((value) => value + 1);
-    } catch {
-      setSubmitError('提交失败，请重试；重复点击不会重复创建同一申请。');
+    } catch (error) {
+      setSubmitError(
+        `提交失败，请重试：${error instanceof Error ? error.message : '请重新评估后提交。'}`,
+      );
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -193,6 +241,42 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
       </header>
       <DemoAccessBar />
       <p className="sales-reference">{referenceNotice}</p>
+      <section className="sales-panel" aria-label="插单申请记录">
+        <PendingRequestsPanel
+          disabled={checking || submitting}
+          refreshVersion={requestsVersion}
+          onSelection={selectAssessment}
+          openRequestNo={openRequestNo}
+          onDetailsClose={() => setOpenRequestNo(undefined)}
+          headerActions={
+            <button
+              onClick={() => {
+                assessmentProgress.reset();
+                draftEdited.current = true;
+                selectedId.current = null;
+                setSelectedAssessment(null);
+                setDraft({
+                  ...emptyDraft,
+                  earliestStart: localInput(overview?.snapshot_time ?? new Date().toISOString()),
+                });
+                setEstimate(null);
+                setErrors({});
+                setEstimateError('');
+                setSubmitError('');
+                setSubmitted('');
+                submissionKey.current = null;
+                requestId.current += 1;
+                setChecking(false);
+                formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+                formRef.current?.querySelector('select')?.focus({ preventScroll: true });
+              }}
+              disabled={submitting || checking}
+            >
+              新建插单
+            </button>
+          }
+        />
+      </section>
       <section className="sales-panel" aria-labelledby="sales-plan-heading">
         <div className="sales-section-heading">
           <div>
@@ -269,10 +353,10 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
         )}
       </section>
       <div className="sales-content-grid">
-        <section className="sales-panel" aria-labelledby="sales-form-heading">
+        <section ref={formRef} className="sales-panel" aria-labelledby="sales-form-heading">
           <h2 id="sales-form-heading">插单需求</h2>
           <p className="sales-muted">
-            填写后可检查输入并预估加工时长。提交后可在下方查看已保存的待审批申请。
+            填写后点击“评估插单”，查看加工时长、交期与订单影响，再提交管理者审批。
           </p>
           <form onSubmit={checkDraft} noValidate>
             <fieldset
@@ -356,8 +440,12 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
                 />
                 {fieldError('reason')}
               </label>
-              <button type="submit" className="primary">
-                {checking ? '正在预估…' : '检查填写并预估加工时长'}
+              <button type="submit" className="primary" disabled={!!submitted}>
+                {checking
+                  ? '正在评估插单…'
+                  : estimate && selectedAssessment?.assessment
+                    ? '重新评估'
+                    : '评估插单'}
               </button>
             </fieldset>
           </form>
@@ -371,7 +459,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
             {estimate && (
               <section className="sales-duration" aria-labelledby="duration-heading">
                 <h3 id="duration-heading">加工时长预估</h3>
-                <p>填写检查通过，尚未试排。</p>
+                <p>已完成试排评估；审批与发布需另行操作。</p>
                 <dl>
                   <div>
                     <dt>理论加工时长</dt>
@@ -404,6 +492,7 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
           </div>
         </section>
         <aside className="sales-results">
+          <InsertionProgress progress={assessmentProgress.progress} />
           <section className="sales-panel" aria-labelledby="sales-impact-heading">
             <div className="sales-section-heading">
               <h2 id="sales-impact-heading">试排影响摘要</h2>
@@ -453,23 +542,36 @@ export function SalesPage({ onSwitchRole }: { onSwitchRole: () => void }) {
               </>
             )}
             <p className="sales-muted">
-              提交保存申请后，在下方列表点击“查看详情”，在抽屉中点击“评估插单”或“查看试排摘要”。每条申请的结果独立保存。
+              在左侧填写需求并点击“评估插单”，结果在此展示。修改需求后需重新评估；每条申请的结果独立保存。
             </p>
           </section>
           <section className="sales-panel" aria-labelledby="sales-status-heading">
             <h2 id="sales-status-heading">申请状态</h2>
             <p className="sales-muted">
-              提交后保存为待审批；试排完成后由管理者决定，批准后由排产计划员复核发布。下方保留所有申请状态与历史。
+              评估仅保存草稿。提交后进入管理者审批，批准后由排产计划员复核发布。
             </p>
             <WriteButton
               onClick={submit}
-              disabled={!estimate || submitting || !!submitted || loading || !!loadError}
+              disabled={
+                !selectedAssessment?.assessment?.assessment_id ||
+                selectedAssessment.status !== 'draft' ||
+                !!selectedAssessment.assessment_stale ||
+                checking ||
+                submitting ||
+                !!submitted ||
+                loading ||
+                !!loadError
+              }
             >
               {submitting ? '正在提交…' : '提交管理者审批'}
             </WriteButton>
             {submitError && <p role="alert">{submitError}</p>}
-            {submitted && <p role="status">申请 {submitted} 已保存，待审批。</p>}
-            <PendingRequestsPanel refreshVersion={requestsVersion} onSelection={selectAssessment} />
+            {submitted && (
+              <div role="status">
+                <p>申请 {submitted} 已保存，待审批。</p>
+                <button onClick={() => setOpenRequestNo(submitted)}>查看详情</button>
+              </div>
+            )}
           </section>
         </aside>
       </div>

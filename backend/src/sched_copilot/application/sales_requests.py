@@ -44,7 +44,9 @@ class SalesRequestService:
         plan_version: int,
         plan_fingerprint: str,
         snapshot_time: datetime,
+        draft_only: bool = False,
         applicant_session_id: str | None = None,
+        applicant_name: str | None = None,
     ):
         if not reason.strip() or requested_due_at <= earliest_start_at:
             raise RuleViolation("请填写有效的紧急原因和交期")
@@ -69,8 +71,17 @@ class SalesRequestService:
             raise RuleViolation("最早开工时间不能早于当前演示快照")
         # Demo line assignment is server-owned and excluded from the input fingerprint.
         values["assigned_planner"] = "planner_01"
+        # Demo identity assigned by the server, separate from real names/session tokens.
+        values["applicant_id"] = "sales_01"
+        values["applicant_name"] = applicant_name
         return self.repository.submit(
-            values, submission_key, fingerprint, estimate, plan_version, plan_fingerprint
+            values,
+            submission_key,
+            fingerprint,
+            estimate,
+            plan_version,
+            plan_fingerprint,
+            draft_only=draft_only,
         )
 
     def pending(
@@ -100,20 +111,33 @@ class SalesRequestService:
     def production_fingerprint(snapshot):
         return sha256(json.dumps(snapshot, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
-    def assess(self, request_id, snapshot, production_snapshot=None):
+    def assess(self, request_id, snapshot, production_snapshot=None, *, on_progress=None):
         request = self.repository.get(request_id)
         if request is None:
             raise ResourceNotFound("插单申请不存在")
         if request["status"] in {"rejected", "published"}:
             raise RuleViolation("已驳回或已发布申请不能重新试排，请新建申请")
         if self.workflow_runner:
+            progress = {"on_progress": on_progress} if on_progress else {}
             result = self.workflow_runner(
-                request, snapshot, lambda: self._calculate(request, snapshot, production_snapshot)
+                request,
+                snapshot,
+                lambda: self._calculate(request, snapshot, production_snapshot),
+                **progress,
             )
         else:
             result = self._calculate(request, snapshot, production_snapshot)
         result["request_no"] = request["request_no"]
-        self.repository.save_assessment(request["id"], result)
+        if on_progress:
+            on_progress(dict(type="insertion_stage_started", agent="saving"))
+        try:
+            self.repository.save_assessment(request["id"], result)
+        except Exception:
+            if on_progress:
+                on_progress(dict(type="insertion_stage_failed", agent="saving"))
+            raise
+        if on_progress:
+            on_progress(dict(type="insertion_stage_completed", agent="saving"))
         return result
 
     def detail(self, request_no, snapshot, production_snapshot=None):
@@ -200,7 +224,7 @@ class SalesRequestService:
         snapshot,
         production_snapshot=None,
     ):
-        required = "planner" if action == "publish" else "leader"
+        required = "sales" if action == "submit" else "planner" if action == "publish" else "leader"
         if operator_role != required:
             raise RuleViolation("当前演示角色不能执行此操作")
         if not reason.strip():

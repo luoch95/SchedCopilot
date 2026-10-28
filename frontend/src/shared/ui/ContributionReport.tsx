@@ -30,7 +30,7 @@ export function ContributionReport({
     <section className="contribution-report" aria-label="系统模型与人工贡献报告">
       <h3>
         {report?.title ?? '方案评估报告'}
-        {report?.revision ? ` · R${report.revision}` : ''}
+        {report?.revision ? ` · 报告第 ${report.revision} 版` : ''}
       </h3>
       <p className="hint">
         {published ? '已发布方案的预计结果' : '预计结果'}，不代表实际生产完成情况。

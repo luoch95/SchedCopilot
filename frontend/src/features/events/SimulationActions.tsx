@@ -76,7 +76,7 @@ export function SimulationActions({
       </details>
       <EventIssues state={state} />
       {!state.event.recovered_at && (
-        <div className="blockers">已保存事件的恢复时间未知，请补充恢复时间并保存。</div>
+        <div className="blockers">已保存事件的预计恢复时间未知，请补充预计恢复时间并保存。</div>
       )}
     </section>
   );

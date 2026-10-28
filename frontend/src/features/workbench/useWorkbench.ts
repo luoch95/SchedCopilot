@@ -57,6 +57,15 @@ export function useWorkbench() {
   const recoveryEpoch = useRef(0);
   const initialLoad = useRef<Promise<Workbench> | null>(null);
 
+  function matchesSimulation(value: Workbench, saved: WorkflowResponse) {
+    return (
+      !value.event_cancelled &&
+      (!saved.simulation ||
+        (saved.simulation.event_revision === value.event_revision &&
+          saved.simulation.baseline_fingerprint === value.baseline.fingerprint))
+    );
+  }
+
   useEffect(() => {
     const update = () =>
       setDemoRemaining(Math.max(0, Math.ceil((demoRetryAt - Date.now()) / 1000)));
@@ -111,15 +120,6 @@ export function useWorkbench() {
     setStale(false);
     setZoom(1);
     setPan(0);
-  }
-
-  function matchesSimulation(value: Workbench, saved: WorkflowResponse) {
-    return (
-      !value.event_cancelled &&
-      (!saved.simulation ||
-        (saved.simulation.event_revision === value.event_revision &&
-          saved.simulation.baseline_fingerprint === value.baseline.fingerprint))
-    );
   }
 
   useEffect(() => {
@@ -388,7 +388,9 @@ export function useWorkbench() {
           if (
             latest.event_revision !== state.event_revision ||
             latest.baseline.fingerprint !== state.baseline.fingerprint ||
-            !matchesSimulation(latest, result)
+            (result.simulation &&
+              (result.simulation.event_revision !== latest.event_revision ||
+                result.simulation.baseline_fingerprint !== latest.baseline.fingerprint))
           ) {
             clearResults();
             setNotice('计划或故障已更新，已刷新工作台，请基于最新数据重新评估。');

@@ -252,16 +252,19 @@ it.each([null, { 'sched-copilot.demo-navigation.v1': null }])(
   },
 );
 
-it('opens with only the actionable request list and formal plan, and keeps fault editing hidden', async () => {
+it('opens with submitted request history and formal plan, and keeps fault editing hidden', async () => {
   render(<WorkbenchPage />);
-  await screen.findByRole('heading', { name: '待审批插单申请' });
+  await screen.findByRole('heading', { name: '插单申请审批' });
   await screen.findByText('URG-TEST-1');
-  expect(screen.queryByText('URG-OTHER')).toBeNull();
+  expect(screen.getByText('URG-OTHER')).toBeTruthy();
   expect(screen.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
     '申请编号',
     '产品',
     '数量',
     '状态',
+    '申请业务员',
+    '要求交期',
+    '提交时间',
   ]);
   expect(screen.queryByLabelText('故障设备')).toBeNull();
   expect(screen.getByRole('button', { name: '开始 AI 分析并生成方案' })).toBeTruthy();
@@ -272,7 +275,7 @@ it('opens with only the actionable request list and formal plan, and keeps fault
   expect(within(faultCard).getByText('当前计划有 1 道工序受故障影响。').tagName).toBe('STRONG');
   expect(within(faultCard).queryByText(/来源：/)).toBeNull();
   expect(within(faultCard).queryByLabelText('事件分析标识')).toBeNull();
-  const list = screen.getByRole('heading', { name: '待审批插单申请' });
+  const list = screen.getByRole('heading', { name: '插单申请审批' });
   const plan = screen.getByRole('heading', { name: '当前执行计划' });
   expect(list.compareDocumentPosition(plan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(plan.closest('.dashboard-plan')).toBeTruthy();
@@ -390,7 +393,7 @@ it('sorts both task lists newest first and filters each card independently witho
       .getAllByRole('heading')
       .slice(1)
       .map((heading) => heading.textContent),
-  ).toEqual(['M2 停机 · R2', '⚠️ 已登记设备故障：M1 停机', 'M3 停机 · R3']);
+  ).toEqual(['M2 停机 · M2 · 编号缺失', '⚠️ 已登记设备故障：M1 停机', 'M3 停机 · M3 · 编号缺失']);
   const callsBefore = vi.mocked(fetch).mock.calls.length;
   const requests = screen.getByRole('region', { name: '插单申请与状态跟踪' });
   function chooseDay(card: HTMLElement) {
@@ -404,10 +407,10 @@ it('sorts both task lists newest first and filters each card independently witho
   expect(
     screen.getAllByRole('button', { name: /^URG-/ }).map((button) => button.textContent),
   ).toEqual(['URG-END-DAY']);
-  expect(within(alerts).getByText('M2 停机 · R2')).toBeTruthy();
+  expect(within(alerts).getByText('M2 停机 · M2 · 编号缺失')).toBeTruthy();
   chooseDay(alerts);
-  expect(within(alerts).queryByText('M2 停机 · R2')).toBeNull();
-  expect(within(alerts).queryByText('M3 停机 · R3')).toBeNull();
+  expect(within(alerts).queryByText('M2 停机 · M2 · 编号缺失')).toBeNull();
+  expect(within(alerts).queryByText('M3 停机 · M3 · 编号缺失')).toBeNull();
   expect(within(alerts).getByRole('region', { name: '已登记设备故障' })).toBeTruthy();
   expect(screen.getByRole('img', { name: '设备工序甘特图' })).toBeTruthy();
   expect(vi.mocked(fetch).mock.calls.length).toBe(callsBefore);

@@ -19,6 +19,9 @@ export interface Failure {
   recovered_at: string | null;
   source: string;
   received_at: string;
+  fault_event_id?: string | null;
+  fault_business_code?: string | null;
+  fault_process_stage?: string;
 }
 export interface Machine {
   id: string;
@@ -65,7 +68,7 @@ export interface PlanPublication {
     version: number;
     event_revision: number;
     failure: Failure;
-    affected_operations: Operation[];
+    affected_operations?: Operation[];
     candidate_label?: string;
     metrics?: Candidate['metrics'];
   }[];
@@ -85,7 +88,12 @@ export interface PlanPublication {
 export interface Workbench {
   fault_review?: FaultReview | null;
   event_cancelled?: boolean;
-  event_history?: (Failure & { revision: number; created_at: string; cancelled?: boolean })[];
+  event_history?: (Failure & {
+    revision: number;
+    created_at: string;
+    cancelled?: boolean;
+    event_status?: 'registered' | 'pending_approval' | 'approved' | 'published' | 'cancelled';
+  })[];
   plan_publication?: PlanPublication;
   baseline: Schedule;
   event: Failure;
@@ -460,12 +468,15 @@ export interface InsertionRequestCreate {
   requested_due_at: string;
   reason: string;
   submission_key: string;
+  draft_only?: boolean;
 }
 export interface InsertionRequestRecord {
+  applicant_id?: string | null;
+  applicant_name?: string | null;
   id: string;
   request_no: string;
   assigned_planner: string;
-  status: 'pending_approval' | 'approved' | 'rejected' | 'published';
+  status: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'published';
   product_id: string;
   quantity: number;
   earliest_start_at: string;
@@ -484,6 +495,14 @@ export interface InsertionRequestRecord {
     created_at: string;
   }[];
   created_at: string;
+}
+
+export type InsertionStage = 'validation' | 'scheduling' | 'evaluation' | 'explanation' | 'saving';
+export interface InsertionProgressEvent {
+  type: 'insertion_stage_started' | 'insertion_stage_completed' | 'insertion_stage_failed';
+  agent: InsertionStage;
+  mode?: string;
+  elapsed_ms?: number;
 }
 
 export interface InsertionAssessment {

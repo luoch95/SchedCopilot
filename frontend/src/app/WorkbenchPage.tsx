@@ -1,4 +1,8 @@
-import { visibleFaultEvents } from '../shared/lib/visibleFaultEvents';
+import {
+  faultBusinessLabel,
+  resolveFaultIdentity,
+  visibleFaultEvents,
+} from '../shared/lib/visibleFaultEvents';
 import { AiAnalysisButton } from '../shared/ui/AiAnalysisButton';
 import { WorkbenchTitle } from '../shared/ui/WorkbenchTitle';
 import { FaultPlanPage } from './FaultPlanPage';
@@ -18,7 +22,11 @@ import {
 import { FaultAnalysisDetails, FaultProgress } from '../features/analysis';
 import { EventEditor, EventIssues } from '../features/events';
 import { CurrentPlan, timelineRange, publishedPlanRange } from '../features/plan';
-import { publishedFault, useWorkbench, useHistoricalFaultAnalysis } from '../features/workbench';
+import {
+  publishedFaultSummary,
+  useWorkbench,
+  useHistoricalFaultAnalysis,
+} from '../features/workbench';
 import { WriteButton } from '../shared/ui/WriteButton';
 import { BusinessLabelProvider } from '../shared/lib/BusinessLabelProvider';
 import { DateRangeFilter } from '../shared/ui/DateRangeFilter';
@@ -40,11 +48,17 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
     NonNullable<Workbench['event_history']>[number] | null
   >(null);
   const historicalAnalysis = useHistoricalFaultAnalysis(historicalEvent?.revision);
+  const currentAnalysis = useHistoricalFaultAnalysis(
+    analysisOpen && controller.state && !controller.state.event_cancelled
+      ? controller.state.event_revision
+      : undefined,
+  );
   const [notificationReady, setNotificationReady] = useState(true);
   const notificationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const generating = controller.activeIntent === 'generate_candidates';
-  const publication = publishedFault(controller.state);
-  const analysisWorkflow = controller.workflow ?? publication?.workflow ?? null;
+  const publication = publishedFaultSummary(controller.state);
+  const analysisWorkflow =
+    controller.workflow ?? currentAnalysis.analysis?.workflow ?? publication?.workflow ?? null;
   const assessment =
     analysisWorkflow?.status === 'completed' &&
     analysisWorkflow.results.evaluation?.data?.assessment;
@@ -144,7 +158,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       </ol>
     </nav>
   );
-  const eventLabel = `${state.event.machine_id}故障 R${state.event_revision}`;
+  const eventLabel = `${faultBusinessLabel({ ...state.event, revision: state.event_revision })}`;
   const publishedCandidate = publication?.simulation?.candidates.find(
     (candidate) =>
       candidate.id === (publication.selected_candidate_id ?? publication.decisions?.candidate_id),
@@ -153,8 +167,8 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
   const visibleEvents = visibleFaultEvents(state, dateRange);
   const currentFaultCard = publication ? (
     <PublishedFaultCard
-      failure={state.event}
-      revision={state.event_revision}
+      failure={resolveFaultIdentity(state.event, state, state.event_revision)}
+
       version={
         publication.published_version ??
         state.plan_publication?.fault_traces?.find(
@@ -168,7 +182,12 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
             : '原 AI 方案'
           : undefined
       }
-      metrics={publishedCandidate?.metrics}
+      metrics={
+        publishedCandidate?.metrics ??
+        state.plan_publication?.fault_traces?.find(
+          (trace) => trace.event_revision === state.event_revision,
+        )?.metrics
+      }
       orderImpacts={publishedCandidate?.order_impacts}
       label="已登记设备故障"
       onOpen={navigation.openFault}
@@ -184,7 +203,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
             </h2>
             <p className="fault-analysis-window">
               分析窗口：{stamp(state.event.started_at)} —{' '}
-              {state.event.recovered_at ? stamp(state.event.recovered_at) : '恢复时间未知'}
+              {state.event.recovered_at ? stamp(state.event.recovered_at) : '预计恢复时间未知'}
             </p>
           </div>
           <div className="fault-task-actions">
@@ -415,16 +434,72 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                         const trace = state.plan_publication?.fault_traces?.find(
                           (item) => item.event_revision === event.revision,
                         );
+                        if (
+                          !trace &&
+                          (event.event_status === 'registered' ||
+                            event.event_status === 'pending_approval' ||
+                            event.event_status === 'approved')
+                        )
+                          return (
+                            <article
+                              key={event.revision}
+                              className="fault-event-banner"
+                              aria-label={`待处理故障 ${faultBusinessLabel(event)}`}
+                            >
+                              <div className="fault-card-heading">
+                                <div className="fault-card-identity">
+                                  <h2>⚠️ 已登记设备故障：{event.machine_id} 停机</h2>
+                                  <p className="fault-analysis-window">
+                                    分析窗口：{stamp(event.started_at)} —{' '}
+                                    {event.recovered_at
+                                      ? stamp(event.recovered_at)
+                                      : '预计恢复时间未知'}{' '}
+                                    · {faultBusinessLabel(event)}
+                                  </p>
+                                </div>
+                                <div className="fault-task-actions">
+                                  <WriteButton
+                                    className="secondary"
+                                    disabled={
+                                      !!controller.busy || controller.dirty || controller.stale
+                                    }
+                                    onClick={() => {
+                                      if (
+                                        window.confirm(
+                                          '确认撤销这条故障及其关联分析、候选和审批数据？',
+                                        )
+                                      )
+                                        void controller.cancelEvent(event.revision);
+                                    }}
+                                  >
+                                    撤销
+                                  </WriteButton>
+                                  <AiAnalysisButton
+                                    label="AI生成评估方案"
+                                    onClick={() => setHistoricalEvent(event)}
+                                  />
+                                </div>
+                              </div>
+                              <p className="fault-impact-summary">
+                                当前状态：
+                                {event.event_status === 'pending_approval'
+                                  ? '待管理者审批'
+                                  : event.event_status === 'approved'
+                                    ? '已审批，待发布'
+                                    : '故障登记中'}
+                              </p>
+                            </article>
+                          );
                         if (trace)
                           return (
                             <PublishedFaultCard
                               key={event.revision}
-                              failure={trace.failure}
-                              revision={event.revision}
+                              failure={resolveFaultIdentity(trace.failure, state, event.revision)}
+
                               version={trace.version}
                               candidateLabel={trace.candidate_label}
                               metrics={trace.metrics}
-                              label={`历史故障 ${event.machine_id} R${event.revision}`}
+                              label={`历史故障 ${faultBusinessLabel(event)}`}
                               history
                               onOpen={() => setHistoricalEvent(event)}
                             />
@@ -433,15 +508,15 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                           <article
                             key={event.revision}
                             className="fault-history-item"
-                            aria-label={`历史故障 ${event.machine_id} R${event.revision}`}
+                            aria-label={`历史故障 ${faultBusinessLabel(event)}`}
                           >
                             <h3>
-                              {event.machine_id} 停机 · R{event.revision}
+                              {event.machine_id} 停机 · {faultBusinessLabel(event)}
                             </h3>
                             <p>发生时间：{stamp(event.started_at)}</p>
                             <p>
                               分析窗口：{stamp(event.started_at)} —{' '}
-                              {event.recovered_at ? stamp(event.recovered_at) : '恢复时间未知'}
+                              {event.recovered_at ? stamp(event.recovered_at) : '预计恢复时间未知'}
                             </p>
                             <WriteButton
                               className="secondary"
@@ -502,8 +577,8 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
           >
             <div className="fault-analysis-context" aria-label="事件分析标识">
               <span className="fault-analysis-version">
-                基线 V{publication?.baseline_version ?? state.baseline.version} · 故障 R
-                {state.event_revision}
+                基线 V{publication?.baseline_version ?? state.baseline.version} ·{' '}
+                {faultBusinessLabel(state.event)}
               </span>
               <span>
                 {analysisTime && !Number.isNaN(Date.parse(analysisTime))
@@ -511,11 +586,33 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
                   : '分析时间未记录'}
               </span>
             </div>
-            <FaultAnalysisDetails
-              state={state}
-              workflow={analysisWorkflow}
-              simulation={controller.currentSimulation}
-            />
+            {currentAnalysis.loading ? (
+              <p role="status">正在加载 AI 分析…</p>
+            ) : currentAnalysis.error ? (
+              <p role="alert">{currentAnalysis.error}</p>
+            ) : (
+              <FaultAnalysisDetails
+                state={
+                  currentAnalysis.analysis
+                    ? {
+                        ...state,
+                        baseline: currentAnalysis.analysis.baseline ?? state.baseline,
+                        affected: currentAnalysis.analysis.affected ?? [],
+                        plan_publication: {
+                          version:
+                            currentAnalysis.analysis.published_version ?? state.baseline.version,
+                          published_at: currentAnalysis.analysis.published_at ?? null,
+                          published_by: null,
+                          version_summary: '',
+                          fault_analysis: currentAnalysis.analysis,
+                        },
+                      }
+                    : state
+                }
+                workflow={analysisWorkflow}
+                simulation={controller.currentSimulation ?? currentAnalysis.analysis?.simulation}
+              />
+            )}
             {(analysisWorkflow?.status === 'blocked' || assessment) && (
               <div className="analysis-alert-actions">
                 <p className="message warning">
@@ -545,7 +642,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
         )}
         {historicalEvent && (
           <Modal
-            title={`${historicalEvent.machine_id}故障 R${historicalEvent.revision} · 历史智能分析明细`}
+            title={`${faultBusinessLabel(historicalEvent)} · 历史智能分析明细`}
             drawer
             drawerWidth="min(1120px, 100vw)"
             onClose={() => setHistoricalEvent(null)}
@@ -554,13 +651,13 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
               <span className="fault-analysis-version">
                 {historicalAnalysis.analysis &&
                   `基线 V${historicalAnalysis.analysis.baseline_version} · `}
-                故障 R{historicalEvent.revision}
+                {faultBusinessLabel(historicalEvent)}
               </span>
               <span>
                 分析窗口：{stamp(historicalEvent.started_at)} —{' '}
                 {historicalEvent.recovered_at
                   ? stamp(historicalEvent.recovered_at)
-                  : '恢复时间未知'}
+                  : '预计恢复时间未知'}
               </span>
             </div>
             {historicalAnalysis.loading ? (

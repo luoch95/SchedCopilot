@@ -105,7 +105,7 @@ def weekly_metrics(request: Request, response: Response):
 
 @router.get("/workbench")
 def workbench(service: Service):
-    return workbench_view(service.workbench())
+    return workbench_view(service.workbench(overview=True), overview=True)
 
 
 @router.put("/event")
@@ -251,6 +251,15 @@ def sales_request_detail(request_no: str, request: Request, service: Service):
 
 @router.post("/sales/requests/{request_id}/assessment")
 def assess_sales_request(request_id: str, request: Request, service: Service):
+    if "application/x-ndjson" in request.headers.get("accept", ""):
+        return workflow_stream(
+            lambda emit: request.app.state.sales_requests.assess(
+                request_id,
+                service.workbench(),
+                service.repository.production_snapshot(),
+                on_progress=emit,
+            )
+        )
     return request.app.state.sales_requests.assess(
         request_id, service.workbench(), service.repository.production_snapshot()
     )
@@ -282,6 +291,11 @@ def submit_fault_review(request: FaultReviewSubmit, service: Service):
             request.simulation_id, request.candidate_id, request.reason, request.request_id
         )
     )
+
+
+@router.get("/fault-reviews/{review_id}")
+def fault_review_detail(review_id: str, service: Service):
+    return service.fault_review_detail(review_id)
 
 
 @router.post("/fault-reviews/{review_id}/actions")

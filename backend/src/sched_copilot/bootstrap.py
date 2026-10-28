@@ -12,7 +12,7 @@ from .agents.validation_agent import ValidationAgent
 from .agents.workflow import run_analysis
 from .application.workbench import WorkbenchService
 from .config import Settings
-from .domain.models import MachineFailure
+from .domain.models import MachineFailure, Order
 from .infrastructure.fallback_demo import FallbackDemoGate
 from .infrastructure.sqlite_repository import DecisionStore
 from .orchestration.engine import WorkflowEngine
@@ -22,11 +22,18 @@ from .scenarios.demo import EVENT_TIME, demo_machines, demo_orders, demo_schedul
 
 def build_workbench(settings: Settings) -> WorkbenchService:
     store = DecisionStore(settings.database_path, demo_schedule())
+    context = store.scenario_context()
+    snapshot_time = context.snapshot_time if context else EVENT_TIME
+    orders = (
+        tuple(Order(o.id, o.name, o.due, o.priority) for o in context.orders)
+        if context
+        else demo_orders()
+    )
     service = WorkbenchService(
         store,
         demo_machines(),
-        demo_orders(),
-        EVENT_TIME,
+        orders,
+        snapshot_time,
         MachineFailure(
             "M1", EVENT_TIME, EVENT_TIME + timedelta(hours=4), "系统初始化示例", EVENT_TIME
         ),

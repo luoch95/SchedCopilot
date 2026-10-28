@@ -10,6 +10,7 @@ from sched_copilot.domain.scheduling import (
     validate_schedule,
 )
 from sched_copilot.scenarios.demo import BASE_TIME, demo_machines, demo_orders, demo_schedule
+from sched_copilot.scenarios.v0 import v0_data
 
 
 def failure():
@@ -29,6 +30,24 @@ def test_demo_schedule_is_valid():
 def test_failure_only_affects_planned_operations_on_failed_machine():
     affected = affected_operations(demo_schedule(), failure())
     assert {item.id for item in affected} == {"O1002-OP1", "O1005-OP1", "O1005-OP2"}
+
+
+def test_v0_failure_does_not_reclassify_completed_or_other_machine_operations():
+    baseline, orders, snapshot, _ = v0_data()
+    event = MachineFailure(
+        "M1",
+        snapshot,
+        snapshot + timedelta(hours=3),
+        "test",
+        snapshot,
+    )
+
+    assert "O1001-OP2" not in {item.id for item in affected_operations(baseline, event)}
+    candidate = generate_candidates(baseline, event, demo_machines(), orders)[0]
+    original = baseline.by_id("O1001-OP2")
+    actual = candidate.schedule.by_id("O1001-OP2")
+    assert actual == original
+    assert candidate.schedule.by_id("O1001-OP1") == baseline.by_id("O1001-OP1")
 
 
 def test_candidates_are_traceable_and_valid():

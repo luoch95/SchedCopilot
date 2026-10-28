@@ -144,3 +144,25 @@ it('handles missing snapshot times and times before the displayed range without 
   );
   expect(document.querySelector('.gantt-time-marker line')).toBeNull();
 });
+
+it('renders published overview traces without operation details and does not infer a transfer result', () => {
+  const state: Workbench = {
+    ...workbench,
+    baseline: { ...workbench.baseline, version: 1, operations: [] },
+    affected: [],
+    plan_publication: {
+      version: 1,
+      published_at: null,
+      published_by: null,
+      version_summary: '已发布',
+      fault_traces: [{ version: 1, event_revision: 16, failure: workbench.event }],
+    },
+  };
+  render(chart(state));
+  expect(screen.getByRole('heading', { name: '当前执行计划' })).toBeTruthy();
+  fireEvent.focus(screen.getByRole('group', { name: `${workbench.event.machine_id} 停机留痕` }));
+  const tooltip = screen.getByRole('tooltip');
+  expect(tooltip.textContent).toContain('概览未加载受影响工序明细');
+  expect(tooltip.textContent).not.toContain('已全部转移');
+  expect(tooltip.textContent).not.toContain('已调整避开停机窗口');
+});

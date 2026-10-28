@@ -51,6 +51,11 @@ def test_no_candidate_assessment_can_be_reviewed_without_plan_publication(tmp_pa
         submitted = client.post(url, json=submission)
         assert submitted.status_code == 200, submitted.text
         review = submitted.json()["fault_review"]
+        detail = client.get(f"/api/fault-reviews/{review['id']}")
+        assert detail.status_code == 200
+        assert detail.json() == review
+        assert detail.json()["workflow"]["id"] == workflow["id"]
+        assert detail.json()["assessment"] == evaluation["assessment"]
         assert review["metrics"] is None
         assert client.post(url, json=submission).json()["fault_review"] == review
         action_url = f"/api/fault-reviews/{review['id']}/actions"
@@ -316,4 +321,32 @@ def test_published_traces_survive_new_fault_and_cancellation(tmp_path):
         assert response.status_code == 200, response.text
         assert response.json()["plan_publication"]["fault_traces"] == traces
     with TestClient(create_app(path)) as client:
-        assert client.get("/api/workbench").json()["plan_publication"]["fault_traces"] == traces
+        traces = client.get("/api/workbench").json()["plan_publication"]["fault_traces"]
+        assert len(traces) == 1
+        assert traces[0]["event_revision"] == original["event_revision"]
+        assert "affected_operations" not in traces[0]
+
+
+def test_review_detail_keeps_bound_snapshot_after_new_analysis_and_restart(tmp_path):
+    path = tmp_path / "review-detail.sqlite3"
+    with TestClient(create_app(path)) as client:
+        original = generate(client)
+        review = approve_fault(client, original["id"], original["candidates"][1]["id"])
+        url = f"/api/fault-reviews/{review['id']}"
+        overview = client.get("/api/workbench").json()["fault_review"]
+        assert overview["id"] == review["id"]
+        assert "analysis" not in overview
+        detail = client.get(url)
+        assert detail.status_code == 200
+        assert detail.json() == review
+        assert detail.json()["analysis"]["simulation"]["id"] == original["id"]
+        assert len(detail.json()["analysis"]["workflow"]["trace"]) == 4
+        assert (
+            detail.json()["analysis"]["baseline"]["fingerprint"] == review["baseline_fingerprint"]
+        )
+        new = generate(client)
+        assert new["id"] != original["id"]
+        assert client.get(url).json() == review
+        assert client.get("/api/fault-reviews/does-not-exist").status_code == 404
+    with TestClient(create_app(path)) as client:
+        assert client.get(url).json() == review

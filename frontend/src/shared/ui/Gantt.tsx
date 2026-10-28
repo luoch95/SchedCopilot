@@ -15,7 +15,7 @@ const comparisonColors = {
 const hour = (value: number) => stamp(new Date(value).toISOString()).split(' ')[1];
 type FaultOverlay = {
   failure: Failure;
-  faultTrace?: { version: number; affectedOperations: Operation[] };
+  faultTrace?: { version: number; affectedOperations?: Operation[] };
 };
 
 export default function Gantt({
@@ -41,7 +41,7 @@ export default function Gantt({
   changes?: Change[];
   affectedOperationIds?: string[];
   tone?: 'red' | 'green' | 'published';
-  faultTrace?: { version: number; affectedOperations: Operation[] };
+  faultTrace?: { version: number; affectedOperations?: Operation[] };
   faults?: FaultOverlay[];
   editBoundary?: string;
   timeMarker?: { time: number; label: string };
@@ -170,6 +170,10 @@ export default function Gantt({
   }
   const inspected = hover ?? schedule.operations.find((op) => op.id === selectedId) ?? null;
   const before = inspected && baseline?.operations.find((op) => op.id === inspected.id);
+  const inspectedDelay =
+    inspected && before && inspected.status !== 'completed'
+      ? Math.max(0, Math.round((Date.parse(inspected.start) - Date.parse(before.start)) / 60000))
+      : 0;
   const change = inspected && changes.find((item) => item.工序 === inspected.id);
   const activeFailure = activeFault.failure;
   const activeTrace = activeFault.faultTrace;
@@ -182,19 +186,14 @@ export default function Gantt({
       Date.parse(op.end) > Date.parse(activeFailure.started_at),
   );
   const affectedIds = new Set([...affectedOperationIds, ...conflicts.map((op) => op.id)]);
-  const affectedOrders = new Set(
-    [...schedule.operations, ...(baseline?.operations ?? [])]
-      .filter((op) => affectedIds.has(op.id))
-      .map((op) => op.order_id),
-  );
   const allTransferred =
-    !!activeTrace?.affectedOperations.length &&
+    !!activeTrace?.affectedOperations?.length &&
     activeTrace.affectedOperations.every((original) =>
       schedule.operations.some(
         (op) => op.id === original.id && op.machine_id !== activeFailure.machine_id,
       ),
     );
-  const faultDescription = `${activeTrace ? `V${activeTrace.version} 变更留痕：` : '设备停机窗口：'}因 ${activeFailure.machine_id} 设备故障（${stamp(activeFailure.started_at)}—${activeFailure.recovered_at ? stamp(activeFailure.recovered_at) : '恢复时间未知'}），${conflicts.length ? `当前仍有 ${conflicts.length} 道工序与停机窗口重叠，需调整排产` : allTransferred ? '相关订单工序已全部转移' : activeTrace ? '相关工序已调整避开停机窗口' : '当前窗口内无排产冲突'}，当前时段设备不可用。来源：${activeFailure.source}。`;
+  const faultDescription = `${activeTrace ? `V${activeTrace.version} 变更留痕：` : '设备停机窗口：'}因 ${activeFailure.machine_id} 设备故障（${stamp(activeFailure.started_at)}—${activeFailure.recovered_at ? stamp(activeFailure.recovered_at) : '预计恢复时间未知'}），${conflicts.length ? `当前仍有 ${conflicts.length} 道工序与停机窗口重叠，需调整排产` : allTransferred ? '相关订单工序已全部转移' : activeTrace && !activeTrace.affectedOperations ? '已发布；概览未加载受影响工序明细，请查看历史 AI 分析' : activeTrace ? '相关工序已调整避开停机窗口' : '当前窗口内无排产冲突'}，当前时段设备不可用。来源：${activeFailure.source}。`;
   return (
     <div className={`gantt${tone === 'red' ? ' gantt-baseline' : ''}`}>
       <div
@@ -346,8 +345,19 @@ export default function Gantt({
             const original = baseline?.operations.find((item) => item.id === op.id);
             const transfer = original && original.machine_id !== op.machine_id;
             const changed = transfer || (original && original.start !== op.start);
+            const delay =
+              original && op.status !== 'completed'
+                ? Math.max(
+                    0,
+                    Math.round((Date.parse(op.start) - Date.parse(original.start)) / 60000),
+                  )
+                : 0;
+            // Highlight the operation that is actually affected or moved. Do not expand
+            // an operation-level impact into every operation of the same order.
             const affected =
-              tone === 'red' && op.status !== 'completed' && affectedOrders.has(op.order_id);
+              tone === 'red' &&
+              op.status !== 'completed' &&
+              (affectedIds.has(op.id) || changed === true);
             const start = Math.max(left, x(op.start)),
               end = Math.min(width - right, x(op.end));
             if (end <= start) return null;
@@ -441,11 +451,19 @@ export default function Gantt({
                       : palette[orderIds.indexOf(op.order_id) % palette.length]
                   }
                   fillOpacity={1}
-                  stroke={affected ? '#EA580C' : 'transparent'}
-                  strokeWidth={affected ? 3 : 0}
+                  stroke={
+                    delay > 0
+                      ? '#DC2626'
+                      : affected
+                        ? '#EA580C'
+                        : transfer
+                          ? '#0369A1'
+                          : 'transparent'
+                  }
+                  strokeWidth={delay > 0 || affected || transfer ? 3 : 0}
                   tabIndex={0}
                   role="graphics-symbol"
-                  aria-label={`${op.display_name ?? op.id} ${op.machine_id} ${stamp(op.start)} 至 ${stamp(op.end)}${affected ? ' 故障影响' : ''}${transfer ? ' 设备转移' : changed ? ' 时间调整' : ''}${editBoundary ? (editable ? ' 可编辑' : ' 已锁定') : ''}`}
+                  aria-label={`${op.display_name ?? op.id} ${op.machine_id} ${stamp(op.start)} 至 ${stamp(op.end)}${affected ? ' 故障影响' : ''}${transfer ? ' 设备转移' : changed ? ' 时间调整' : ''}${delay > 0 ? ` 顺延 ${delay} 分钟` : ''}${editBoundary ? (editable ? ' 可编辑' : ' 已锁定') : ''}`}
                   aria-disabled={editBoundary && !editable ? true : undefined}
                   onKeyDown={(event) => {
                     if (
@@ -581,6 +599,7 @@ export default function Gantt({
           <>
             <strong>{inspected.display_name ?? inspected.id}</strong>
             <span>
+              {baseline ? '评估方案 · ' : ''}
               {inspected.machine_id} · {stamp(inspected.start)} → {stamp(inspected.end)}
             </span>
             <span>
@@ -593,10 +612,15 @@ export default function Gantt({
                   ? ' · 可编辑'
                   : ''}
               {before &&
-              (before.machine_id !== inspected.machine_id || before.start !== inspected.start)
-                ? ` · 原安排 ${before.machine_id} / ${stamp(before.start)}`
+              (before.machine_id !== inspected.machine_id ||
+                before.start !== inspected.start ||
+                before.end !== inspected.end)
+                ? ` · 原安排 ${before.machine_id} / ${stamp(before.start)} → ${stamp(before.end)}`
                 : ''}
             </span>
+            {inspectedDelay > 0 && (
+              <span style={{ color: '#DC2626' }}>顺延 {inspectedDelay} 分钟</span>
+            )}
           </>
         ) : (
           <span>悬停或聚焦工序条，查看设备、起止时间与调整前安排</span>
@@ -607,6 +631,9 @@ export default function Gantt({
           调整依据：
           <DecisionText text={businessText(change.依据, schedule.operations)} />
         </p>
+      )}
+      {baseline && (
+        <p className="hint">红框表示工序开工顺延，蓝框表示设备转移；顺延不等于订单交期逾期。</p>
       )}
       <div className="order-legend">
         {orderIds.map((id, index) => (

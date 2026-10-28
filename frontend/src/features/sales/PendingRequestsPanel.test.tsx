@@ -136,7 +136,9 @@ beforeEach(() => {
         return new Response(JSON.stringify(result));
       }
       return new Response(
-        JSON.stringify(String(_url).endsWith('/' + request.request_no) ? records[0] : records),
+        JSON.stringify(
+          records.find((record) => String(_url).endsWith('/' + record.request_no)) ?? records,
+        ),
       );
     }),
   );
@@ -271,6 +273,9 @@ it('opens leader approval details in a drawer and restores background scrolling 
     '产品',
     '数量',
     '状态',
+    '申请业务员',
+    '要求交期',
+    '提交时间',
   ]);
   expect(screen.queryByRole('button', { name: '批准插单' })).toBeNull();
   fireEvent.click(screen.getByText(request.product_id));
@@ -283,6 +288,117 @@ it('opens leader approval details in a drawer and restores background scrolling 
   fireEvent.click(within(drawer).getByRole('button', { name: '关闭' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.body.style.overflow).not.toBe('hidden');
+});
+
+it.each(['leader', 'planner'] as const)(
+  '%s lists submitted requests pending first and combines status and date filters',
+  async (role) => {
+    records = (['draft', 'pending_approval', 'approved', 'rejected', 'published'] as const).map(
+      (status, index) => ({
+        ...request,
+        id: status,
+        request_no: `URG-${status}`,
+        status,
+        applicant_id: 'sales_01',
+        created_at: `2026-10-${19 + index}T13:00:00+08:00`,
+      }),
+    );
+    const onOpen = vi.fn();
+    const view = render(
+      <PendingRequestsPanel
+        leader={role === 'leader'}
+        planner={role === 'planner'}
+        onOpen={onOpen}
+      />,
+    );
+    await screen.findByText('URG-published');
+    expect(screen.getByRole('heading', { name: '插单申请审批' })).toBeTruthy();
+    expect(screen.queryByText('URG-draft')).toBeNull();
+    expect(
+      screen
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => row.querySelector('button')?.textContent),
+    ).toEqual(['URG-pending_approval', 'URG-published', 'URG-rejected', 'URG-approved']);
+    expect(screen.getAllByText('sales_01')).toHaveLength(4);
+    expect(screen.getAllByText('2026-10-20 16:00')).toHaveLength(4);
+    for (const status of ['pending_approval', 'approved', 'rejected', 'published']) {
+      fireEvent.change(screen.getByRole('combobox', { name: '插单申请状态' }), {
+        target: { value: status },
+      });
+      expect(screen.getAllByRole('row')).toHaveLength(2);
+      fireEvent.click(screen.getByRole('button', { name: `URG-${status}` }));
+      expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ status }));
+    }
+    view.rerender(
+      <PendingRequestsPanel
+        leader={role === 'leader'}
+        planner={role === 'planner'}
+        onOpen={onOpen}
+        dateRange={{ start: '2026-10-20', end: '2026-10-20' }}
+      />,
+    );
+    expect(screen.getByText('当前筛选条件下暂无插单申请。')).toBeTruthy();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'all' } });
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.getByText('URG-pending_approval')).toBeTruthy();
+  },
+);
+
+it.each(['approved', 'rejected', 'published'] as const)(
+  'opens %s history read-only in the manager drawer',
+  async (status) => {
+    records = [
+      { ...request, status, assessment: result, approval: { status, reason: '历史审批意见' } },
+    ];
+    render(<LeaderPage onSwitchRole={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: request.request_no }));
+    const drawer = await screen.findByRole('dialog', { name: '插单审批详情' });
+    await within(drawer).findByText('审批意见：历史审批意见');
+    expect(within(drawer).getByText('订单延期变化明细')).toBeTruthy();
+    expect(within(drawer).queryByRole('textbox')).toBeNull();
+    expect(
+      within(drawer).queryByRole('button', {
+        name: /批准插单|驳回申请|复核并发布插单|重新试排|评估插单/,
+      }),
+    ).toBeNull();
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.every(([, options]) => !options?.method || options.method === 'GET'),
+    ).toBe(true);
+  },
+);
+
+it('keeps the approved request in the manager list after approval and closing the drawer', async () => {
+  records = [{ ...request, assessment: result }];
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url) === '/api/workbench') return new Response(JSON.stringify(workbench));
+    if (String(url).endsWith('/actions')) {
+      expect(JSON.parse(String(options?.body)).action).toBe('approve');
+      records = [
+        { ...records[0], status: 'approved', approval: { status: 'approved', reason: '确认影响' } },
+      ];
+      return new Response(JSON.stringify(records[0]));
+    }
+    return new Response(
+      JSON.stringify(String(url).endsWith('/' + request.request_no) ? records[0] : records),
+    );
+  });
+  render(<LeaderPage onSwitchRole={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: request.request_no }));
+  const drawer = await screen.findByRole('dialog', { name: '插单审批详情' });
+  fireEvent.change(await within(drawer).findByRole('textbox'), { target: { value: '确认影响' } });
+  fireEvent.click(within(drawer).getByRole('button', { name: '批准插单' }));
+  const list = screen
+    .getAllByRole('region', { name: '插单申请与状态跟踪' })
+    .find((region) => !drawer.contains(region))!;
+  await within(list).findByText('已批准 · 待复核发布 · 已试排');
+  await within(drawer).findByText('审批意见：确认影响');
+  expect(within(drawer).queryByRole('button', { name: '批准插单' })).toBeNull();
+  fireEvent.click(within(drawer).getByRole('button', { name: '关闭' }));
+  await screen.findByText('已批准 · 待复核发布 · 已试排');
+  expect(screen.getByRole('button', { name: request.request_no })).toBeTruthy();
 });
 
 it.each([
@@ -324,6 +440,21 @@ it.each([
     );
   },
 );
+
+it('formats stored ISO times in assessment text as Beijing dates and minutes', () => {
+  render(
+    <AssessmentView
+      result={{
+        ...result,
+        assumptions: ['要求交期：2026-10-26T08:30:00+00:00', '预计完工：2026-10-26T23:30:00Z'],
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByText('试排口径与限制'));
+  expect(screen.getByText('要求交期：2026-10-26 16:30')).toBeTruthy();
+  expect(screen.getByText('预计完工：2026-10-27 07:30')).toBeTruthy();
+  expect(screen.queryByText(/2026-10-26T08:30/)).toBeNull();
+});
 
 it('uses shared business stage labels and management bullets based on the actual assessment', () => {
   render(
@@ -426,13 +557,9 @@ it('keeps sales details outside the table and loads the saved summary by request
   const onSelection = vi.fn();
   render(<PendingRequestsPanel onSelection={onSelection} />);
   await screen.findByText('待审批 · 已试排');
-  expect(screen.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
-    '申请编号',
-    '产品 / 数量',
-    '要求交期',
-    '状态',
-    '操作',
-  ]);
+  const card = screen.getByRole('article', { name: `申请 ${request.request_no}` });
+  expect(within(card).getByText('P-DEMO-001 / 100 件 · 要求交期：2026-10-20 16:00')).toBeTruthy();
+  expect(within(card).getByLabelText('申请审批流程')).toBeTruthy();
   expect(screen.queryByText('申请需求')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '查看详情' }));
   const drawer = await screen.findByRole('dialog', { name: '插单申请详情' });
@@ -472,11 +599,13 @@ it('keeps the drawer open with an actionable error when a saved summary fetch fa
 });
 
 it('filters planner requests by demo identity and displays the persisted assignee', async () => {
+  records = [{ ...request, applicant_id: 'sales_01' }];
   render(<PendingRequestsPanel planner assignedPlanner="planner_01" requestId={undefined} />);
   await screen.findByText('URG-TEST-1');
   expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/sales/requests?assigned_planner=planner_01');
   fireEvent.click(screen.getByText('查看需求'));
   expect(screen.getByText('指派排产员：planner_01')).toBeTruthy();
+  expect(screen.getByText('申请业务员：sales_01')).toBeTruthy();
 });
 
 it('displays the persisted assignee in leader request details without filtering the leader list', async () => {
@@ -605,21 +734,38 @@ it('uses Chinese status tags across the sales request list and detail view', asy
     }),
   );
   render(<PendingRequestsPanel onSelection={vi.fn()} />);
-  await screen.findByText('草稿 · 未试排');
-  const table = screen.getByRole('table');
+  await screen.findByText('草稿 · 未提交审批 · 未试排');
+  const table = screen.getByLabelText('申请记录列表');
   expect(table.textContent).not.toMatch(/draft|pending_approval|approved|rejected|published/);
   for (const label of [
-    '草稿 · 未试排',
+    '草稿 · 未提交审批 · 未试排',
     '待审批 · 未试排',
     '已批准 · 待复核发布 · 未试排',
     '已驳回',
     '已发布',
   ]) {
-    const tag = within(table).getByText(label);
+    const tag = within(table).getByText(label, { selector: '.status-tag' });
     expect(tag.classList.contains('status-tag')).toBe(true);
-    expect(tag.closest('td')?.classList.contains('status-column')).toBe(true);
+    expect(tag.closest('article')).toBeTruthy();
   }
   fireEvent.click(within(table).getAllByRole('button', { name: '查看详情' })[0]);
   const drawer = await screen.findByRole('dialog', { name: '插单申请详情' });
-  expect(await within(drawer).findByText('草稿')).toBeTruthy();
+  expect(await within(drawer).findByText('草稿 · 未提交审批')).toBeTruthy();
+});
+
+it('paginates sales cards and opens the just submitted request from the success entry', async () => {
+  records = Array.from({ length: 7 }, (_, index) => ({
+    ...request,
+    id: `card-${index}`,
+    request_no: `URG-CARD-${index}`,
+  }));
+  const onSelection = vi.fn();
+  const view = render(<PendingRequestsPanel onSelection={onSelection} />);
+  await screen.findByText('第 1 / 2 页 · 共 7 条');
+  expect(screen.getAllByRole('article')).toHaveLength(5);
+  fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+  expect(screen.getAllByRole('article')).toHaveLength(2);
+  view.rerender(<PendingRequestsPanel onSelection={onSelection} openRequestNo="URG-CARD-0" />);
+  const drawer = await screen.findByRole('dialog', { name: '插单申请详情' });
+  expect(await within(drawer).findByText('申请业务员：未记录')).toBeTruthy();
 });

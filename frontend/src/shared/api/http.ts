@@ -31,9 +31,9 @@ export async function api<T>(path: string, body?: unknown, method = 'POST'): Pro
 }
 
 /** Consume real progress without retrying a potentially still-running workflow. */
-export async function workflowStream<T = WorkflowResponse>(
+export async function workflowStream<T = WorkflowResponse, E = WorkflowProgressEvent>(
   body: unknown,
-  onProgress: (event: WorkflowProgressEvent) => void,
+  onProgress: (event: E) => void,
   signal?: AbortSignal,
   path = '/workflow',
 ): Promise<T> {
@@ -73,7 +73,7 @@ export async function workflowStream<T = WorkflowResponse>(
     const event = JSON.parse(line);
     if (event.type === 'result') result = event.data;
     else if (event.type === 'error') throw new ApiError(event.detail, event.status, event.code);
-    else if (event.type !== 'heartbeat') onProgress(event as WorkflowProgressEvent);
+    else if (event.type !== 'heartbeat') onProgress(event as E);
   }
   try {
     while (true) {

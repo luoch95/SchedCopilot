@@ -1,5 +1,6 @@
 """Insertion submission persistence, idempotency and rollback integration tests."""
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -37,6 +38,128 @@ def table_counts(path):
         ]
 
 
+def test_insertion_stream_reports_real_roles_then_persistence(setup):
+    _, _, client, payload = setup
+    before = client.get("/api/workbench").json()
+    draft = client.post("/api/sales/requests", json={**payload, "draft_only": True}).json()
+    response = client.post(
+        f"/api/sales/requests/{draft['request_no']}/assessment",
+        json={},
+        headers={"Accept": "application/x-ndjson"},
+    )
+    assert response.status_code == 200
+    assert "application/x-ndjson" in response.headers["content-type"]
+    events = [json.loads(line) for line in response.iter_lines() if line]
+    events = [event for event in events if event["type"] != "heartbeat"]
+    roles = ["validation", "scheduling", "evaluation", "explanation", "saving"]
+    assert [(e["type"], e["agent"]) for e in events[:-1]] == [
+        (kind, role)
+        for role in roles
+        for kind in ("insertion_stage_started", "insertion_stage_completed")
+    ]
+    assert events[-1]["type"] == "result"
+    assert events[-1]["data"]["assessment_id"]
+    record = client.get(f"/api/sales/requests/{draft['request_no']}").json()
+    assert record["status"] == "draft"
+    assert record["assessment"] == events[-1]["data"]
+    assert client.get("/api/workbench").json() == before
+
+
+@pytest.mark.parametrize("failed_stage", ["scheduling", "saving"])
+def test_insertion_stream_stops_at_failure_without_false_completion(
+    setup, monkeypatch, failed_stage
+):
+    from sched_copilot.domain.errors import RuleViolation
+
+    _, app, client, payload = setup
+    draft = client.post("/api/sales/requests", json={**payload, "draft_only": True}).json()
+
+    def fail(*args, **kwargs):
+        raise RuleViolation("当前条件无法继续")
+
+    if failed_stage == "saving":
+        monkeypatch.setattr(app.state.sales_requests.repository, "save_assessment", fail)
+    else:
+        monkeypatch.setattr(
+            app.state.sales_requests.workflow_runner.scheduling, "run_insertion", fail
+        )
+    response = client.post(
+        f"/api/sales/requests/{draft['request_no']}/assessment",
+        json={},
+        headers={"Accept": "application/x-ndjson"},
+    )
+    events = [json.loads(line) for line in response.iter_lines() if line]
+    assert {"type": "insertion_stage_failed", "agent": failed_stage} in events
+    assert not any(
+        e["type"] == "insertion_stage_completed" and e["agent"] == failed_stage for e in events
+    )
+    assert events[-1]["type"] == "error"
+    assert events[-1]["detail"] == "当前条件无法继续"
+    assert not any(e["type"] == "result" for e in events)
+    assert client.get(f"/api/sales/requests/{draft['request_no']}").json()["assessment"] is None
+
+
+def test_draft_assessment_precedes_explicit_submission(setup):
+    path, _, client, payload = setup
+    baseline = client.get("/api/workbench").json()
+    draft_payload = {**payload, "draft_only": True}
+    draft = client.post("/api/sales/requests", json=draft_payload).json()
+    assert draft["status"] == "draft"
+    assert draft["approval"] is None
+    assert table_counts(path) == [1, 0, 0]
+    assert client.post("/api/sales/requests", json=draft_payload).json() == draft
+    url = f"/api/sales/requests/{draft['request_no']}"
+    action = {"action": "submit", "operator_role": "sales", "reason": "评估后提交"}
+    assert client.post(url + "/actions", json=action).status_code == 409
+    assessment = client.post(url + "/assessment").json()
+    assert [step["agent"] for step in assessment["workflow"]["trace"]] == [
+        "validation",
+        "scheduling",
+        "evaluation",
+        "explanation",
+    ]
+    assert client.get(url).json()["status"] == "draft"
+    assert table_counts(path) == [1, 0, 0]
+    assert client.get("/api/sales/requests?status=pending_approval").json() == []
+    action["assessment_id"] = assessment["assessment_id"]
+    assert (
+        client.post(url + "/actions", json={**action, "operator_role": "leader"}).status_code == 409
+    )
+    assert client.post(url + "/actions", json={**action, "assessment_id": "old"}).status_code == 409
+    submitted = client.post(url + "/actions", json=action)
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "pending_approval"
+    assert submitted.json()["assessment"] == assessment
+    assert table_counts(path) == [1, 1, 1]
+    assert client.post(url + "/actions", json=action).json() == submitted.json()
+    assert table_counts(path) == [1, 1, 1]
+    assert client.get("/api/workbench").json() == baseline
+
+
+def test_draft_submission_rejects_stale_resources(setup):
+    path, _, client, payload = setup
+    draft = client.post("/api/sales/requests", json={**payload, "draft_only": True}).json()
+    url = f"/api/sales/requests/{draft['request_no']}"
+    assessment = client.post(url + "/assessment").json()
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO production_inputs(id,payload) VALUES(1,'{}') "
+            "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload"
+        )
+    response = client.post(
+        url + "/actions",
+        json={
+            "action": "submit",
+            "operator_role": "sales",
+            "reason": "提交审批",
+            "assessment_id": assessment["assessment_id"],
+        },
+    )
+    assert response.status_code == 409, response.text
+    assert client.get(url).json()["status"] == "draft"
+    assert table_counts(path) == [1, 0, 0]
+
+
 def test_submit_persists_all_three_tables_and_survives_app_restart(setup):
     path, app, client, payload = setup
     baseline = client.get("/api/workbench").json()
@@ -45,6 +168,7 @@ def test_submit_persists_all_three_tables_and_survives_app_restart(setup):
     record = response.json()
     assert record["status"] == "pending_approval"
     assert record["assigned_planner"] == "planner_01"
+    assert record["applicant_id"] == "sales_01"
     assert record["estimate"]["planned_minutes"] == 414
     assert datetime.fromisoformat(record["earliest_start_at"]) == datetime.fromisoformat(
         payload["earliest_start_at"]
@@ -94,6 +218,7 @@ def test_approval_write_failure_rolls_back_request_and_history(setup):
     [
         ({"quantity": 0}, 422),
         ({"quantity": True}, 422),
+        ({"draft_only": "true"}, 422),
         ({"product_id": "unknown"}, 409),
         ({"reason": " "}, 422),
         ({"requested_due_at": "2020-01-01T00:00:00+08:00"}, 422),
@@ -290,3 +415,81 @@ def test_legacy_database_backfills_planner_without_losing_request_data(setup):
     migrated.engine.dispose()
     assert InsertionStore(path).get(first["request_no"]) == before
     assert len(list((path.parent / "backups").glob("*.sqlite3"))) == len(backups)
+
+
+def test_applicant_name_legacy_migration_preserves_records_and_does_not_infer_identity(setup):
+    from sched_copilot.infrastructure.insertion_repository import InsertionStore
+
+    path, _, client, payload = setup
+    first = client.post("/api/sales/requests", json=payload).json()
+    assert first["applicant_name"] is None
+    store = InsertionStore(path)
+    before = store.get(first["request_no"])
+    store.engine.dispose()
+    with sqlite3.connect(path) as conn:
+        conn.execute("ALTER TABLE insertion_requests DROP COLUMN applicant_name")
+    migrated = InsertionStore(path)
+    assert migrated.get(first["request_no"]) == before
+    assert table_counts(path) == [1, 1, 1]
+    backups = list((path.parent / "backups").glob("*.sqlite3"))
+    assert backups
+    assert any(
+        "applicant_name"
+        not in {
+            r[1] for r in sqlite3.connect(backup).execute("PRAGMA table_info(insertion_requests)")
+        }
+        for backup in backups
+    )
+    migrated.engine.dispose()
+    assert InsertionStore(path).get(first["request_no"]) == before
+    assert len(list((path.parent / "backups").glob("*.sqlite3"))) == len(backups)
+
+
+def test_client_cannot_claim_an_authenticated_applicant_name(setup):
+    _, _, client, payload = setup
+    response = client.post("/api/sales/requests", json={**payload, "applicant_name": "伪造姓名"})
+    assert response.status_code == 422
+
+
+def test_client_cannot_override_demo_applicant_id(setup):
+    _, _, client, payload = setup
+    response = client.post("/api/sales/requests", json={**payload, "applicant_id": "sales_99"})
+    assert response.status_code == 422
+
+
+def test_applicant_id_migration_preserves_unknown_legacy_identity(setup):
+    from sched_copilot.infrastructure.insertion_repository import InsertionStore
+
+    path, app, client, payload = setup
+    record = client.post("/api/sales/requests", json=payload).json()
+    app.state.sales_requests.repository.engine.dispose()
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE insertion_requests DROP COLUMN applicant_id")
+    store = InsertionStore(path)
+    migrated = store.get(record["id"])
+    assert migrated["applicant_id"] is None
+    assert migrated["request_no"] == record["request_no"]
+    assert migrated["status_history"] == record["status_history"]
+    assert migrated["approval"] == record["approval"]
+    store.engine.dispose()
+
+
+def test_applicant_name_snapshot_survives_restart_and_retry(setup):
+    path, app, client, payload = setup
+    overview = client.get("/api/sales/overview").json()
+    values = dict(payload)
+    for field in ("earliest_start_at", "requested_due_at"):
+        values[field] = datetime.fromisoformat(values[field])
+    values.update(
+        plan_version=overview["plan_version"],
+        plan_fingerprint=overview["plan_fingerprint"],
+        snapshot_time=datetime.fromisoformat(overview["snapshot_time"]),
+    )
+    record = app.state.sales_requests.submit(**values, applicant_name="陈明")
+    assert record["applicant_name"] == "陈明"
+    assert app.state.sales_requests.submit(**values)["applicant_name"] == "陈明"
+    with TestClient(create_app(path)) as restarted:
+        assert (
+            restarted.get(f"/api/sales/requests/{record['request_no']}").json()["applicant_name"]
+            == "陈明"
+        )

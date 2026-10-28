@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+﻿import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { GanttSelectionProvider } from './GanttSelection';
 import { Comparison } from '../../features/comparison';
@@ -225,7 +225,9 @@ describe('Gantt baseline comparison', () => {
       />,
     );
     expect(screen.queryByRole('graphics-symbol', { name: /^原安排/ })).toBeNull();
-    const moved = screen.getByRole('graphics-symbol', { name: /^O1-OP1 M1.*时间调整$/ });
+    const moved = screen.getByRole('graphics-symbol', {
+      name: /^O1-OP1 M1.*时间调整 顺延 240 分钟$/,
+    });
     fireEvent.focus(moved);
     expect(screen.getByText('调整依据：故障:M1')).toBeTruthy();
     expect(workbench.baseline.operations[0].start).toBe('2026-10-19T13:00:00+08:00');
@@ -243,7 +245,7 @@ describe('Gantt baseline comparison', () => {
     );
     expect(screen.queryByRole('graphics-symbol', { name: /^原安排/ })).toBeNull();
     const moved = screen.getByRole('graphics-symbol', { name: /^O1-OP1 M2.*设备转移$/ });
-    expect(moved.getAttribute('stroke')).toBe('transparent');
+    expect(moved.getAttribute('stroke')).toBe('#0369A1');
     expect(screen.getAllByRole('graphics-symbol')).toHaveLength(1);
   });
 });
@@ -253,7 +255,7 @@ it('links the same operation across candidate charts in either direction and sup
   const bars = screen.getAllByRole('graphics-symbol');
   expect(bars).toHaveLength(2);
   expect(bars[0].getAttribute('fill')).toBe('#527DA8');
-  expect(bars[0].getAttribute('stroke')).toBe('#EA580C');
+  expect(bars[0].getAttribute('stroke')).toBe('#DC2626');
   expect(bars[0].getAttribute('stroke-width')).toBe('3');
   expect(bars[1].getAttribute('fill')).toBe('#10B981');
   fireEvent.click(bars[0]);
@@ -262,7 +264,7 @@ it('links the same operation across candidate charts in either direction and sup
   ).toBe(true);
   fireEvent.keyDown(bars[1], { key: 'Enter' });
   expect(bars.every((bar) => bar.parentElement?.dataset.selected === 'true')).toBe(true);
-  expect(bars[1].getAttribute('stroke')).toBe('transparent');
+  expect(bars[1].getAttribute('stroke')).toBe('#0369A1');
 });
 
 it('keeps independent comparison scopes separate and does not select an unrelated operation', () => {
@@ -445,3 +447,32 @@ it('saves pointer drags in five minute increments and ignores cancelled drags', 
     vi.unstubAllGlobals();
   }
 });
+
+it.each(['red', 'green'] as const)(
+  'marks downstream operation delay in %s candidate independently of transfer',
+  (tone) => {
+    const original = { ...workbench.baseline.operations[0], status: 'planned' as const };
+    const delayed = {
+      ...original,
+      start: new Date(Date.parse(original.start) + 15 * 60000).toISOString(),
+      end: new Date(Date.parse(original.end) + 15 * 60000).toISOString(),
+    };
+    render(
+      <Gantt
+        tone={tone}
+        schedule={{ ...workbench.baseline, operations: [delayed] }}
+        baseline={{ ...workbench.baseline, operations: [original] }}
+        failure={workbench.event}
+        machines={workbench.machines}
+        range={range}
+      />,
+    );
+    const bar = screen.getByRole('graphics-symbol', { name: /顺延 15 分钟/ });
+    expect(bar.getAttribute('stroke')).toBe('#DC2626');
+    expect(bar.closest('svg')?.textContent).not.toContain('顺延 15 分钟');
+    fireEvent.focus(bar);
+    expect(screen.getByText('顺延 15 分钟').style.color).toBe('rgb(220, 38, 38)');
+    expect(screen.getByText(/评估方案 ·/).textContent).toContain('→');
+    expect(screen.getByText(/原安排/).textContent?.split('→')).toHaveLength(2);
+  },
+);

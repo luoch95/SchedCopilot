@@ -80,7 +80,7 @@ export function ManualFaultPanel({
     >
       <section className="manual-fault-panel" aria-label="人工调整草案">
         <div className="fault-stage-card-heading">
-          <h3>人工调整草案 · R{draft.revision}</h3>
+          <h3>人工调整草案 · 第 {draft.revision} 版</h3>
         </div>
         <p className="manual-source-label">
           <strong>编辑起点：{sourceLabel}</strong>

@@ -32,6 +32,8 @@ class InsertionRequest(Base):
     assigned_planner: Mapped[str] = mapped_column(
         String(100), default="planner_01", server_default="planner_01", index=True
     )
+    applicant_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    applicant_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     applicant_role: Mapped[str] = mapped_column(String(32))
     applicant_session_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     product_id: Mapped[str] = mapped_column(String(100))

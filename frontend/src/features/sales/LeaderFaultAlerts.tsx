@@ -1,12 +1,16 @@
 import type { Simulation, Workbench, WorkflowResult } from '../../shared/api/contracts';
 import type { DateRange } from '../../shared/lib/dateRange';
-import { visibleFaultEvents } from '../../shared/lib/visibleFaultEvents';
+import {
+  faultBusinessLabel,
+  resolveFaultIdentity,
+  visibleFaultEvents,
+} from '../../shared/lib/visibleFaultEvents';
 import { planReport } from '../../shared/lib/planReport';
 import { stamp } from '../../shared/lib/time';
 import { AiAnalysisButton } from '../../shared/ui/AiAnalysisButton';
 import { PublishedFaultCard } from '../../shared/ui/PublishedFaultCard';
 import { FaultProgress } from '../analysis';
-import { publishedFault } from '../workbench';
+import { publishedFaultSummary } from '../workbench';
 
 export type FaultEvent = NonNullable<Workbench['event_history']>[number];
 
@@ -28,7 +32,7 @@ export function LeaderFaultAlerts({
   onHistory: (event: FaultEvent) => void;
 }) {
   const events = visibleFaultEvents(state, range);
-  const publication = publishedFault(state);
+  const publication = publishedFaultSummary(state);
   const candidate = publication?.simulation?.candidates.find(
     (item) =>
       item.id === (publication.selected_candidate_id ?? publication.decisions?.candidate_id),
@@ -49,7 +53,7 @@ export function LeaderFaultAlerts({
             <PublishedFaultCard
               key={event.revision}
               failure={event}
-              revision={event.revision}
+
               version={publication.published_version ?? trace?.version}
               candidateLabel={
                 candidate
@@ -58,23 +62,50 @@ export function LeaderFaultAlerts({
                     : '原 AI 方案'
                   : undefined
               }
-              metrics={candidate?.metrics}
+              metrics={candidate?.metrics ?? trace?.metrics}
               orderImpacts={candidate?.order_impacts}
               label="已登记设备故障"
               onOpen={onAnalysis}
               onReview={state.fault_review ? onReview : undefined}
             />
           );
+        if (!current && event.event_status !== 'published' && event.event_status !== 'cancelled')
+          return (
+            <article
+              key={event.revision}
+              className="fault-event-banner"
+              aria-label={`待处理故障 ${faultBusinessLabel(event)}`}
+            >
+              <div className="fault-card-heading">
+                <div className="fault-card-identity">
+                  <h2>⚠️ 已登记设备故障：{event.machine_id} 停机</h2>
+                  <p className="fault-analysis-window">
+                    分析窗口：{stamp(event.started_at)} —{' '}
+                    {event.recovered_at ? stamp(event.recovered_at) : '预计恢复时间未知'} ·{' '}
+                    {faultBusinessLabel(event)}
+                  </p>
+                </div>
+              </div>
+              <p className="fault-impact-summary">
+                当前状态：
+                {event.event_status === 'pending_approval'
+                  ? '待管理者审批'
+                  : event.event_status === 'approved'
+                    ? '已审批，待发布'
+                    : '故障登记中'}
+              </p>
+            </article>
+          );
         if (!current && trace)
           return (
             <PublishedFaultCard
               key={event.revision}
-              failure={trace.failure}
-              revision={event.revision}
+              failure={resolveFaultIdentity(trace.failure, state, event.revision)}
+
               version={trace.version}
               candidateLabel={trace.candidate_label}
               metrics={trace.metrics}
-              label={`历史故障 ${event.machine_id} R${event.revision}`}
+              label={`历史故障 ${faultBusinessLabel(event)}`}
               history
               onOpen={() => onHistory(event)}
             />
@@ -84,15 +115,15 @@ export function LeaderFaultAlerts({
             <article
               key={event.revision}
               className="fault-history-item"
-              aria-label={`历史故障 ${event.machine_id} R${event.revision}`}
+              aria-label={`历史故障 ${faultBusinessLabel(event)}`}
             >
               <h3>
-                {event.machine_id} 停机 · R{event.revision}
+                {event.machine_id} 停机 · {faultBusinessLabel(event)}
               </h3>
               <p>发生时间：{stamp(event.started_at)}</p>
               <p>
                 分析窗口：{stamp(event.started_at)} —{' '}
-                {event.recovered_at ? stamp(event.recovered_at) : '恢复时间未知'}
+                {event.recovered_at ? stamp(event.recovered_at) : '预计恢复时间未知'}
               </p>
               <AiAnalysisButton label="查看历史 AI 分析" onClick={() => onHistory(event)} />
             </article>
@@ -107,7 +138,7 @@ export function LeaderFaultAlerts({
                   </h2>
                   <p className="fault-analysis-window">
                     分析窗口：{stamp(event.started_at)} —{' '}
-                    {event.recovered_at ? stamp(event.recovered_at) : '恢复时间未知'}
+                    {event.recovered_at ? stamp(event.recovered_at) : '预计恢复时间未知'}
                   </p>
                 </div>
                 <div className="fault-task-actions">
