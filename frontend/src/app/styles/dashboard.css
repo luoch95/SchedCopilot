@@ -1,6 +1,12 @@
 .dashboard-layout {
   background: #f4f7f9;
 }
+.planner-data-placeholder {
+  min-height: 200px;
+  margin-top: 16px;
+  border-radius: 4px;
+  background: repeating-linear-gradient(to bottom, #f1f5f7 0 16px, transparent 16px 36px);
+}
 .dashboard-layout > .workspace {
   display: flex;
   flex-direction: column;

@@ -4,6 +4,7 @@ import type { Metrics } from '../../shared/api/metrics';
 import { WeeklyReportButton } from './WeeklyReportButton';
 import { WorkbenchTitle } from '../../shared/ui/WorkbenchTitle';
 import { AgentTraces } from './AgentTraces';
+import { VisitorDetails } from './VisitorDetails';
 
 const roleLabels: Record<string, string> = { sales: '业务员', planner: '计划员', leader: '管理者' };
 
@@ -13,6 +14,7 @@ export default function AdminPage({ onSwitchRole }: { onSwitchRole: () => void }
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
+  const [visitorsOpen, setVisitorsOpen] = useState(false);
   async function load() {
     setMetrics(null);
     setMetrics(await workbenchApi.adminMetrics());
@@ -55,6 +57,7 @@ export default function AdminPage({ onSwitchRole }: { onSwitchRole: () => void }
     }
   }
   async function logout() {
+    setVisitorsOpen(false);
     setMetrics(null);
     setBusy(true);
     try {
@@ -126,6 +129,7 @@ export default function AdminPage({ onSwitchRole }: { onSwitchRole: () => void }
         </button>
       )}
       {authorized && <AgentTraces />}
+      {authorized && visitorsOpen && <VisitorDetails onClose={() => setVisitorsOpen(false)} />}
       {metrics && (
         <>
           <div className="admin-toolbar">
@@ -141,6 +145,9 @@ export default function AdminPage({ onSwitchRole }: { onSwitchRole: () => void }
               <span>累计日访客 UV</span>
               <strong>{metrics.visits.total.toLocaleString()}</strong>
               <small>按北京时间每日 IP 去重后累计</small>
+              <button type="button" onClick={() => setVisitorsOpen(true)}>
+                查看访客明细
+              </button>
             </article>
             <article>
               <span>AI 方案生成</span>

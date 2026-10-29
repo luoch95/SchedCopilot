@@ -186,6 +186,58 @@ beforeEach(() => {
 });
 
 describe('Schedule Copilot workflow', () => {
+  it('keeps the dashboard layout while the initial workbench request is pending', async () => {
+    history.replaceState(null, '', '/');
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    let resolveWorkbench!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveWorkbench = resolve;
+    });
+    vi.mocked(fetch).mockImplementation((...args) =>
+      args[0] === '/api/workbench' ? pending : original(...args),
+    );
+    const onSwitchRole = vi.fn();
+    render(<App onSwitchRole={onSwitchRole} />);
+    const heading = screen.getByRole('heading', { name: '排产计划工作台', level: 1 });
+    expect(heading.closest('.dashboard-layout')).not.toBeNull();
+    expect(screen.getByRole('status').textContent).toContain('正在加载车间数据');
+    expect(screen.getByLabelText('工作台数据').getAttribute('aria-busy')).toBe('true');
+    expect(screen.queryByRole('button', { name: /录入设备故障/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '切换角色' }));
+    expect(onSwitchRole).toHaveBeenCalledOnce();
+    await act(async () => {
+      resolveWorkbench(new Response(JSON.stringify(workbench)));
+    });
+    await screen.findByRole('button', { name: /录入设备故障/ });
+    expect(screen.queryByText('正在加载车间数据…')).toBeNull();
+    expect(
+      screen
+        .getByRole('heading', { name: '排产计划工作台', level: 1 })
+        .closest('.dashboard-layout'),
+    ).not.toBeNull();
+  });
+
+  it('keeps the dashboard and retries when the initial request fails', async () => {
+    history.replaceState(null, '', '/');
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (...args) => {
+      if (args[0] === '/api/workbench') throw new Error('网络连接失败');
+      return original(...args);
+    });
+    render(<App />);
+    expect((await screen.findByRole('alert')).textContent).toContain('无法连接后端');
+    expect(
+      screen
+        .getByRole('heading', { name: '排产计划工作台', level: 1 })
+        .closest('.dashboard-layout'),
+    ).not.toBeNull();
+    expect(screen.getByLabelText('工作台数据').getAttribute('aria-busy')).toBe('false');
+    vi.mocked(fetch).mockImplementation(original);
+    fireEvent.click(screen.getByRole('button', { name: '重新连接' }));
+    await screen.findByRole('button', { name: /录入设备故障/ });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it.each(['available', 'missing', 'mismatched', 'failed'])(
     'loads published fault details from an overview response: %s',
     async (mode) => {

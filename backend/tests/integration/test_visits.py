@@ -69,3 +69,32 @@ def test_analytics_write_failure_does_not_break_response(tmp_path):
         db.execute("DROP TABLE daily_visitors")
     with TestClient(app, client=("127.0.0.1", 1234)) as client:
         assert client.get("/api/visits").status_code == 204
+
+
+def test_visitor_details_require_session_and_support_pagination_and_exclusion(tmp_path):
+    app = create_app(tmp_path / "visitors.sqlite3")
+    store = app.state.visits
+    store.record("203.0.113.1", "2026-10-28")
+    store.record("203.0.113.1", "2026-10-29")
+    store.record("203.0.113.2", "2026-10-29")
+    with TestClient(app, client=("203.0.113.1", 1234)) as client:
+        assert client.get("/api/admin/visitors").status_code == 403
+        client.post("/api/demo/login", json={"password": app.state.settings.demo_admin_password})
+        response = client.get("/api/admin/visitors?page_size=1")
+        assert response.headers["cache-control"] == "no-store"
+        data = response.json()
+        assert data["total"] == 3
+        assert data["items"] == [
+            {"visit_date": "2026-10-29", "ip": "203.0.113.1", "matches_current_ip": True}
+        ]
+        second = client.get("/api/admin/visitors?page_size=1&page=2").json()
+        assert second["items"][0]["ip"] == "203.0.113.2"
+        filtered = client.get("/api/admin/visitors?exclude_current=true").json()
+        assert filtered["total"] == 1
+        assert filtered["items"][0]["matches_current_ip"] is False
+        assert client.get("/api/admin/visitors?page=0").status_code == 422
+        assert client.get("/api/admin/visitors?page_size=101").status_code == 422
+        client.post("/api/demo/logout")
+        assert client.get("/api/admin/visitors").status_code == 403
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT COUNT(*) FROM daily_visitors").fetchone()[0] == 3

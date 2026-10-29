@@ -1,4 +1,5 @@
 import { api, workflowStream } from '../../shared/api/http';
+import type { VisitorPage } from '../../shared/api/visitors';
 import type { InsertionProgressEvent } from '../../shared/api/contracts';
 import type { Metrics } from '../../shared/api/metrics';
 import type { DiagnosticPage, DiagnosticRun } from '../../shared/api/traces';
@@ -72,6 +73,8 @@ export const workbenchApi = {
   adminLogin: (password: string) => api<{ admin: boolean }>('/demo/login', { password }),
   adminLogout: () => api('/demo/logout', {}),
   adminMetrics: () => api<Metrics>('/admin/metrics'),
+  adminVisitors: (page: number, excludeCurrent: boolean) =>
+    api<VisitorPage>(`/admin/visitors?page=${page}&exclude_current=${excludeCurrent}`),
   adminTraces: (filters: Record<string, string>) =>
     api<DiagnosticPage>(
       `/admin/traces?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value))}`,

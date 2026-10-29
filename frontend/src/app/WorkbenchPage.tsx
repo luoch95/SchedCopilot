@@ -120,19 +120,6 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       onSwitch={switchRole}
     />
   );
-  if (!state || !draft)
-    return (
-      <main className="loading">
-        {roleControl}
-        <DemoAccessBar />
-        <h1>排产辅助决策工作台</h1>
-        <p role={controller.error ? 'alert' : 'status'}>
-          {controller.error || '正在载入本地车间数据…'}
-        </p>
-        {controller.error && <button onClick={controller.reload}>重新连接</button>}
-      </main>
-    );
-  const range = timelineRange(state, currentSimulation, controller.zoom, controller.pan);
   const breadcrumb = (
     <nav className="console-breadcrumb" aria-label="当前位置">
       <ol>
@@ -158,6 +145,64 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
       </ol>
     </nav>
   );
+  const dashboardTopbar = (
+    <div className="planner-topbar">
+      <header className="page-header">
+        <div>
+          <div className="planner-title-row">
+            <WorkbenchTitle />
+            {breadcrumb}
+          </div>
+          <p>处理插单申请，查看当前已发布的生产安排。</p>
+        </div>
+        <div className="workbench-identity">
+          {roleControl}
+          <span className="environment-tag">仿真数据</span>
+        </div>
+      </header>
+      <DemoAccessBar />
+    </div>
+  );
+  if (!state || !draft)
+    return (
+      <div className="planner-console dashboard-layout">
+        <main className="workspace">
+          {dashboardTopbar}
+          <div className="planner-notifications">
+            <p
+              className={`message ${controller.error ? 'error' : 'info'}`}
+              role={controller.error ? 'alert' : 'status'}
+            >
+              {controller.error || '正在加载车间数据…'}
+            </p>
+            {controller.error && <button onClick={controller.reload}>重新连接</button>}
+          </div>
+          <div
+            className="planner-dashboard-grid"
+            aria-busy={!controller.error}
+            aria-label="工作台数据"
+          >
+            <aside className="dashboard-summary" aria-label="待办与异常">
+              <section className="pending-requests">
+                <h2>插单申请审批</h2>
+                <div className="planner-data-placeholder" aria-hidden="true" />
+              </section>
+              <section className="dashboard-alerts">
+                <h2>异常与预警</h2>
+                <div className="planner-data-placeholder" aria-hidden="true" />
+              </section>
+            </aside>
+            <div className="dashboard-plan">
+              <section className="current-plan-card">
+                <h2>当前执行计划</h2>
+                <div className="planner-data-placeholder" aria-hidden="true" />
+              </section>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  const range = timelineRange(state, currentSimulation, controller.zoom, controller.pan);
   const eventLabel = `${faultBusinessLabel({ ...state.event, revision: state.event_revision })}`;
   const publishedCandidate = publication?.simulation?.candidates.find(
     (candidate) =>
@@ -341,28 +386,7 @@ export default function WorkbenchPage({ onSwitchRole }: { onSwitchRole?: () => v
         className={`planner-console${view === 'fault' ? ' fault-decision-layout' : ' dashboard-layout'}`}
       >
         <main className="workspace">
-          <div className="planner-topbar">
-            {view === 'dashboard' && (
-              <header className="page-header">
-                <div>
-                  <div className="planner-title-row">
-                    <WorkbenchTitle />
-                    {breadcrumb}
-                  </div>
-                  <p>
-                    {view === 'dashboard'
-                      ? '处理插单申请，查看当前已发布的生产安排。'
-                      : '分析已保存故障，比较候选方案并确认发布。'}
-                  </p>
-                </div>
-                <div className="workbench-identity">
-                  {roleControl}
-                  <span className="environment-tag">仿真数据</span>
-                </div>
-              </header>
-            )}
-            {view === 'dashboard' && <DemoAccessBar />}
-          </div>
+          {view === 'dashboard' && dashboardTopbar}
           <div className="planner-notifications" aria-live="polite">
             {controller.busy && !(view === 'fault' && generating) && (
               <div className="message info" role="status">

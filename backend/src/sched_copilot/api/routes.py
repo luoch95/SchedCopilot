@@ -27,6 +27,7 @@ from .schemas import (
     WorkflowRequest,
 )
 from .trace_schemas import DiagnosticPage, DiagnosticRun
+from .visits import client_ip
 from .workflow_stream import workflow_stream
 
 router = APIRouter(prefix="/api")
@@ -90,6 +91,22 @@ def health(request: Request):
         "live_analysis_configured": settings.llm_configured,
         "workflow_model_mode": settings.workflow_model_mode,
     }
+
+
+@router.get("/admin/visitors")
+def admin_visitors(
+    request: Request,
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    exclude_current: bool = False,
+):
+    if not is_admin(request):
+        raise HTTPException(status_code=403, detail="请先登录研发后台（演示权限）")
+    response.headers["Cache-Control"] = "no-store"
+    return request.app.state.visits.details(
+        client_ip(request), page=page, page_size=page_size, exclude_current=exclude_current
+    )
 
 
 @router.get("/admin/metrics")

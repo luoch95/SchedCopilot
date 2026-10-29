@@ -11,6 +11,7 @@ vi.mock('../workbench', () => ({
     adminLogin: vi.fn(),
     adminLogout: vi.fn(),
     adminMetrics: vi.fn(),
+    adminVisitors: vi.fn(),
     adminTraces: vi.fn(),
     adminTrace: vi.fn(),
     weeklyMetrics: vi.fn(),
@@ -57,6 +58,34 @@ it('loads metrics only after a server login and hides them on logout', async () 
   await screen.findByRole('button', { name: '登录' });
   expect(screen.queryByText('累计日访客 UV')).toBeNull();
 });
+it('opens visitor details on demand and excludes the current IP', async () => {
+  vi.mocked(workbenchApi.adminSession).mockResolvedValue({ admin: true });
+  vi.mocked(workbenchApi.adminMetrics).mockResolvedValue(metrics);
+  vi.mocked(workbenchApi.adminVisitors).mockResolvedValue({
+    items: [{ visit_date: '2026-10-29', ip: '203.0.113.1', matches_current_ip: true }],
+    total: 1,
+    page: 1,
+    page_size: 20,
+    current_ip: '203.0.113.1',
+  });
+  render(<AdminPage onSwitchRole={() => {}} />);
+  await screen.findByRole('button', { name: '查看访客明细' });
+  expect(workbenchApi.adminVisitors).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '查看访客明细' }));
+  await screen.findByText('与当前 IP 相同');
+  expect(workbenchApi.adminVisitors).toHaveBeenLastCalledWith(1, false);
+  vi.mocked(workbenchApi.adminVisitors).mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    page_size: 20,
+    current_ip: '203.0.113.1',
+  });
+  fireEvent.click(screen.getByRole('checkbox', { name: '排除当前 IP' }));
+  await screen.findByText('暂无符合条件的访问记录。');
+  expect(workbenchApi.adminVisitors).toHaveBeenLastCalledWith(1, true);
+});
+
 it('reports unavailable capacity and uses actual risk and failure fields', () => {
   const text = weeklyMarkdown(metrics);
   expect(text).toContain('AI 拦截风险：3 次');

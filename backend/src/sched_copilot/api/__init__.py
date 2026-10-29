@@ -51,7 +51,8 @@ def create_app(
     app.state.workbench.telemetry = app.state.telemetry
     app.state.sales_requests.telemetry = app.state.telemetry
     app.state.manual_faults = app.state.workbench.manual_faults
-    install_visits(app, VisitStore(settings.database_path).record)
+    app.state.visits = VisitStore(settings.database_path)
+    install_visits(app, app.state.visits.record)
     register_errors(app)
     app.include_router(router)
     app.include_router(manual_router)
